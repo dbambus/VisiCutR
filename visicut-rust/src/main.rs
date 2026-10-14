@@ -19,7 +19,7 @@ use visicut_core::{
     import,
     ltt::{self, OutputJob, PreparedJob},
     project::{Operation, Project},
-    svg,
+    session, svg,
 };
 
 const WARNING: Color32 = Color32::from_rgb(180, 75, 40);
@@ -67,6 +67,8 @@ enum Command {
     /// Eintrag aus „Zuletzt geöffnet“ (Index in der Liste).
     OpenRecent(usize),
     ClearRecent,
+    /// Alle ungesicherten Zwischenstände löschen (`session`).
+    ClearCache,
     /// Sprache der Oberfläche; `None` folgt dem System.
     Language(Option<i18n::Language>),
 }
@@ -133,6 +135,7 @@ impl Command {
             Self::FlipVertical => tr("Vertikal spiegeln"),
             Self::OpenRecent(_) => tr("Zuletzt geöffnet"),
             Self::ClearRecent => tr("Liste leeren"),
+            Self::ClearCache => tr("Zwischenspeicher leeren …"),
             Self::Language(_) => tr("Sprache"),
         }
     }
@@ -176,6 +179,7 @@ impl Command {
             | Self::FlipVertical
             | Self::OpenRecent(_)
             | Self::ClearRecent
+            | Self::ClearCache
             | Self::Language(_) => return None,
         };
         Some(KeyboardShortcut::new(modifiers, key))
@@ -240,6 +244,9 @@ struct VisiCutRust {
     /// Deutlich sichtbarer Hinweis (Fehler, Importwarnungen) in einem Dialog.
     alert: Option<String>,
     project_path: Option<PathBuf>,
+    /// Zwischenstand, aus dem das Projekt geöffnet wurde (`session`);
+    /// Sichern löscht ihn.
+    cached: Option<PathBuf>,
     dirty: bool,
     proportional: bool,
     allow_close: bool,
@@ -250,6 +257,8 @@ struct VisiCutRust {
     /// Wartet auf „Sichern / Nicht sichern / Abbrechen“.
     replace: Option<Replace>,
     overwrite: Option<PendingExport>,
+    /// Wartet auf die Bestätigung „Zwischenspeicher leeren“ (Anzahl Stände).
+    confirm_clear_cache: Option<usize>,
     confirm_send: Option<PreparedJob>,
     preview: preview_ui::PreviewUi,
     /// „Vorschau & Zeit“ (Menü, Werkzeugleiste, Strg+Umschalt+P) setzt dieses
@@ -289,6 +298,7 @@ impl VisiCutRust {
             status: tr("Datei öffnen, hierher ziehen oder das Beispiel öffnen").into(),
             alert: None,
             project_path: None,
+            cached: None,
             dirty: false,
             proportional: true,
             allow_close: false,
@@ -297,6 +307,7 @@ impl VisiCutRust {
             sendable: false,
             replace: None,
             overwrite: None,
+            confirm_clear_cache: None,
             confirm_send: None,
             show_preview: false,
             preview: preview_ui::PreviewUi::default(),
@@ -338,6 +349,9 @@ impl VisiCutRust {
             app.perform(&cc.egui_ctx, Replace::Demo);
         } else if let Some(path) = arguments.first().filter(|a| !a.starts_with('-')) {
             app.perform(&cc.egui_ctx, Replace::Open(PathBuf::from(path)));
+        } else if let Some(path) = session::take_resume(&session::dir()) {
+            // Beim letzten Beenden ungesicherter Stand.
+            app.perform(&cc.egui_ctx, Replace::Open(path));
         }
         cc.egui_ctx.request_repaint();
         app
@@ -373,6 +387,7 @@ impl VisiCutRust {
         self.alert.is_some()
             || self.replace.is_some()
             || self.overwrite.is_some()
+            || self.confirm_clear_cache.is_some()
             || self.confirm_send.is_some()
     }
 
@@ -384,6 +399,7 @@ impl VisiCutRust {
         self.texture = None;
         self.part_textures.clear();
         self.project_path = None;
+        self.cached = None;
         self.dirty = false;
     }
 
@@ -533,6 +549,7 @@ impl VisiCutRust {
         self.part_textures.clear();
         self.texture = Some(ctx.load_texture("SVG", preview.image, egui::TextureOptions::LINEAR));
         self.project_path = None;
+        self.cached = None;
         self.dirty = true;
         self.status = tr("Datei importiert · Maße aus der Datei übernommen").into();
         Ok(())
@@ -574,9 +591,18 @@ impl VisiCutRust {
                 self.project.material.clear();
             }
             self.devices.apply(&mut self.project);
-            self.project_path = Some(path.to_owned());
-            self.dirty = false;
-            self.status = tr("Projekt geöffnet").into();
+            // Ein Zwischenstand hat noch keinen eigenen Speicherort.
+            if session::is_cached(&session::dir(), path) {
+                self.project_path = None;
+                self.cached = Some(path.to_owned());
+                self.dirty = true;
+                self.status = tr("Ungesicherter Stand geöffnet. Zum Behalten sichern.").into();
+            } else {
+                self.project_path = Some(path.to_owned());
+                self.cached = None;
+                self.dirty = false;
+                self.status = tr("Projekt geöffnet").into();
+            }
             self.remember(path);
             Ok(())
         }
@@ -656,6 +682,11 @@ impl VisiCutRust {
         };
         let bytes = serde_json::to_vec_pretty(&self.project).map_err(|e| e.to_string())?;
         workspace::write_atomic(&path, &bytes)?;
+        if let Some(cache) = self.cached.take() {
+            session::discard(&session::dir(), &cache);
+            let cache = std::fs::canonicalize(&cache).unwrap_or(cache);
+            self.settings.recent.retain(|p| p != &cache && p.exists());
+        }
         self.remember(&path);
         self.project_path = Some(path);
         self.dirty = false;
@@ -663,14 +694,61 @@ impl VisiCutRust {
         Ok(true)
     }
 
-    /// Führt eine Aktion aus oder fragt vorher nach ungesicherten Änderungen.
+    /// Führt eine Aktion aus. Ungesicherte Änderungen kommen vorher ohne
+    /// Rückfrage in den Zwischenspeicher; nur wenn das scheitert, wird gefragt.
     fn request(&mut self, ctx: &egui::Context, action: Replace) {
         if self.busy() && !matches!(action, Replace::Quit) {
             self.status = tr("Bitte die laufende Übertragung abwarten").into();
-        } else if self.dirty {
+        } else if self.dirty && !self.stash(matches!(action, Replace::Quit)) {
             self.replace = Some(action);
         } else {
             self.perform(ctx, action);
+        }
+    }
+
+    /// Löscht alle Zwischenstände und ihre Einträge unter „Zuletzt geöffnet“.
+    /// Das geöffnete Projekt bleibt im Speicher, verliert aber die Bindung.
+    fn clear_cache(&mut self) {
+        match session::clear(&session::dir()) {
+            Ok(removed) => {
+                let removed: Vec<PathBuf> = removed
+                    .into_iter()
+                    .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
+                    .collect();
+                self.settings
+                    .recent
+                    .retain(|p| !removed.contains(p) && p.exists());
+                self.save_settings();
+                self.cached = None;
+                self.status = tr!(
+                    "Zwischenspeicher geleert ({count} Stände)",
+                    count = removed.len()
+                );
+            }
+            Err(e) => self.report(tr!("Zwischenspeicher nicht geleert: {error}", error = e)),
+        }
+    }
+
+    /// Legt den ungesicherten Stand ab und führt ihn unter „Zuletzt
+    /// geöffnet“; mit `resume` öffnet er beim nächsten Start wieder.
+    fn stash(&mut self, resume: bool) -> bool {
+        let dir = session::dir();
+        let stashed =
+            session::stash(&dir, &self.project, self.cached.as_deref()).and_then(|path| {
+                if resume {
+                    session::set_resume(&dir, Some(&path))?;
+                }
+                Ok(path)
+            });
+        match stashed {
+            Ok(path) => {
+                self.remember(&path);
+                true
+            }
+            Err(e) => {
+                self.report(tr!("Zwischenspeichern fehlgeschlagen: {error}", error = e));
+                false
+            }
         }
     }
 
@@ -992,6 +1070,7 @@ impl VisiCutRust {
             | Command::FlipVertical => self.texture.is_some() && !self.busy(),
             Command::OpenRecent(_) => !self.busy(),
             Command::ClearRecent => !self.settings.recent.is_empty(),
+            Command::ClearCache => !session::states(&session::dir()).is_empty(),
             Command::Language(_) => true,
             Command::Undo => self.undo.is_some() && !self.busy(),
             Command::Center => self.texture.is_some() && !self.busy(),
@@ -1067,6 +1146,9 @@ impl VisiCutRust {
             Command::ClearRecent => {
                 self.settings.recent.clear();
                 self.save_settings();
+            }
+            Command::ClearCache => {
+                self.confirm_clear_cache = Some(session::states(&session::dir()).len());
             }
             Command::Language(language) => {
                 self.settings.language = language.map(|l| l.code().to_owned());
@@ -1199,6 +1281,7 @@ impl VisiCutRust {
                     ui.separator();
                     self.menu_item(ui, Command::ClearRecent, &mut clicked);
                 });
+                self.menu_item(ui, Command::ClearCache, &mut clicked);
                 ui.separator();
                 for command in [Command::Save, Command::SaveAs, Command::Export] {
                     self.menu_item(ui, command, &mut clicked);
@@ -1951,6 +2034,28 @@ impl VisiCutRust {
                 self.overwrite = Some(pending);
             }
         }
+        if let Some(count) = self.confirm_clear_cache.take() {
+            let mut clear = false;
+            let modal = egui::Modal::new(egui::Id::new("clear_cache")).show(ctx, |ui| {
+                ui.set_max_width(380.0);
+                ui.heading(tr!("{count} ungesicherte Stände löschen?", count = count));
+                ui.label(tr(
+                    "Die abgelegten Projekte im Zwischenspeicher werden endgültig gelöscht. Gesicherte Projekte und das geöffnete Projekt bleiben erhalten.",
+                ));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    clear = ui.button(tr("Löschen")).clicked();
+                    if ui.button(tr("Abbrechen")).clicked() {
+                        ui.close();
+                    }
+                });
+            });
+            if clear {
+                self.clear_cache();
+            } else if !modal.should_close() {
+                self.confirm_clear_cache = Some(count);
+            }
+        }
         if let Some(prepared) = self.confirm_send.take() {
             let mut send = false;
             let modal = egui::Modal::new(egui::Id::new("send")).show(ctx, |ui| {
@@ -2209,7 +2314,7 @@ impl eframe::App for VisiCutRust {
             if self.busy() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.status = tr("Bitte die laufende Übertragung vor dem Beenden abwarten").into();
-            } else if self.dirty {
+            } else if self.dirty && !self.stash(true) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.replace = Some(Replace::Quit);
             }

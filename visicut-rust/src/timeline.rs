@@ -116,12 +116,29 @@ pub struct Timeline {
     pub programs: Vec<Program>,
     pub runs: Vec<Run>,
     pub duration_seconds: f64,
+    /// Start of the next program when it begins a new device job.
+    #[serde(skip)]
+    job_start: Option<[f64; 2]>,
 }
 
 impl Timeline {
+    /// The next program begins a new device job, which the machine starts
+    /// from its home position.
+    pub fn start_job(&mut self, home: [f64; 2]) {
+        self.job_start = Some(home);
+    }
+
+    /// Head position before the next program.
+    pub fn position(&self) -> [f64; 2] {
+        self.job_start
+            .or(self.programs.last().map(|p| p.end_mm))
+            .unwrap_or([0.0; 2])
+    }
+
     pub fn append(&mut self, program: Program, passes: u32) -> f64 {
         let start = self.duration_seconds;
-        let mut from = self.programs.last().map(|p| p.end_mm).unwrap_or([0.0; 2]);
+        let mut from = self.position();
+        self.job_start = None;
         for pass in 1..=passes {
             let entry_end_seconds =
                 self.duration_seconds + distance(from, program.start_mm) / TRAVEL_MM_S;
@@ -176,5 +193,28 @@ mod tests {
             timeline.runs.last().unwrap().end_seconds
         );
         assert_eq!(timeline.runs[2].pass, 3);
+    }
+
+    #[test]
+    fn a_new_job_starts_at_home_and_continues_from_there() {
+        let mut timeline = Timeline::default();
+        timeline.start_job([1000.0, 0.0]);
+        assert_eq!(timeline.position(), [1000.0, 0.0]);
+        let mut first = Program::new(Operation::Cut);
+        first.travel([700.0, 400.0]);
+        first.line(MotionKind::Cut, [710.0, 400.0], 10.0);
+        let seconds = timeline.append(first, 1);
+        assert_eq!(timeline.runs[0].from_mm, [1000.0, 0.0]);
+        assert!((seconds - 500.0 / TRAVEL_MM_S - 1.0).abs() < 1e-9);
+        // Same job: the next program follows on from the previous end.
+        let mut second = Program::new(Operation::Cut);
+        second.travel([10.0, 10.0]);
+        timeline.append(second, 1);
+        assert_eq!(timeline.runs[1].from_mm, [710.0, 400.0]);
+        timeline.start_job([1000.0, 0.0]);
+        let mut third = Program::new(Operation::Engrave);
+        third.travel([10.0, 10.0]);
+        timeline.append(third, 1);
+        assert_eq!(timeline.runs[2].from_mm, [1000.0, 0.0]);
     }
 }

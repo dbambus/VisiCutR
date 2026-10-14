@@ -12,6 +12,7 @@ pub mod overlap;
 pub mod project;
 pub mod raster;
 pub mod selection;
+pub mod session;
 pub mod shift_calibration;
 pub mod svg;
 pub mod svg_import;

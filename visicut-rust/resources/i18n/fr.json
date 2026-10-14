@@ -228,6 +228,8 @@
   "Keine Teile im Motiv": "Aucune pièce dans le motif",
   "Keine Vektorpfade zum Bearbeiten": "Aucun tracé vectoriel à usiner",
   "Keine Verbindung zum LTT möglich": "Connexion au LTT impossible",
+  "Keine Verbindung zu {address} möglich: {error}": "Connexion à {address} impossible : {error}",
+  "Ist der Lasercutter eingeschaltet, blockiert macOS vermutlich den Zugriff auf das lokale Netzwerk. Unter Systemeinstellungen → Datenschutz & Sicherheit → Lokales Netzwerk VisiCutRust erlauben und erneut senden.": "Si la découpeuse laser est allumée, macOS bloque probablement l'accès au réseau local. Autorisez VisiCutRust dans Réglages Système → Confidentialité et sécurité → Réseau local, puis renvoyez.",
   "Keine VisiCut-Gerätedatei": "Pas un fichier d'appareils VisiCut",
   "Keine auswählbaren Objekte in der SVG.": "Aucun objet sélectionnable dans le SVG.",
   "Konturen markieren. Eigene Leistung einstellen.": "Marquer les contours. Régler une puissance personnalisée.",
@@ -854,5 +856,14 @@
   "Teile": "Pièces",
   "Wirkt nur auf das aktive Teil.": "N'agit que sur la pièce active.",
   "{count} Datei(en) als Teile hinzugefügt · Bearbeiten › Widerrufen macht es rückgängig": "{count} fichier(s) ajouté(s) comme pièces · Édition › Annuler pour revenir en arrière",
-  "{count} Datei(en) als Teile hinzugefügt · ⌘Z widerruft": "{count} fichier(s) ajouté(s) comme pièces · ⌘Z pour annuler"
+  "{count} Datei(en) als Teile hinzugefügt · ⌘Z widerruft": "{count} fichier(s) ajouté(s) comme pièces · ⌘Z pour annuler",
+  "{name} (ungesichert)": "{name} (non enregistré)",
+  "{name} (ungesichert {number})": "{name} (non enregistré {number})",
+  "Ungesicherter Stand geöffnet. Zum Behalten sichern.": "État non enregistré ouvert. Enregistrez-le pour le conserver.",
+  "Zwischenspeichern fehlgeschlagen: {error}": "Impossible de conserver l'état non enregistré : {error}",
+  "Zwischenspeicher leeren …": "Vider le cache non enregistré …",
+  "{count} ungesicherte Stände löschen?": "Supprimer {count} états non enregistrés ?",
+  "Die abgelegten Projekte im Zwischenspeicher werden endgültig gelöscht. Gesicherte Projekte und das geöffnete Projekt bleiben erhalten.": "Les projets conservés dans le cache sont supprimés définitivement. Les projets enregistrés et le projet ouvert sont conservés.",
+  "Zwischenspeicher geleert ({count} Stände)": "Cache vidé ({count} états)",
+  "Zwischenspeicher nicht geleert: {error}": "Cache non vidé : {error}"
 }

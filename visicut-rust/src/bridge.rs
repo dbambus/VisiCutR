@@ -7,7 +7,7 @@ use crate::{
     ltt,
     materials::Library,
     project::Project,
-    svg, tr,
+    session, svg, tr,
 };
 use serde_json::{Value, json};
 use std::ffi::{CStr, CString, c_char};
@@ -228,10 +228,28 @@ pub(crate) fn execute(request: &Value) -> Result<Value, String> {
             } else {
                 preview(&project.svg)?
             };
+            // A cached state has no location of its own yet (see `session`).
+            let cached = session::is_cached(&session::dir(), std::path::Path::new(path(request)?));
             Ok(
-                json!({"project": project, "preview": image, "objects": crate::selection::objects(&project.svg)?}),
+                json!({"project": project, "preview": image, "objects": crate::selection::objects(&project.svg)?, "cached": cached}),
             )
         }
+        "stash" => {
+            let dir = session::dir();
+            let previous = request["previous"].as_str().map(std::path::Path::new);
+            let stashed = session::stash(&dir, &get_project(request)?, previous)?;
+            if request["resume"].as_bool() == Some(true) {
+                session::set_resume(&dir, Some(&stashed))?;
+            }
+            Ok(json!({"path": stashed}))
+        }
+        "discard_cached" => {
+            session::discard(&session::dir(), std::path::Path::new(path(request)?));
+            Ok(json!({}))
+        }
+        "take_resume" => Ok(json!({"path": session::take_resume(&session::dir())})),
+        "cached_states" => Ok(json!({"paths": session::states(&session::dir())})),
+        "clear_cache" => Ok(json!({"paths": session::clear(&session::dir())?})),
         "devices" => {
             // A damaged list must not prevent starting; it is replaced only on save.
             let (store, error) = match DeviceStore::load(&device::config_dir()) {

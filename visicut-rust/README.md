@@ -164,7 +164,8 @@ lokal nach einem Build für die jeweilige Host-Architektur.
    wie der Java-Treiber, innere Konturen vor den äußeren.
    **Schnittreihenfolge** „Wie VisiCut“ (Standard, byte-gleich mit Java) oder
    „Kürzeste Leerfahrten (experimentell)“: weiterhin innen zuerst, dann
-   jeweils der nächstgelegene Pfad; deutlich weniger Leerfahrt, aber am Gerät
+   jeweils der nächstgelegene Pfad, beginnend am Referenzpunkt oben rechts;
+   deutlich weniger Leerfahrt, aber am Gerät
    noch nicht erprobt, daher mit Hinweis. **Doppelte Linien entfernen**
    schneidet Abschnitte, die genau auf einer schon geschnittenen Linie
    desselben Schritts liegen (gemeinsame Kanten, doppelt platzierte Objekte),
@@ -182,8 +183,9 @@ lokal nach einem Build für die jeweilige Host-Architektur.
 6. **Vorschau & Zeit** (⇧⌘P) berechnet den Auftrag im Hintergrund. Die Vorschau
    zeigt tatsächliche Schnittkonturen rot und Gravurflächen blau; ignorierte
    Objekte fehlen. Markierkonturen erscheinen violett. Der **Zeitslider**
-   zeigt den Ablauf mit Laserkopfposition, Leerfahrten, Rasterzeilen und
-   Durchgängen. **Abspielen/Pause**, Anfang/Ende und **1× bis 100×** erlauben
+   zeigt auf dem ganzen Arbeitsbett den Ablauf mit Laserkopfposition,
+   Leerfahrten, Rasterzeilen und Durchgängen; jeder Auftrag beginnt wie am
+   LTT am Referenzpunkt oben rechts. **Abspielen/Pause**, Anfang/Ende und **1× bis 100×** erlauben
    die Simulation. Beim Verschieben pausiert die Wiedergabe. Bereits
    bearbeitete Bereiche sind kräftig, geplante Bereiche blass dargestellt.
    Angezeigt werden die geschätzte Gesamtdauer, Dauer und
@@ -344,6 +346,16 @@ geöffnet** die zehn zuletzt geöffneten oder gesicherten Dateien; Sprache und
 Liste stehen in `app-settings.json` im Einstellungsordner neben der
 Geräteliste. Die macOS-App speichert die Sprache in den Benutzereinstellungen;
 der UI-Test läuft immer auf Deutsch.
+
+Ungesicherte Änderungen fragen nicht nach dem Sichern (beide Oberflächen):
+Beim Öffnen, bei **Neu** und beim Beenden legt die App den Stand im Ordner
+`cache` des Einstellungsordners ab (höchstens zehn, ältere werden gelöscht)
+und führt ihn als „Name (ungesichert).vcr“ unter **Zuletzt geöffnet**. Der beim
+Beenden abgelegte Stand öffnet beim nächsten Start wieder. Ein Zwischenstand
+hat keinen eigenen Speicherort: **Sichern** fragt nach dem Ort und löscht danach
+den Zwischenstand. Nur wenn das Ablegen scheitert, kommt die frühere Rückfrage.
+**Ablage/Datei → Zwischenspeicher leeren …** löscht nach einer Bestätigung alle
+abgelegten Stände; gesicherte Projekte und das geöffnete Projekt bleiben.
 
 Übersetzungen: Der deutsche Text ist der Schlüssel (`tr("…")` in Rust und
 Swift, mit Platzhaltern `tr!("… {name}", name = …)` bzw.

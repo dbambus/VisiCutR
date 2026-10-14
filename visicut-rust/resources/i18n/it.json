@@ -228,6 +228,8 @@
   "Keine Teile im Motiv": "Nessuna parte nel disegno",
   "Keine Vektorpfade zum Bearbeiten": "Nessun tracciato vettoriale da lavorare",
   "Keine Verbindung zum LTT möglich": "Impossibile connettersi al LTT",
+  "Keine Verbindung zu {address} möglich: {error}": "Impossibile connettersi a {address}: {error}",
+  "Ist der Lasercutter eingeschaltet, blockiert macOS vermutlich den Zugriff auf das lokale Netzwerk. Unter Systemeinstellungen → Datenschutz & Sicherheit → Lokales Netzwerk VisiCutRust erlauben und erneut senden.": "Se la macchina laser è accesa, probabilmente macOS blocca l'accesso alla rete locale. Consentire VisiCutRust in Impostazioni di Sistema → Privacy e sicurezza → Rete locale e inviare di nuovo.",
   "Keine VisiCut-Gerätedatei": "Non è un file dispositivo VisiCut",
   "Keine auswählbaren Objekte in der SVG.": "Nessun oggetto selezionabile nell'SVG.",
   "Konturen markieren. Eigene Leistung einstellen.": "Marca i contorni. Imposta una potenza personalizzata.",
@@ -854,5 +856,14 @@
   "Teile": "Parti",
   "Wirkt nur auf das aktive Teil.": "Agisce solo sulla parte attiva.",
   "{count} Datei(en) als Teile hinzugefügt · Bearbeiten › Widerrufen macht es rückgängig": "{count} file aggiunti come parti · Modifica › Annulla per ripristinare",
-  "{count} Datei(en) als Teile hinzugefügt · ⌘Z widerruft": "{count} file aggiunti come parti · ⌘Z annulla"
+  "{count} Datei(en) als Teile hinzugefügt · ⌘Z widerruft": "{count} file aggiunti come parti · ⌘Z annulla",
+  "{name} (ungesichert)": "{name} (non salvato)",
+  "{name} (ungesichert {number})": "{name} (non salvato {number})",
+  "Ungesicherter Stand geöffnet. Zum Behalten sichern.": "Stato non salvato aperto. Salvarlo per conservarlo.",
+  "Zwischenspeichern fehlgeschlagen: {error}": "Impossibile conservare lo stato non salvato: {error}",
+  "Zwischenspeicher leeren …": "Svuota cache non salvata …",
+  "{count} ungesicherte Stände löschen?": "Eliminare {count} stati non salvati?",
+  "Die abgelegten Projekte im Zwischenspeicher werden endgültig gelöscht. Gesicherte Projekte und das geöffnete Projekt bleiben erhalten.": "I progetti conservati nella cache vengono eliminati definitivamente. I progetti salvati e il progetto aperto restano.",
+  "Zwischenspeicher geleert ({count} Stände)": "Cache svuotata ({count} stati)",
+  "Zwischenspeicher nicht geleert: {error}": "Cache non svuotata: {error}"
 }

@@ -3,6 +3,27 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## 0.14.0 – 14.10.2026
+
+- **Kein „Änderungen sichern?“ mehr** (egui und macOS): Beim Öffnen, bei
+  **Neu** und beim Beenden legt die App ungesicherte Stände im Ordner `cache`
+  des Einstellungsordners ab (höchstens zehn) und führt sie als
+  „Name (ungesichert).vcr“ unter **Zuletzt geöffnet**. Der beim Beenden
+  abgelegte Stand öffnet beim nächsten Start wieder. **Sichern** fragt bei
+  einem Zwischenstand nach dem Ort und löscht ihn danach.
+  **Datei → Zwischenspeicher leeren …** löscht nach Bestätigung alle Stände.
+- **Auftragsvorschau zeigt das ganze Arbeitsbett** (1000 × 600 mm, egui und
+  macOS) statt eines Ausschnitts um den Auftrag; macOS zeichnet den Bettrand.
+- **Startpunkt oben rechts**: Der LTT fährt zur Referenz nach oben rechts.
+  Jeder Gerätejob beginnt in Simulation und Zeitschätzung dort (1000, 0 mm);
+  „Kürzeste Leerfahrten“ sucht den ersten Pfad ab dieser Position. Die
+  gesendeten Daten mit der Reihenfolge „Wie VisiCut“ ändern sich nicht.
+- **Verbindung im lokalen Netz unter macOS**: Das App-Bundle erklärt den
+  Zugriff aufs lokale Netzwerk (`NSLocalNetworkUsageDescription`), damit macOS
+  danach fragt. Verbindungsfehler nennen Adresse und Systemfehler; blockiert
+  macOS den Zugriff, verweist die Meldung auf Systemeinstellungen →
+  Datenschutz & Sicherheit → Lokales Netzwerk.
+
 ## 0.13.0 – 12.10.2026
 
 - **Mehrere Teile** (egui und macOS) wie die PlfParts in VisiCut: Jede

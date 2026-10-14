@@ -444,10 +444,16 @@ fn motion_bounds(timeline: &Timeline) -> Option<[f64; 4]> {
     )
 }
 
-/// Visible bed section in mm: all parts and motions with a margin.
+/// Visible area in mm: the whole bed, extended by parts and motions beyond
+/// it, with a margin so the bed edge stays visible.
 pub fn viewport(project: &Project, motions: Option<[f64; 4]>) -> [f64; 4] {
     let [x, y, w, h] = project.bounds().map(f64::from);
-    let mut b = [x, y, x + w, y + h];
+    let mut b = [
+        x.min(0.0),
+        y.min(0.0),
+        (x + w).max(project.bed_width_mm as f64),
+        (y + h).max(project.bed_height_mm as f64),
+    ];
     if let Some(m) = motions {
         b = [
             b[0].min(m[0]),
@@ -456,8 +462,8 @@ pub fn viewport(project: &Project, motions: Option<[f64; 4]>) -> [f64; 4] {
             b[3].max(m[3]),
         ];
     }
-    let dx = 2f64.max((b[2] - b[0]) * 0.05);
-    let dy = 2f64.max((b[3] - b[1]) * 0.05);
+    let dx = 2f64.max((b[2] - b[0]) * 0.02);
+    let dy = 2f64.max((b[3] - b[1]) * 0.02);
     [b[0] - dx, b[1] - dy, b[2] + dx, b[3] + dy]
 }
 
@@ -1183,9 +1189,13 @@ mod tests {
         assert_eq!(bytes(512), "512 Byte");
         assert_eq!(bytes(12_345), "12,3 kB");
         assert_eq!(bytes(2_000_000), "2 MB");
-        let project = Project::default();
-        let v = viewport(&project, None);
-        assert_eq!(v, [5.0, 7.0, 115.0, 73.0]);
+        // The whole 1000 × 600 mm bed, even for a small part.
+        let mut project = Project::default();
+        assert_eq!(viewport(&project, None), [-20.0, -12.0, 1020.0, 612.0]);
+        // Parts and motions beyond the bed stay visible.
+        project.x_mm = 950.0;
+        assert_eq!(viewport(&project, None), [-21.0, -12.0, 1071.0, 612.0]);
+        assert!(viewport(&project, Some([0.0, -10.0, 10.0, 0.0]))[1] < -10.0);
     }
 
     #[test]

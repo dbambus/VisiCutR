@@ -223,6 +223,15 @@ enum RecentFiles {
     }
 }
 
+/// Zwischenspeicher für ungesicherte Projekte (Rust `session`): Statt nach dem
+/// Sichern zu fragen, wird der Stand abgelegt und unter „Zuletzt geöffnet“
+/// geführt. Der UI-Test legt nichts im Einstellungsordner ab.
+enum SessionCache {
+    static var enabled: Bool { !CommandLine.arguments.contains("--ui-test") }
+    /// Anzahl der abgelegten Stände.
+    static var count: Int { ((try? RustCore.decode("cached_states") as PathsResponse)?.paths.count) ?? 0 }
+}
+
 /// Reihenfolge der Vektorpfade (visicut_core::project::CutOrder).
 enum CutOrder: String, Codable, CaseIterable, Identifiable {
     case visiCut = "VisiCut", shortestTravel = "ShortestTravel"
@@ -269,7 +278,9 @@ struct PreparedStep: Decodable {
     let passes: Int
     let parameter_sets: Int
 }
-struct ProjectResponse: Decodable { let project: Project; let preview: Preview?; let objects: [SVGObject]?; let warnings: [String]? }
+struct ProjectResponse: Decodable { let project: Project; let preview: Preview?; let objects: [SVGObject]?; let warnings: [String]?; let cached: Bool? }
+struct PathResponse: Decodable { let path: String? }
+struct PathsResponse: Decodable { let paths: [String] }
 struct Preview: Decodable { let png: [UInt8] }
 struct OutputJob: Decodable {
     let name: String
@@ -358,7 +369,10 @@ final class AppModel: ObservableObject {
     @Published var composeTool: ComposeTool?
     var materialSource = ""
     var mappingScheduled = false
-    var projectURL: URL?
+    /// Ort des Projekts; ein neuer Ort (auch nil) beendet die Bindung an einen Zwischenstand.
+    var projectURL: URL? { didSet { cachedURL = nil } }
+    /// Zwischenstand, aus dem das Projekt geöffnet wurde; Sichern löscht ihn.
+    private(set) var cachedURL: URL?
     private var replacing = true
 
     init() {
@@ -385,6 +399,9 @@ final class AppModel: ObservableObject {
         if CommandLine.arguments.contains("--demo") || CommandLine.arguments.contains("--ui-test") {
             demo()
         } else if let path = CommandLine.arguments.dropFirst().first, !path.hasPrefix("-") {
+            open(URL(fileURLWithPath: path))
+        } else if SessionCache.enabled, let resume = try? RustCore.decode("take_resume") as PathResponse,
+                  let path = resume.path {
             open(URL(fileURLWithPath: path))
         }
     }
@@ -603,10 +620,13 @@ final class AppModel: ObservableObject {
         do {
             let isSVG = !["vcr", "json"].contains(url.pathExtension.lowercased())
             let response: ProjectResponse = try RustCore.decode(isSVG ? "import" : "load", project: project, path: url.path)
-            accept(response, dirty: isSVG)
-            projectURL = isSVG ? nil : url
+            let cached = response.cached == true
+            accept(response, dirty: isSVG || cached)
+            projectURL = isSVG || cached ? nil : url
+            if cached { cachedURL = url }
             RecentFiles.add(url)
-            status = isSVG ? tr("{file} importiert · Originalmaße übernommen", ["file": url.lastPathComponent]) : tr("Projekt geöffnet")
+            status = isSVG ? tr("{file} importiert · Originalmaße übernommen", ["file": url.lastPathComponent])
+                : cached ? tr("Ungesicherter Stand geöffnet. Zum Behalten sichern.") : tr("Projekt geöffnet")
             if let warnings = response.warnings, !warnings.isEmpty { self.error = warnings.joined(separator: "\n") }
         } catch { self.error = error.localizedDescription }
     }
@@ -628,6 +648,10 @@ final class AppModel: ObservableObject {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(project).write(to: url, options: .atomic)
+            if let cache = cachedURL {
+                _ = try? RustCore.call("discard_cached", path: cache.path)
+                RecentFiles.remove(cache.path)
+            }
             projectURL = url
             RecentFiles.add(url)
             dirty = false
@@ -639,9 +663,35 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func canDiscard() -> Bool {
+    /// Löscht alle Zwischenstände und ihre Einträge unter „Zuletzt geöffnet“.
+    /// Das geöffnete Projekt bleibt im Speicher, verliert aber die Bindung.
+    func clearCache() {
+        do {
+            let removed: PathsResponse = try RustCore.decode("clear_cache")
+            for path in removed.paths { RecentFiles.remove(path) }
+            cachedURL = nil
+            status = tr("Zwischenspeicher geleert ({count} Stände)", ["count": removed.paths.count])
+        } catch {
+            self.error = tr("Zwischenspeicher nicht geleert: {error}", ["error": error.localizedDescription])
+        }
+    }
+
+    /// Keine Rückfrage: Ungesicherte Änderungen kommen in den Zwischenspeicher
+    /// und unter „Zuletzt geöffnet“; mit `resume` öffnen sie beim nächsten Start
+    /// wieder. Nur wenn das Ablegen scheitert, wird wie früher gefragt.
+    func canDiscard(resume: Bool = false) -> Bool {
         guard !busy else { return false }
         guard dirty else { return true }
+        guard SessionCache.enabled else { return true }
+        do {
+            var values: [String: Any] = ["resume": resume]
+            if let cachedURL { values["previous"] = cachedURL.path }
+            let stashed: PathResponse = try RustCore.decode("stash", project: project, values: values)
+            if let path = stashed.path { RecentFiles.add(URL(fileURLWithPath: path)) }
+            return true
+        } catch {
+            self.error = tr("Zwischenspeichern fehlgeschlagen: {error}", ["error": error.localizedDescription])
+        }
         let alert = NSAlert()
         alert.messageText = tr("Änderungen an „{name}“ sichern?", ["name": project.name])
         alert.informativeText = tr("Nicht gesicherte Änderungen gehen verloren.")
@@ -853,7 +903,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let model else { return .terminateNow }
-        return model.canDiscard() ? .terminateNow : .terminateCancel
+        return model.canDiscard(resume: true) ? .terminateNow : .terminateCancel
     }
     func application(_ application: NSApplication, open urls: [URL]) {
         if let url = urls.first { model?.open(url) }
@@ -894,9 +944,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         workspaceWindow?.toolbar?.validateVisibleItems()
     }
 
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
-        sender !== workspaceWindow || model.canDiscard()
-    }
     func windowWillClose(_ notification: Notification) {
         if let window = notification.object as? NSWindow, window === workspaceWindow { workspaceWindow = nil }
     }
@@ -937,6 +984,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         let recentItem = NSMenuItem(title: tr("Zuletzt geöffnet"), action: nil, keyEquivalent: "")
         recentItem.submenu = recent
         file.addItem(recentItem)
+        file.addItem(menuItem(tr("Zwischenspeicher leeren …"), action: #selector(clearCache)))
         file.addItem(menuItem(tr("Hinzufügen …"), action: #selector(addFiles), key: "o", modifiers: [.command, .shift]))
         file.addItem(menuItem(tr("Beispiel öffnen"), action: #selector(openDemo)))
         file.addItem(menuItem(tr("Bitmap vektorisieren …"), action: #selector(vectorizeBitmap)))
@@ -1031,11 +1079,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
     @objc func openRecent(_ sender: NSMenuItem) {
         guard let path = sender.representedObject as? String else { return }
         showWorkspace()
-        // Erst nach dem Schließen des Menüs öffnen (Rückfrage, Liste wird neu sortiert).
+        // Erst nach dem Schließen des Menüs öffnen (Zwischenspeichern, Liste wird neu sortiert).
         DispatchQueue.main.async { self.model.openRecent(path) }
     }
     @objc func clearRecent() {
         RecentFiles.clear()
+        if let recentMenu { fillRecentMenu(recentMenu) }
+    }
+    /// Endgültiges Löschen, daher mit Bestätigung.
+    @objc func clearCache() {
+        let alert = NSAlert()
+        alert.messageText = tr("{count} ungesicherte Stände löschen?", ["count": SessionCache.count])
+        alert.informativeText = tr("Die abgelegten Projekte im Zwischenspeicher werden endgültig gelöscht. Gesicherte Projekte und das geöffnete Projekt bleiben erhalten.")
+        alert.addButton(withTitle: tr("Löschen")).hasDestructiveAction = true
+        alert.addButton(withTitle: tr("Abbrechen"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        model.clearCache()
         if let recentMenu { fillRecentMenu(recentMenu) }
     }
 
@@ -1077,6 +1136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         case #selector(refreshCamera): return model.showCamera && !model.cameraLoading
         case #selector(openFile), #selector(openDemo), #selector(newProject), #selector(showSettings), #selector(openRecent(_:)): return !model.busy
         case #selector(clearRecent): return !RecentFiles.paths.isEmpty
+        case #selector(clearCache): return !model.busy && SessionCache.enabled && SessionCache.count > 0
         case #selector(addFiles): return !model.busy && !model.showJobPreview && model.composeTool == nil
         case #selector(duplicatePart):
             return model.project.hasArtwork && !model.busy && !model.showJobPreview && model.composeTool == nil

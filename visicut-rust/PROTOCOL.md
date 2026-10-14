@@ -294,9 +294,12 @@ Rasterzeilen einschließlich Overscan und Leerfahrten. Wiederholte
 Rasterdurchgänge teilen die gespeicherte Geometrie. Vektordurchgänge sind wie
 in Java je Kontur verschränkt und bilden daher einen Ablauf ohne getrennte
 Durchgänge; Zeitabschnitte bilden die Reihenfolge ab.
-Die erste Anfahrt wird ab (0,0) geschätzt; danach wird die letzte Position
-fortgeschrieben. Tatsächliche Kopfposition und Pausen zwischen den getrennt
-zu startenden Gerätejobs sind nicht bekannt. Die Simulation sendet keine Daten.
+Der LTT fährt zur Referenz nach oben rechts, während die Auftragskoordinaten
+von oben links zählen. Jeder Gerätejob beginnt deshalb mit der Anfahrt ab
+(1000, 0) mm; innerhalb eines Jobs wird die letzte Position fortgeschrieben.
+„Kürzeste Leerfahrten“ sucht den ersten Pfad ebenfalls ab dieser Position.
+Pausen zwischen den getrennt zu startenden Gerätejobs sind nicht bekannt. Die
+Simulation sendet keine Daten.
 
 Die Bounding Box im Header ist wie `LaserJob.getBoundingBox` die des
 tatsächlichen Inhalts (Vektorpunkte bzw. Rasterbereich), nicht die der

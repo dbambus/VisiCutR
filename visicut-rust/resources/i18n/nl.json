@@ -228,6 +228,8 @@
   "Keine Teile im Motiv": "Geen onderdelen in het ontwerp",
   "Keine Vektorpfade zum Bearbeiten": "Geen vectorpaden om te bewerken",
   "Keine Verbindung zum LTT möglich": "Geen verbinding met de LTT mogelijk",
+  "Keine Verbindung zu {address} möglich: {error}": "Geen verbinding met {address} mogelijk: {error}",
+  "Ist der Lasercutter eingeschaltet, blockiert macOS vermutlich den Zugriff auf das lokale Netzwerk. Unter Systemeinstellungen → Datenschutz & Sicherheit → Lokales Netzwerk VisiCutRust erlauben und erneut senden.": "Als de lasersnijder aan staat, blokkeert macOS waarschijnlijk de toegang tot het lokale netwerk. Sta VisiCutRust toe onder Systeeminstellingen → Privacy en beveiliging → Lokaal netwerk en verstuur opnieuw.",
   "Keine VisiCut-Gerätedatei": "Geen VisiCut-apparaatbestand",
   "Keine auswählbaren Objekte in der SVG.": "Geen selecteerbare objecten in de SVG.",
   "Konturen markieren. Eigene Leistung einstellen.": "Contouren markeren. Eigen vermogen instellen.",
@@ -854,5 +856,14 @@
   "Teile": "Onderdelen",
   "Wirkt nur auf das aktive Teil.": "Werkt alleen op het actieve onderdeel.",
   "{count} Datei(en) als Teile hinzugefügt · Bearbeiten › Widerrufen macht es rückgängig": "{count} bestand(en) als onderdelen toegevoegd · Bewerken › Ongedaan maken draait dit terug",
-  "{count} Datei(en) als Teile hinzugefügt · ⌘Z widerruft": "{count} bestand(en) als onderdelen toegevoegd · ⌘Z maakt ongedaan"
+  "{count} Datei(en) als Teile hinzugefügt · ⌘Z widerruft": "{count} bestand(en) als onderdelen toegevoegd · ⌘Z maakt ongedaan",
+  "{name} (ungesichert)": "{name} (niet bewaard)",
+  "{name} (ungesichert {number})": "{name} (niet bewaard {number})",
+  "Ungesicherter Stand geöffnet. Zum Behalten sichern.": "Niet-bewaarde stand geopend. Bewaar hem om hem te behouden.",
+  "Zwischenspeichern fehlgeschlagen: {error}": "Niet-bewaarde stand kon niet worden vastgehouden: {error}",
+  "Zwischenspeicher leeren …": "Tussenopslag legen …",
+  "{count} ungesicherte Stände löschen?": "{count} niet-bewaarde standen verwijderen?",
+  "Die abgelegten Projekte im Zwischenspeicher werden endgültig gelöscht. Gesicherte Projekte und das geöffnete Projekt bleiben erhalten.": "De projecten in de tussenopslag worden definitief verwijderd. Bewaarde projecten en het geopende project blijven behouden.",
+  "Zwischenspeicher geleert ({count} Stände)": "Tussenopslag geleegd ({count} standen)",
+  "Zwischenspeicher nicht geleert: {error}": "Tussenopslag niet geleegd: {error}"
 }

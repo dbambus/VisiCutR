@@ -346,12 +346,16 @@ fn join_contiguous(group: Vec<Element>) -> Vec<Element> {
 const NEAREST_MAX_PATHS: usize = 5_000;
 const NEAREST_MAX_POINTS: usize = 400_000;
 
-/// Experimental order with less travel: starting at the origin, always the
+/// Experimental order with less travel: starting at `start` (the head
+/// position in pixels, the home corner at the beginning of a job), always the
 /// nearest path whose bounding box strictly contains no path still to cut, so
 /// inner contours still come first. Closed paths may start at any vertex,
 /// open paths in either direction. Ties keep the inner-first order.
 /// Returns the paths unchanged as `Err` when the job exceeds the size limits.
-pub fn shortest_travel(elements: Vec<Element>) -> Result<Vec<Element>, Vec<Element>> {
+pub fn shortest_travel(
+    elements: Vec<Element>,
+    start: [f64; 2],
+) -> Result<Vec<Element>, Vec<Element>> {
     let points: usize = elements.iter().map(|e| e.moves.len() + 1).sum();
     if elements.len() > NEAREST_MAX_PATHS || points > NEAREST_MAX_POINTS {
         return Err(elements);
@@ -369,7 +373,7 @@ pub fn shortest_travel(elements: Vec<Element>) -> Result<Vec<Element>, Vec<Eleme
         .collect();
     let mut slots: Vec<Option<Element>> = elements.into_iter().map(Some).collect();
     let mut result = Vec::with_capacity(slots.len());
-    let mut at = [0.0, 0.0];
+    let mut at = start;
     let distance = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]);
     while result.len() < slots.len() {
         // (distance, path, start vertex, reversed)
@@ -590,23 +594,30 @@ mod tests {
         let b = square(1000.0, 0.0, 100.0);
         let b_hole = square(1040.0, 40.0, 10.0);
         let elements = vec![a.clone(), b.clone(), a_hole.clone(), b_hole.clone()];
-        let result = shortest_travel(elements).unwrap();
+        let result = shortest_travel(elements.clone(), [0.0, 0.0]).unwrap();
         let bounds: Vec<[f64; 4]> = result.iter().map(Element::bounds).collect();
         assert_eq!(
             bounds,
             vec![a_hole.bounds(), a.bounds(), b_hole.bounds(), b.bounds()]
         );
         assert!(result.iter().all(Element::is_closed));
+        // From a start on the right, the right part comes first.
+        let result = shortest_travel(elements, [2000.0, 0.0]).unwrap();
+        let bounds: Vec<[f64; 4]> = result.iter().map(Element::bounds).collect();
+        assert_eq!(
+            bounds,
+            vec![b_hole.bounds(), b.bounds(), a_hole.bounds(), a.bounds()]
+        );
     }
 
     #[test]
     fn shortest_travel_rotates_closed_and_reverses_open_paths() {
         // From the origin the square comes first; the line is then entered at
         // its nearer end and therefore reversed.
-        let result = shortest_travel(vec![
-            path(&[[500.0, 0.0], [120.0, 0.0]]),
-            square(0.0, 0.0, 100.0),
-        ])
+        let result = shortest_travel(
+            vec![path(&[[500.0, 0.0], [120.0, 0.0]]), square(0.0, 0.0, 100.0)],
+            [0.0, 0.0],
+        )
         .unwrap();
         assert_eq!(result[0].start, [0.0, 0.0]);
         assert_eq!(result[1].start, [120.0, 0.0]);
@@ -614,20 +625,26 @@ mod tests {
 
         // After the line the square starts at its vertex nearest to the line's
         // end and returns there.
-        let result = shortest_travel(vec![
-            path(&[[0.0, 0.0], [160.0, 90.0]]),
-            square(100.0, 100.0, 50.0),
-        ])
+        let result = shortest_travel(
+            vec![
+                path(&[[0.0, 0.0], [160.0, 90.0]]),
+                square(100.0, 100.0, 50.0),
+            ],
+            [0.0, 0.0],
+        )
         .unwrap();
         assert_eq!(result[1].start, [150.0, 100.0]);
         assert_eq!(result[1].end(), [150.0, 100.0]);
         assert_eq!(result[1].moves.len(), 4);
 
         // A path whose box contains another waits for it, even if it is nearer.
-        let result = shortest_travel(vec![
-            path(&[[0.0, 0.0], [160.0, 160.0]]),
-            square(100.0, 100.0, 50.0),
-        ])
+        let result = shortest_travel(
+            vec![
+                path(&[[0.0, 0.0], [160.0, 160.0]]),
+                square(100.0, 100.0, 50.0),
+            ],
+            [0.0, 0.0],
+        )
         .unwrap();
         assert_eq!(result[0].bounds(), [100.0, 100.0, 150.0, 150.0]);
         assert_eq!(result[1].start, [160.0, 160.0]);
@@ -638,7 +655,7 @@ mod tests {
         let many: Vec<Element> = (0..NEAREST_MAX_PATHS + 1)
             .map(|i| square(i as f64, 0.0, 1.0))
             .collect();
-        assert!(shortest_travel(many).is_err());
+        assert!(shortest_travel(many, [0.0, 0.0]).is_err());
     }
 
     #[test]

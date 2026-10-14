@@ -228,6 +228,8 @@
   "Keine Teile im Motiv": "No parts in the design",
   "Keine Vektorpfade zum Bearbeiten": "No vector paths to process",
   "Keine Verbindung zum LTT möglich": "Cannot connect to the LTT",
+  "Keine Verbindung zu {address} möglich: {error}": "Cannot connect to {address}: {error}",
+  "Ist der Lasercutter eingeschaltet, blockiert macOS vermutlich den Zugriff auf das lokale Netzwerk. Unter Systemeinstellungen → Datenschutz & Sicherheit → Lokales Netzwerk VisiCutRust erlauben und erneut senden.": "If the laser cutter is switched on, macOS is probably blocking access to the local network. Allow VisiCutRust under System Settings → Privacy & Security → Local Network and send again.",
   "Keine VisiCut-Gerätedatei": "Not a VisiCut device file",
   "Keine auswählbaren Objekte in der SVG.": "No selectable objects in the SVG.",
   "Konturen markieren. Eigene Leistung einstellen.": "Mark contours. Set your own power.",
@@ -854,5 +856,14 @@
   "Teile": "Parts",
   "Wirkt nur auf das aktive Teil.": "Affects only the active part.",
   "{count} Datei(en) als Teile hinzugefügt · Bearbeiten › Widerrufen macht es rückgängig": "{count} file(s) added as parts · Edit › Undo reverts this",
-  "{count} Datei(en) als Teile hinzugefügt · ⌘Z widerruft": "{count} file(s) added as parts · ⌘Z undoes"
+  "{count} Datei(en) als Teile hinzugefügt · ⌘Z widerruft": "{count} file(s) added as parts · ⌘Z undoes",
+  "{name} (ungesichert)": "{name} (unsaved)",
+  "{name} (ungesichert {number})": "{name} (unsaved {number})",
+  "Ungesicherter Stand geöffnet. Zum Behalten sichern.": "Unsaved state opened. Save it to keep it.",
+  "Zwischenspeichern fehlgeschlagen: {error}": "Could not keep the unsaved state: {error}",
+  "Zwischenspeicher leeren …": "Clear Unsaved Cache …",
+  "{count} ungesicherte Stände löschen?": "Delete {count} unsaved states?",
+  "Die abgelegten Projekte im Zwischenspeicher werden endgültig gelöscht. Gesicherte Projekte und das geöffnete Projekt bleiben erhalten.": "The projects kept in the cache are deleted permanently. Saved projects and the open project are kept.",
+  "Zwischenspeicher geleert ({count} Stände)": "Cache cleared ({count} states)",
+  "Zwischenspeicher nicht geleert: {error}": "Cache not cleared: {error}"
 }

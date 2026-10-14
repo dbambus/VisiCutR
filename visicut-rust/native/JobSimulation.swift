@@ -249,10 +249,14 @@ private struct SimulationCanvas: NSViewRepresentable {
     func makeNSView(context: Context) -> SimulationView { SimulationView() }
     func updateNSView(_ view: SimulationView, context: Context) { view.canvas = self; view.needsDisplay = true }
 
+    private var bed: CGRect { CGRect(x: 0, y: 0, width: project.bed_width_mm, height: project.bed_height_mm) }
+
+    /// Das ganze Bett, erweitert um Teile und Wege außerhalb, wie `viewport`
+    /// im Kern.
     private var viewport: CGRect {
-        var bounds = project.partsBounds
+        var bounds = bed.union(project.partsBounds)
         if let drawing, !drawing.motionBounds.isNull { bounds = bounds.union(drawing.motionBounds) }
-        return bounds.insetBy(dx: -max(2, bounds.width * 0.05), dy: -max(2, bounds.height * 0.05))
+        return bounds.insetBy(dx: -max(2, bounds.width * 0.02), dy: -max(2, bounds.height * 0.02))
     }
 
     func draw(in context: CGContext, size: CGSize) {
@@ -270,6 +274,12 @@ private struct SimulationCanvas: NSViewRepresentable {
             context.setLineDash(phase: 0, lengths: dash)
             context.strokePath()
         }
+        context.setFillColor(NSColor(white: 0.91, alpha: 1).cgColor)
+        context.fill(CGRect(origin: .zero, size: size))
+        let bedRect = bed.applying(transform)
+        context.setFillColor(NSColor.white.cgColor)
+        context.fill(bedRect)
+        stroke(Path(bedRect), Color(white: 0.63), 1)
         if let image {
             image.draw(in: artwork.applying(transform), from: .zero, operation: .sourceOver, fraction: 0.18,
                 respectFlipped: true, hints: nil)
@@ -399,7 +409,7 @@ struct SimulationTimeSlider: NSViewRepresentable {
 func testJobSimulation(_ job: PreparedJob) throws {
     let timeline = job.timeline
     guard let first = timeline.frame(at: 0), let last = timeline.frame(at: job.estimated_seconds),
-          first.position == .zero, !first.finished, last.finished,
+          first.position == CGPoint(x: 1000, y: 0), !first.finished, last.finished,
           last.programIndex == timeline.programs.count - 1 else { throw CoreError("Simulationsgrenzen fehlerhaft") }
     for (runIndex, run) in timeline.runs.enumerated() {
         guard let frame = timeline.frame(at: run.entry_end_seconds),

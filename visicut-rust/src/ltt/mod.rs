@@ -14,8 +14,8 @@ use crate::{
 };
 use resvg::{tiny_skia, usvg};
 use std::{
-    io::Write,
-    net::{Shutdown, TcpStream, ToSocketAddrs},
+    io::{self, Write},
+    net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs},
     time::Duration,
 };
 
@@ -23,6 +23,9 @@ const MACHINE_DPI: f64 = 4000.0;
 const RASTER_DPI: f64 = 500.0;
 const BED_HEIGHT: f64 = 600.0;
 const BED_WIDTH: f64 = 1000.0;
+/// The LTT homes at the top right corner of the bed while job coordinates
+/// count from the top left; every job starts there.
+pub const HOME_MM: [f64; 2] = [BED_WIDTH, 0.0];
 /// Cutting speed at 100 % (FAU device profile, nominalCuttingSpeed).
 const NOMINAL_CUT_SPEED: f64 = 338.677;
 /// Full engrave speed relative to full cutting speed, only for the time
@@ -316,6 +319,7 @@ pub fn prepare(project: &Project) -> Result<PreparedJob, String> {
         let mut body = Vec::new();
         let mut bounds: Option<Bounds> = None;
         let mut state = DeviceState::default();
+        timeline.start_job(HOME_MM);
         for (index, part) in group.iter().enumerate() {
             let (step, part_bounds) = append_part(
                 &mut body,
@@ -528,7 +532,11 @@ fn append_part(
             let ordered = order::inner_first(elements, &keys);
             let ordered = match project.cut_order {
                 CutOrder::VisiCut => ordered,
-                CutOrder::ShortestTravel => order::shortest_travel(ordered).unwrap_or_else(|o| {
+                CutOrder::ShortestTravel => order::shortest_travel(
+                    ordered,
+                    timeline.position().map(|v| v / 25.4 * RASTER_DPI),
+                )
+                .unwrap_or_else(|o| {
                     warnings.push(
                         tr("Zu viele Vektorpfade für „Kürzeste Leerfahrten“; dieser Schritt nutzt die VisiCut-Reihenfolge")
                             .into(),
@@ -1198,14 +1206,17 @@ pub fn transmit(host: &str, port: u16, bytes: &[u8]) -> Result<(), String> {
         .to_socket_addrs()
         .map_err(|e| tr!("Hostname nicht erreichbar: {error}", error = e))?
         .collect();
-    let mut connection = None;
+    let mut connection = Err(tr("Keine Verbindung zum LTT möglich").to_string());
     for address in addresses {
-        if let Ok(stream) = TcpStream::connect_timeout(&address, Duration::from_secs(3)) {
-            connection = Some(stream);
-            break;
+        match TcpStream::connect_timeout(&address, Duration::from_secs(3)) {
+            Ok(stream) => {
+                connection = Ok(stream);
+                break;
+            }
+            Err(error) => connection = Err(connect_error(address, &error)),
         }
     }
-    let mut stream = connection.ok_or(tr("Keine Verbindung zum LTT möglich"))?;
+    let mut stream = connection?;
     stream
         .set_write_timeout(Some(Duration::from_secs(10)))
         .map_err(|e| e.to_string())?;
@@ -1220,6 +1231,27 @@ pub fn transmit(host: &str, port: u16, bytes: &[u8]) -> Result<(), String> {
         .shutdown(Shutdown::Write)
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Names the address and the system error. macOS rejects connections into
+/// the local network with EHOSTUNREACH while the app lacks the "Local
+/// Network" privacy permission, even though the cutter answers.
+fn connect_error(address: SocketAddr, error: &io::Error) -> String {
+    let message = tr!(
+        "Keine Verbindung zu {address} möglich: {error}",
+        address = address,
+        error = error
+    );
+    if cfg!(target_os = "macos") && error.kind() == io::ErrorKind::HostUnreachable {
+        format!(
+            "{message}\n{}",
+            tr(
+                "Ist der Lasercutter eingeschaltet, blockiert macOS vermutlich den Zugriff auf das lokale Netzwerk. Unter Systemeinstellungen → Datenschutz & Sicherheit → Lokales Netzwerk VisiCutRust erlauben und erneut senden."
+            )
+        )
+    } else {
+        message
+    }
 }
 
 #[cfg(test)]
@@ -1250,6 +1282,9 @@ mod tests {
         assert_eq!(job.jobs.len(), 2);
         assert_eq!(job.jobs[0].operation, Operation::Engrave);
         assert_eq!(job.jobs[1].operation, Operation::Cut);
+        // Both device jobs start at the home position top right.
+        let starts: Vec<_> = job.timeline.runs.iter().map(|r| r.from_mm).collect();
+        assert_eq!(starts, [HOME_MM, HOME_MM]);
         assert!(job.jobs[0].bytes.windows(2).any(|b| b == [0x1b, 0x30]));
         assert!(!job.jobs[0].bytes.windows(2).any(|b| b == [0x1b, 0x56]));
         assert!(job.jobs[1].bytes.windows(2).any(|b| b == [0x1b, 0x56]));
@@ -1611,11 +1646,13 @@ mod tests {
         let mut p = Project { x_mm: 0.0, y_mm: 0.0, width_mm: 100.0, height_mm: 10.0,
             speed_percent: 10.0,
             svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="10mm" viewBox="0 0 100 10"><path d="M0 0L100 0" stroke="black"/></svg>"#.into(), ..Default::default() };
+        // Travel from home (top right) to the start of the line, then the
         // Java estimate: distance plus acceleration distance v²/a at 2000 mm/s²,
         // plus the controller's dwell at the start of the contour.
+        let entry = 1000.0 / crate::timeline::TRAVEL_MM_S;
         let pierce = p.machine.pierce_delay_ms / 1000.0;
         assert!(pierce > 0.0);
-        let expected = |v: f64| (100.0 + (v * v / 2000.0).sqrt()) / v + pierce;
+        let expected = |v: f64| entry + (100.0 + (v * v / 2000.0).sqrt()) / v + pierce;
         let one = prepare(&p).unwrap().estimated_seconds;
         assert!((one - expected(33.8677)).abs() < 0.003, "{one}");
         p.speed_percent = 20.0;
@@ -1625,7 +1662,10 @@ mod tests {
         // back: no travel in between, the reversal is a corner, one start.
         p.passes = 2;
         let twice = prepare(&p).unwrap().estimated_seconds;
-        assert!((twice - (2.0 * faster - pierce)).abs() < 0.003, "{twice}");
+        assert!(
+            (twice - (2.0 * faster - entry - pierce)).abs() < 0.003,
+            "{twice}"
+        );
         p.machine.pierce_delay_ms = 0.0;
         p.passes = 1;
         let without = prepare(&p).unwrap().estimated_seconds;
@@ -1941,6 +1981,26 @@ mod tests {
         });
         transmit("127.0.0.1", port, b"test job").unwrap();
         assert_eq!(receiver.join().unwrap(), b"test job");
+    }
+
+    #[test]
+    fn connection_errors_name_address_and_local_network_permission() {
+        // Bind and drop to get a local port nobody listens on.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let refused = transmit("127.0.0.1", port, b"x").unwrap_err();
+        assert!(refused.contains(&format!("127.0.0.1:{port}")), "{refused}");
+        assert!(!refused.contains("Lokales Netzwerk"), "{refused}");
+        let address: SocketAddr = "10.188.64.39:9100".parse().unwrap();
+        let blocked = connect_error(address, &io::ErrorKind::HostUnreachable.into());
+        assert!(blocked.starts_with("Keine Verbindung zu 10.188.64.39:9100"));
+        assert_eq!(
+            blocked.contains("Lokales Netzwerk"),
+            cfg!(target_os = "macos")
+        );
     }
 
     #[test]

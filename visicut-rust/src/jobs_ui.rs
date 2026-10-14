@@ -83,12 +83,6 @@ pub fn thicknesses(material: &Material) -> Vec<f32> {
     list
 }
 
-fn active<'a>(library: &'a Library, others: &'a [Library], set: usize) -> &'a Library {
-    set.checked_sub(1)
-        .and_then(|i| others.get(i))
-        .unwrap_or(library)
-}
-
 fn find_material<'a>(library: &'a Library, name: &str) -> Option<&'a Material> {
     library.materials.iter().find(|m| m.name == name)
 }
@@ -706,10 +700,6 @@ struct Editor {
 pub struct JobUi {
     /// Editable library of the LTT (FAU catalogue or the user's own).
     pub library: Library,
-    /// Read-only FAU profiles of the other lasercutters.
-    others: Vec<Library>,
-    /// Profile set in use: 0 is `library`, then `others`.
-    profile_set: usize,
     custom: bool,
     /// "Eigenes Material …" was chosen; keeps the name field while it is empty.
     own_material: bool,
@@ -727,8 +717,6 @@ impl JobUi {
         };
         let ui = Self {
             library,
-            others: Library::other_devices(),
-            profile_set: 0,
             custom,
             own_material: false,
             editor: None,
@@ -738,56 +726,14 @@ impl JobUi {
         (ui, error)
     }
 
-    /// Profiles used for presets and the material choice.
+    /// Profiles of the lasercutter used for presets and the material choice.
     pub fn active(&self) -> &Library {
-        active(&self.library, &self.others, self.profile_set)
-    }
-
-    /// Profile set dropdown: the LTT library and the other FAU lasercutters.
-    fn profile_set(&mut self, ui: &mut egui::Ui, project: &mut Project, dirty: &mut bool) {
-        let names: Vec<String> = std::iter::once(&self.library)
-            .chain(&self.others)
-            .map(|l| l.device.clone())
-            .collect();
-        let before = self.profile_set;
-        crate::form::row(ui, tr("Profile"), |ui| {
-            egui::ComboBox::from_id_salt("profile_set")
-                .width(190.0)
-                .selected_text(names.get(self.profile_set).map_or("", |n| n.as_str()))
-                .show_ui(ui, |ui| {
-                    for (i, name) in names.iter().enumerate() {
-                        ui.selectable_value(&mut self.profile_set, i, name);
-                    }
-                })
-                .response
-                .on_hover_text(tr("\
-                    FAU-Materialprofile eines Lasercutters für Material, Stärke und Parameter"));
-        });
-        if self.profile_set != before {
-            let material = project.material.clone();
-            if find_material(self.active(), &material).is_some() {
-                select_material(self.active(), project, Some(&material));
-                apply_presets(self.active(), project);
-            }
-            *dirty = true;
-        }
-        if self.profile_set > 0 {
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(tr("\
-                        Profile eines anderen Lasercutters: Werte vor dem Lasern am LTT prüfen."))
-                    .size(11.5)
-                    .color(PROFILE),
-                )
-                .wrap(),
-            );
-        }
+        &self.library
     }
 
     pub fn material(&mut self, ui: &mut egui::Ui, project: &mut Project, dirty: &mut bool) {
-        self.profile_set(ui, project, dirty);
         let before = (project.material.clone(), project.thickness_mm);
-        let library = active(&self.library, &self.others, self.profile_set);
+        let library = &self.library;
         let library_material = find_material(library, &project.material).is_some();
         if library_material {
             self.own_material = false;
@@ -847,6 +793,8 @@ impl JobUi {
         let list = find_material(library, &project.material)
             .map(thicknesses)
             .unwrap_or_default();
+        // Nur Materialien mit echten Stärken zeigen die Auswahl; gibt es nur
+        // „Nicht festgelegt“ (z. B. Folien, Beschichtungen), entfällt sie.
         if list.is_empty() {
             *dirty |= crate::number(
                 ui,
@@ -855,7 +803,7 @@ impl JobUi {
                 0.0..=1000.0,
                 " mm",
             );
-        } else {
+        } else if list.iter().any(|&t| t > 0.0) {
             let title = |t: f32| {
                 if t == 0.0 {
                     tr("Nicht festgelegt").to_string()
@@ -863,22 +811,40 @@ impl JobUi {
                     format!("{t} mm")
                 }
             };
-            crate::form::row(ui, tr("Stärke"), |ui| {
-                egui::ComboBox::from_id_salt("thickness")
-                    .width(130.0)
-                    .selected_text(title(project.thickness_mm))
-                    .show_ui(ui, |ui| {
-                        for t in list {
-                            if ui
-                                .selectable_label(same_thickness(t, project.thickness_mm), title(t))
-                                .clicked()
-                            {
-                                project.thickness_mm = t;
-                                *dirty = true;
-                            }
+            // Bis zu drei Stärken als eigene Knöpfe, mehr (Acryl …) im Menü.
+            if list.len() <= 3 {
+                crate::form::row(ui, tr("Stärke"), |ui| {
+                    for &t in &list {
+                        if ui
+                            .selectable_label(same_thickness(t, project.thickness_mm), title(t))
+                            .clicked()
+                        {
+                            project.thickness_mm = t;
+                            *dirty = true;
                         }
-                    });
-            });
+                    }
+                });
+            } else {
+                crate::form::row(ui, tr("Stärke"), |ui| {
+                    egui::ComboBox::from_id_salt("thickness")
+                        .width(130.0)
+                        .selected_text(title(project.thickness_mm))
+                        .show_ui(ui, |ui| {
+                            for t in list {
+                                if ui
+                                    .selectable_label(
+                                        same_thickness(t, project.thickness_mm),
+                                        title(t),
+                                    )
+                                    .clicked()
+                                {
+                                    project.thickness_mm = t;
+                                    *dirty = true;
+                                }
+                            }
+                        });
+                });
+            }
         }
         if (project.material.clone(), project.thickness_mm) != before {
             // Das Materialprofil ist der Standard; Abweichungen zeigt die
@@ -1069,7 +1035,7 @@ impl JobUi {
             ui.small(tr("Keine auswählbaren Objekte in der SVG."));
             return;
         }
-        let library = active(&self.library, &self.others, self.profile_set);
+        let library = &self.library;
         egui::ScrollArea::vertical()
             .id_salt("objects")
             .max_height(220.0)
@@ -1569,23 +1535,6 @@ mod tests {
         select_material(&library, &mut p, None);
         assert_eq!(p.material, "Eigenes Material");
         assert!(preset(&library, &p, Operation::Cut).is_none());
-    }
-
-    #[test]
-    fn profile_sets_switch_presets_to_the_other_lasercutter() {
-        let others = Library::other_devices();
-        let ltt = Library::bundled();
-        assert_eq!(active(&ltt, &others, 0).device, "LTT iLaser 4000");
-        assert_eq!(active(&ltt, &others, 1).device, "Epilog Zing");
-        assert_eq!(active(&ltt, &others, 9).device, "LTT iLaser 4000");
-        let mut p = Project::default();
-        select_material(&others[0], &mut p, Some("Acryl"));
-        assert_eq!(apply_presets(&others[0], &mut p), 1);
-        let epilog = preset(&others[0], &p, p.operation).unwrap();
-        assert_eq!(
-            (p.power_percent, p.speed_percent),
-            (epilog.power_percent, epilog.speed_percent)
-        );
     }
 
     #[test]

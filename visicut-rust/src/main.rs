@@ -1433,7 +1433,6 @@ impl VisiCutRust {
         self.jobs.processing(ui, &mut self.project, &mut self.dirty);
         form::section(ui, tr("Position und Größe"), |ui| {
             self.transform_panel(ui, &mut clicked);
-            ui.checkbox(&mut self.proportional, tr("Seitenverhältnis beibehalten"));
         });
         ui.add_space(8.0);
         clicked
@@ -1496,42 +1495,88 @@ impl VisiCutRust {
     fn transform_panel(&mut self, ui: &mut egui::Ui, clicked: &mut Option<Command>) {
         let mut reference = self.reference;
         let mut dirty = false;
-        let proportional = self.proportional;
+        let mut proportional = self.proportional;
         // Nullpunkt unten links: Y zählt wie am Gerät von der unteren
         // Bettkante nach oben (nur Anzeige, der Auftrag bleibt gleich).
         let bottom = self.devices.origin_bottom_left();
         let p = &mut self.project;
+        // Wie das Transformieren-Feld in Grafikprogrammen: Bezugspunkt, X/Y,
+        // B/H und rechts die Kette, die das Seitenverhältnis hält.
+        let (mut new_x, mut new_y, mut new_w, mut new_h) = (None, None, None, None);
         ui.horizontal(|ui| {
             reference_picker(ui, &mut reference);
             let [fx, fy] = reference;
-            ui.vertical(|ui| {
-                let mut x = p.x_mm + p.width_mm * fx;
-                let top = p.y_mm + p.height_mm * fy;
-                let mut y = if bottom { p.bed_height_mm - top } else { top };
-                if number(ui, "X", &mut x, -10000.0..=10000.0, " mm") {
-                    p.x_mm = x - p.width_mm * fx;
-                    dirty = true;
-                }
-                if number(ui, "Y", &mut y, -10000.0..=10000.0, " mm") {
-                    let top = if bottom { p.bed_height_mm - y } else { y };
-                    p.y_mm = top - p.height_mm * fy;
-                    dirty = true;
-                }
-            });
+            let mut x = p.x_mm + p.width_mm * fx;
+            let top = p.y_mm + p.height_mm * fy;
+            let mut y = if bottom { p.bed_height_mm - top } else { top };
+            let (mut w, mut h) = (p.width_mm, p.height_mm);
+            fn field(value: &mut f32, min: f32) -> egui::DragValue<'_> {
+                egui::DragValue::new(value)
+                    .speed(0.1)
+                    .range(min..=10000.0)
+                    .max_decimals(2)
+                    .suffix(" mm")
+            }
+            egui::Grid::new("position_size")
+                .num_columns(4)
+                .spacing([4.0, 4.0])
+                .show(ui, |ui| {
+                    ui.label("X");
+                    if ui.add(field(&mut x, -10000.0)).changed() {
+                        new_x = Some(x);
+                    }
+                    ui.label("B").on_hover_text(tr("Breite"));
+                    if ui.add(field(&mut w, 0.1)).changed() {
+                        new_w = Some(w);
+                    }
+                    ui.end_row();
+                    ui.label("Y");
+                    if ui.add(field(&mut y, -10000.0)).changed() {
+                        new_y = Some(y);
+                    }
+                    ui.label("H").on_hover_text(tr("Höhe"));
+                    if ui.add(field(&mut h, 0.1)).changed() {
+                        new_h = Some(h);
+                    }
+                    ui.end_row();
+                });
+            let tip = if proportional {
+                tr("Seitenverhältnis beibehalten")
+            } else {
+                tr("Seitenverhältnis frei")
+            };
+            if ui
+                .selectable_label(proportional, "🔗")
+                .on_hover_text(tip)
+                .clicked()
+            {
+                proportional = !proportional;
+            }
         });
         let [fx, fy] = reference;
+        if let Some(x) = new_x {
+            p.x_mm = x - p.width_mm * fx;
+            dirty = true;
+        }
+        if let Some(y) = new_y {
+            let top = if bottom { p.bed_height_mm - y } else { y };
+            p.y_mm = top - p.height_mm * fy;
+            dirty = true;
+        }
         let anchor = [p.x_mm + p.width_mm * fx, p.y_mm + p.height_mm * fy];
         let ratio = p.height_mm / p.width_mm;
         let mut resized = false;
-        if number(ui, tr("Breite"), &mut p.width_mm, 0.1..=10000.0, " mm") {
+        if let Some(w) = new_w {
+            p.width_mm = w;
             if proportional {
-                p.height_mm = p.width_mm * ratio;
+                p.height_mm = w * ratio;
             }
             resized = true;
         }
-        if number(ui, tr("Höhe"), &mut p.height_mm, 0.1..=10000.0, " mm") {
+        if let Some(h) = new_h {
+            p.height_mm = h;
             if proportional {
-                p.width_mm = p.height_mm / ratio;
+                p.width_mm = h / ratio;
             }
             resized = true;
         }
@@ -1542,28 +1587,27 @@ impl VisiCutRust {
             dirty = true;
         }
         self.reference = reference;
+        self.proportional = proportional;
         self.dirty |= dirty;
         let editable = self.texture.is_some() && !self.busy();
-        form::row(ui, tr("Drehen"), |ui| {
-            if ui
-                .add_enabled(
-                    editable && self.rotate_deg != 0.0,
-                    egui::Button::new(tr("Anwenden")),
-                )
-                .on_hover_text(tr("Positive Winkel drehen im Uhrzeigersinn"))
-                .clicked()
-            {
-                *clicked = Some(Command::RotateBy);
-            }
+        // Drehen und Spiegeln nur als Symbole; die Tooltips nennen den Befehl.
+        ui.horizontal(|ui| {
+            ui.label("⟳").on_hover_text(tr("Drehen"));
             ui.add(
                 egui::DragValue::new(&mut self.rotate_deg)
                     .range(-360.0..=360.0)
                     .speed(1.0)
                     .suffix("°"),
-            );
-        });
-        ui.horizontal(|ui| {
-            // Nur Symbole wie unter macOS; der Tooltip nennt den Befehl.
+            )
+            .on_hover_text(tr("Positive Winkel drehen im Uhrzeigersinn"));
+            if ui
+                .add_enabled(editable && self.rotate_deg != 0.0, egui::Button::new("✔"))
+                .on_hover_text(tr("Anwenden"))
+                .clicked()
+            {
+                *clicked = Some(Command::RotateBy);
+            }
+            ui.separator();
             for (command, text) in [
                 (Command::RotateLeft, "⟲ 90°"),
                 (Command::RotateRight, "⟳ 90°"),

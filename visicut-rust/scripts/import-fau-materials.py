@@ -2,8 +2,7 @@
 """Import single-pass cut, engrave, mark and 3D engrave profiles from a local FAU checkout.
 
 Usage: python3 scripts/import-fau-materials.py /path/to/visicut-settings
-Writes the LTT iLaser 4000 catalogue (resources/materials.json) and the
-catalogues of the other FAU lasercutters (resources/profiles/*.json).
+Writes the LTT iLaser 4000 catalogue (resources/materials.json).
 No downloads or laser communication are performed.
 """
 import argparse
@@ -22,7 +21,6 @@ OPERATIONS = (
 # FAU device directory, device name and destination in resources/.
 DEVICES = (
     ("LTT_32_iLaser_32_4000", "LTT iLaser 4000", "materials.json"),
-    ("Epilog_95_Zing_95_Fablab", "Epilog Zing", "profiles/epilog-zing.json"),
 )
 
 

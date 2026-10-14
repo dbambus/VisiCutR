@@ -120,7 +120,6 @@
   "FAU wiederherstellen": "Restaurer FAU",
   "FAU-Bibliothek": "Bibliothèque FAU",
   "FAU-Materialbibliothek wiederhergestellt": "Bibliothèque de matériaux FAU restaurée",
-  "FAU-Materialprofile eines Lasercutters für Material, Stärke und Parameter": "Profils de matériaux FAU d'une découpeuse laser pour matériau, épaisseur et paramètres",
   "FAU: grün markieren, rot und blau ignorieren, Rest gravieren": "FAU : marquer le vert, ignorer le rouge et le bleu, graver le reste",
   "FAU: rot schneiden, grün markieren, blau ignorieren, Rest gravieren": "FAU : découper le rouge, marquer le vert, ignorer le bleu, graver le reste",
   "Farbe": "Couleur",
@@ -335,8 +334,6 @@
   "Positive Winkel drehen im Uhrzeigersinn": "Les angles positifs tournent dans le sens horaire",
   "Profil entfernen": "Supprimer le profil",
   "Profil hinzufügen": "Ajouter un profil",
-  "Profile": "Profils",
-  "Profile eines anderen Lasercutters: Werte vor dem Lasern am LTT prüfen.": "Profils d'une autre découpeuse laser : vérifier les valeurs sur le LTT avant de lancer le laser.",
   "Projekt": "Projet",
   "Projekt geöffnet": "Projet ouvert",
   "Projekt mit eingebetteter SVG gesichert": "Projet enregistré avec SVG intégré",
@@ -865,5 +862,8 @@
   "{count} ungesicherte Stände löschen?": "Supprimer {count} états non enregistrés ?",
   "Die abgelegten Projekte im Zwischenspeicher werden endgültig gelöscht. Gesicherte Projekte und das geöffnete Projekt bleiben erhalten.": "Les projets conservés dans le cache sont supprimés définitivement. Les projets enregistrés et le projet ouvert sont conservés.",
   "Zwischenspeicher geleert ({count} Stände)": "Cache vidé ({count} états)",
-  "Zwischenspeicher nicht geleert: {error}": "Cache non vidé : {error}"
+  "Zwischenspeicher nicht geleert: {error}": "Cache non vidé : {error}",
+  "Seitenverhältnis frei": "Proportions libres",
+  "Position X des Bezugspunkts": "Position X du point de référence",
+  "Position Y des Bezugspunkts": "Position Y du point de référence"
 }

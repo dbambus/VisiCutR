@@ -120,7 +120,6 @@
   "FAU wiederherstellen": "FAU herstellen",
   "FAU-Bibliothek": "FAU-bibliotheek",
   "FAU-Materialbibliothek wiederhergestellt": "FAU-materiaalbibliotheek hersteld",
-  "FAU-Materialprofile eines Lasercutters für Material, Stärke und Parameter": "FAU-materiaalprofielen van een lasercutter voor materiaal, dikte en parameters",
   "FAU: grün markieren, rot und blau ignorieren, Rest gravieren": "FAU: groen markeren, rood en blauw negeren, rest graveren",
   "FAU: rot schneiden, grün markieren, blau ignorieren, Rest gravieren": "FAU: rood snijden, groen markeren, blauw negeren, rest graveren",
   "Farbe": "Kleur",
@@ -335,8 +334,6 @@
   "Positive Winkel drehen im Uhrzeigersinn": "Positieve hoeken draaien met de klok mee",
   "Profil entfernen": "Profiel verwijderen",
   "Profil hinzufügen": "Profiel toevoegen",
-  "Profile": "Profielen",
-  "Profile eines anderen Lasercutters: Werte vor dem Lasern am LTT prüfen.": "Profielen van een andere lasercutter: controleer de waarden vóór het laseren op de LTT.",
   "Projekt": "Project",
   "Projekt geöffnet": "Project geopend",
   "Projekt mit eingebetteter SVG gesichert": "Project met ingebedde SVG opgeslagen",
@@ -865,5 +862,8 @@
   "{count} ungesicherte Stände löschen?": "{count} niet-bewaarde standen verwijderen?",
   "Die abgelegten Projekte im Zwischenspeicher werden endgültig gelöscht. Gesicherte Projekte und das geöffnete Projekt bleiben erhalten.": "De projecten in de tussenopslag worden definitief verwijderd. Bewaarde projecten en het geopende project blijven behouden.",
   "Zwischenspeicher geleert ({count} Stände)": "Tussenopslag geleegd ({count} standen)",
-  "Zwischenspeicher nicht geleert: {error}": "Tussenopslag niet geleegd: {error}"
+  "Zwischenspeicher nicht geleert: {error}": "Tussenopslag niet geleegd: {error}",
+  "Seitenverhältnis frei": "Verhouding vrij",
+  "Position X des Bezugspunkts": "X-positie van het referentiepunt",
+  "Position Y des Bezugspunkts": "Y-positie van het referentiepunt"
 }

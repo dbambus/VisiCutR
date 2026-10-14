@@ -129,10 +129,9 @@ lokal nach einem Build für die jeweilige Host-Architektur.
    verschieben das vergrößerte Bett.
 3. **Material** und **Stärke** aus den nativen Auswahlmenüs wählen.
    Die Bibliothek enthält 31 Materialien und 115 Schnitt-, Gravur-, Markier-
-   und 3D-Profile aus den öffentlichen FAU-LTT-Einstellungen. Über das
-   Dropdown **Profile** lassen sich stattdessen die FAU-Profile des anderen
-   Lasercutters wählen (Epilog Zing: 42 Materialien, 128 Profile). Sie sind
-   am Epilog ermittelt und nur lesbar; die Werte vor dem Lasern am LTT prüfen.
+   und 3D-Profile aus den öffentlichen FAU-LTT-Einstellungen. Die Profile
+   ergeben sich aus dem gewählten Lasercutter; eine eigene Auswahl gibt es
+   nicht.
    **Job → Materialbibliothek …** (⇧⌘M) bearbeitet Materialien und Profile,
    importiert/exportiert sie als JSON und stellt die FAU-Bibliothek wieder her;
    eigene Änderungen liegen im Einstellungsordner (siehe unten). Das Profil

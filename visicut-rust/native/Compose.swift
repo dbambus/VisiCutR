@@ -400,9 +400,11 @@ struct ReferencePointPicker: View {
                     .fill(selected ? Color.primary : Color(nsColor: .controlBackgroundColor))
                     .overlay(Rectangle().stroke(Color.secondary, lineWidth: 1))
                     .frame(width: box, height: box)
-                    .offset(x: fx * (size - box), y: fy * (size - box))
                     .contentShape(Rectangle().inset(by: -3))
                     .onTapGesture { x = fx; y = fy }
+                    // Erst nach der Klickfläche verschieben: Sonst bleiben alle neun
+                    // Klickflächen oben links übereinander liegen.
+                    .offset(x: fx * (size - box), y: fy * (size - box))
             }
         }
         .frame(width: size, height: size)
@@ -411,29 +413,38 @@ struct ReferencePointPicker: View {
     }
 }
 
-/// Drehen um einen Winkel, 90°-Schritte und Spiegeln (kein Verzerren).
+/// Drehen um einen Winkel, 90°-Schritte und Spiegeln (kein Verzerren), nur als
+/// Symbole; die Tooltips nennen den Befehl. Der Winkel gilt mit ⏎ oder ✓.
 struct TransformControls: View {
     @ObservedObject var model: AppModel
     @State private var angle = 0.0
     var body: some View {
-        LabeledContent(tr("Drehen")) {
-            HStack(spacing: 6) {
-                TextField(tr("Winkel"), value: $angle, format: .number).multilineTextAlignment(.trailing)
-                    .textFieldStyle(.roundedBorder).frame(width: 60).labelsHidden()
-                Text("°").foregroundStyle(.secondary)
-                Button(tr("Anwenden")) { model.transformArtwork(rotate: angle); angle = 0 }
-                    .disabled(angle == 0 || !model.project.hasArtwork)
-                    .help(tr("Positive Winkel drehen im Uhrzeigersinn"))
-            }
-        }
-        HStack {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.trianglehead.clockwise.rotate.90").foregroundStyle(.secondary)
+                .help(tr("Drehen"))
+            UnitField(title: tr("Winkel"), value: $angle, unit: "°", width: 64)
+                .onSubmit(apply)
+                .help(tr("Positive Winkel drehen im Uhrzeigersinn"))
+            Button(action: apply) { Image(systemName: "checkmark") }
+                .disabled(angle == 0)
+                .help(tr("Anwenden"))
+            Spacer(minLength: 8)
             Button { model.transformArtwork(rotate: -90) } label: { Image(systemName: "rotate.left") }.help(tr("90° nach links drehen"))
             Button { model.transformArtwork(rotate: 90) } label: { Image(systemName: "rotate.right") }.help(tr("90° nach rechts drehen"))
-            Button { model.transformArtwork(flipHorizontal: true) } label: { Image(systemName: "arrow.left.and.right") }.help(tr("Horizontal spiegeln"))
-            Button { model.transformArtwork(flipVertical: true) } label: { Image(systemName: "arrow.up.and.down") }.help(tr("Vertikal spiegeln"))
-            Spacer()
+            Button { model.transformArtwork(flipHorizontal: true) } label: {
+                Image(systemName: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+            }.help(tr("Horizontal spiegeln"))
+            Button { model.transformArtwork(flipVertical: true) } label: {
+                Image(systemName: "arrow.up.and.down.righttriangle.up.righttriangle.down")
+            }.help(tr("Vertikal spiegeln"))
         }
+        .buttonStyle(.borderless)
         .disabled(!model.project.hasArtwork)
+    }
+    private func apply() {
+        guard angle != 0, model.project.hasArtwork else { return }
+        model.transformArtwork(rotate: angle)
+        angle = 0
     }
 }
 

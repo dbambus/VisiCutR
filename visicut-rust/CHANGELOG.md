@@ -3,6 +3,26 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## 0.15.0 – 14.10.2026
+
+- **Profile folgen dem Lasercutter** (egui und macOS): Die Auswahl „Profile“
+  entfällt; Material und Stärke kommen aus den Profilen des gewählten
+  Lasercutters. Der Epilog-Zing-Katalog ist entfernt, da nur LTT-Geräte
+  eingerichtet werden können.
+- **Stärke nur bei Bedarf**: Materialien ohne echte Stärke zeigen keine
+  Stärke-Zeile; bis zu drei Stärken erscheinen als eigene Knöpfe, mehr
+  (Acryl) weiterhin im Menü.
+- **Position und Größe wie in Grafikprogrammen** (egui und macOS):
+  Bezugspunkt, X/Y und B/H mit der Einheit im Feld, rechts die Kette für das
+  Seitenverhältnis; Drehen und Spiegeln als Symbole, der Winkel gilt mit ⏎
+  oder ✓.
+- **macOS-Oberfläche**: Das Bezugspunkt-Feld reagiert wieder auf Klicks
+  (alle Klickflächen lagen oben links). Lange Material- und Gerätenamen
+  werden in einer Zeile mit „…“ gekürzt. Der Kopf der Arbeitsfläche ist nicht
+  mehr verblasst und angeschnitten. Das Bett lässt sich nicht mehr über den
+  Ursprung oder den Rand hinaus verschieben und zeichnet nicht mehr über
+  seinen Bereich hinaus; die Linealzahl 1000 hat Platz.
+
 ## 0.14.0 – 14.10.2026
 
 - **Kein „Änderungen sichern?“ mehr** (egui und macOS): Beim Öffnen, bei

@@ -360,9 +360,6 @@ final class AppModel: ObservableObject {
     let labs: [LabSetting]
     @Published var materials: [Material]
     @Published var materialsCustom = false
-    /// FAU-Profile der anderen Lasercutter; `profileSet` 0 ist die LTT-Bibliothek.
-    let otherProfiles: [MaterialLibrary]
-    @Published var profileSet = 0
     @Published var mapping: MappingInfo?
     @Published var mappingError: String?
     @Published var vectorizeSource: BitmapSource?
@@ -384,7 +381,6 @@ final class AppModel: ObservableObject {
             project = initial.project
             let catalog: MaterialCatalog = try RustCore.decode("materials")
             materials = catalog.materials
-            otherProfiles = catalog.others
             materialSource = catalog.source
             materialsCustom = catalog.custom
             project.material = ""
@@ -406,16 +402,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Materialien des gewählten Profilsatzes.
-    var activeMaterials: [Material] {
-        profileSet > 0 && profileSet <= otherProfiles.count ? otherProfiles[profileSet - 1].materials : materials
-    }
-    var profileSetNames: [String] { ["LTT iLaser 4000"] + otherProfiles.map(\.device) }
-    func selectProfileSet(_ index: Int) {
-        guard index != profileSet, profileSetNames.indices.contains(index) else { return }
-        profileSet = index
-        if selectedMaterial != nil { selectMaterial(project.material) }
-    }
+    /// Materialprofile des Lasercutters.
+    var activeMaterials: [Material] { materials }
     var selectedMaterial: Material? { activeMaterials.first { $0.name == project.material } }
     var materialSelection: String {
         project.material.isEmpty ? "" : selectedMaterial?.name ?? "__custom"
@@ -917,8 +905,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
     func showWorkspace() {
         if let window = workspaceWindow { window.makeKeyAndOrderFront(nil); return }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1240, height: 820),
-            // Ohne .fullSizeContentView: Der Inspektor scrollt sonst unter die Fensterknöpfe.
-            styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            // Mit .fullSizeContentView: Die geteilte Ansicht zeichnet ihren Symbolleisten-Bereich
+            // sonst zusätzlich in den Inhalt, der Kopf der Arbeitsfläche wirkt verblasst und angeschnitten.
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.contentView = NSHostingView(rootView: Workspace(model: model))
         // Widerrufen von Werkzeug- und Löschaktionen über Bearbeiten → Widerrufen.
         model.undoManager = window.undoManager
@@ -1362,8 +1351,7 @@ struct Inspector: View {
                 LabeledContent(tr("Lasercutter")) {
                     NativePopup(options: model.devices.devices.indices.map { PopupOption(String($0), model.devices.devices[$0].name) },
                         selection: Binding(get: { String(model.devices.selected) }, set: { if let index = Int($0) { model.selectDevice(index) } }),
-                        identifier: "devicePicker")
-                        .fixedSize()
+                        identifier: "devicePicker", maxWidth: 210)
                 }
             }
             if model.device.rotary_axis {
@@ -1378,37 +1366,39 @@ struct Inspector: View {
                 }
             }
             Section(tr("Material")) {
-                LabeledContent(tr("Profile")) {
-                    NativePopup(options: model.profileSetNames.indices.map { PopupOption(String($0), model.profileSetNames[$0]) },
-                        selection: Binding(get: { String(model.profileSet) }, set: { if let index = Int($0) { model.selectProfileSet(index) } }),
-                        identifier: "profileSetPicker")
-                        .fixedSize()
-                        .help(tr("FAU-Materialprofile eines Lasercutters für Material, Stärke und Parameter"))
-                }
-                if model.profileSet > 0 {
-                    Text(tr("Profile eines anderen Lasercutters: Werte vor dem Lasern am LTT prüfen."))
-                        .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-                }
                 LabeledContent(tr("Material")) {
                     NativePopup(options: [PopupOption("", tr("Material wählen")), .separator]
                         + model.activeMaterials.map { PopupOption($0.name, $0.name) }
                         + [.separator, PopupOption("__custom", tr("Eigenes Material …"))],
-                        selection: material, identifier: "materialPicker")
-                        .fixedSize()
+                        selection: material, identifier: "materialPicker", maxWidth: 210)
                 }
                 if model.materialSelection == "__custom" {
                     TextField(tr("Bezeichnung"), text: $model.project.material)
                 }
-                if let material = model.selectedMaterial {
+                // Nur Materialien mit echten Stärken zeigen die Auswahl; gibt es nur
+                // „Nicht festgelegt“ (z. B. Folien, Beschichtungen), entfällt sie.
+                if let material = model.selectedMaterial, material.thicknesses.contains(where: { $0 > 0 }) {
                     LabeledContent(tr("Stärke")) {
-                        NativePopup(options: material.thicknesses.map {
-                            PopupOption(String($0), $0 == 0 ? tr("Nicht festgelegt") : "\(format($0)) mm")
-                        }, selection: Binding(get: { String(model.project.thickness_mm) }, set: {
-                            if let value = Double($0) { model.selectThickness(value) }
-                        }), identifier: "thicknessPicker")
-                        .fixedSize()
+                        // Bis zu drei Stärken als eigene Knöpfe, mehr (Acryl …) im Menü.
+                        if material.thicknesses.count <= 3 {
+                            Picker(tr("Stärke"), selection: Binding(get: { model.project.thickness_mm },
+                                                                    set: { model.selectThickness($0) })) {
+                                ForEach(material.thicknesses, id: \.self) { thickness in
+                                    Text(thickness == 0 ? tr("Nicht festgelegt") : "\(format(thickness)) mm").tag(thickness)
+                                }
+                            }
+                            .pickerStyle(.segmented).labelsHidden().fixedSize()
+                            .accessibilityIdentifier("thicknessButtons")
+                        } else {
+                            NativePopup(options: material.thicknesses.map {
+                                PopupOption(String($0), $0 == 0 ? tr("Nicht festgelegt") : "\(format($0)) mm")
+                            }, selection: Binding(get: { String(model.project.thickness_mm) }, set: {
+                                if let value = Double($0) { model.selectThickness(value) }
+                            }), identifier: "thicknessPicker")
+                            .fixedSize()
+                        }
                     }
-                } else {
+                } else if model.selectedMaterial?.thicknesses.isEmpty ?? true {
                     NumberField(tr("Stärke"), value: $model.project.thickness_mm, unit: "mm")
                 }
             }
@@ -1490,21 +1480,10 @@ struct Inspector: View {
                 }
             }
             Section(tr("Position und Größe")) {
-                HStack(alignment: .center, spacing: 12) {
-                    ReferencePointPicker(x: $model.referenceX, y: $model.referenceY)
-                    VStack(spacing: 6) {
-                        NumberField("X", value: Binding(get: { model.referencePoint.0 },
-                            set: { model.project.x_mm = $0 - model.project.width_mm * model.referenceX }), unit: "mm")
-                        // Bei Nullpunkt unten links vom unteren Bettrand aus gemessen.
-                        NumberField("Y", value: Binding(get: { model.displayY }, set: { model.setDisplayY($0) }), unit: "mm")
-                    }
-                }
+                PositionSizeGrid(model: model)
                 if model.originBottomLeft {
                     Text(tr("Nullpunkt unten links")).font(.caption).foregroundStyle(.secondary)
                 }
-                NumberField(tr("Breite"), value: Binding(get: { model.project.width_mm }, set: { model.changeWidth($0) }), unit: "mm")
-                NumberField(tr("Höhe"), value: Binding(get: { model.project.height_mm }, set: { model.changeHeight($0) }), unit: "mm")
-                Toggle(tr("Seitenverhältnis beibehalten"), isOn: $model.keepProportions)
                 TransformControls(model: model)
             }
         }
@@ -1716,6 +1695,8 @@ struct NativePopup: NSViewRepresentable {
     let options: [PopupOption]
     @Binding var selection: String
     let identifier: String
+    /// Höchstbreite; längere Titel werden in einer Zeile mit „…“ gekürzt.
+    var maxWidth: CGFloat? = nil
     @Environment(\.isEnabled) private var isEnabled
 
     func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }
@@ -1749,6 +1730,22 @@ struct NativePopup: NSViewRepresentable {
         button.isEnabled = isEnabled
         button.toolTip = button.selectedItem?.title
     }
+    /// Mit `maxWidth` nie breiter als erlaubt und angeboten: Lange Titel werden
+    /// in einer Zeile mit „…“ gekürzt (der Tooltip zeigt den ganzen Titel),
+    /// statt dass das Menü in eine zweite Zeile rutscht.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView button: NSPopUpButton, context: Context) -> CGSize? {
+        let ideal = button.intrinsicContentSize
+        guard let maxWidth else { return ideal }
+        // NSPopUpButton ist so breit wie sein längster Eintrag; hier zählt der
+        // gewählte, damit kurze Titel wie die anderen Zeilen rechts stehen.
+        let font = button.font ?? .systemFont(ofSize: NSFont.systemFontSize)
+        let titleWidth = { (title: String) in ceil((title as NSString).size(withAttributes: [.font: font]).width) }
+        let widest = button.itemArray.map { titleWidth($0.title) }.max() ?? 0
+        let selected = titleWidth(button.titleOfSelectedItem ?? "")
+        var width = min(ideal.width - widest + selected, maxWidth)
+        if let offered = proposal.width, offered.isFinite { width = min(width, max(offered, 80)) }
+        return CGSize(width: width, height: ideal.height)
+    }
     final class Coordinator: NSObject {
         var selection: Binding<String>
         var options: [PopupOption] = []
@@ -1756,6 +1753,59 @@ struct NativePopup: NSViewRepresentable {
         @objc func changed(_ sender: NSPopUpButton) {
             if let value = sender.selectedItem?.representedObject as? String { selection.wrappedValue = value }
         }
+    }
+}
+
+/// Wie das Transformieren-Feld in Grafikprogrammen: Bezugspunkt, X/Y, B/H und
+/// rechts die Kette, die das Seitenverhältnis hält.
+struct PositionSizeGrid: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            ReferencePointPicker(x: $model.referenceX, y: $model.referenceY)
+            Grid(alignment: .leading, horizontalSpacing: 4, verticalSpacing: 6) {
+                GridRow {
+                    Text("X").help(tr("Position X des Bezugspunkts"))
+                    UnitField(title: "X", value: Binding(get: { model.referencePoint.0 },
+                        set: { model.project.x_mm = $0 - model.project.width_mm * model.referenceX }), unit: "mm")
+                    Text("B").help(tr("Breite")).padding(.leading, 6)
+                    UnitField(title: tr("Breite"), value: Binding(get: { model.project.width_mm }, set: { model.changeWidth($0) }), unit: "mm")
+                }
+                GridRow {
+                    // Bei Nullpunkt unten links vom unteren Bettrand aus gemessen.
+                    Text("Y").help(tr("Position Y des Bezugspunkts"))
+                    UnitField(title: "Y", value: Binding(get: { model.displayY }, set: { model.setDisplayY($0) }), unit: "mm")
+                    Text("H").help(tr("Höhe")).padding(.leading, 6)
+                    UnitField(title: tr("Höhe"), value: Binding(get: { model.project.height_mm }, set: { model.changeHeight($0) }), unit: "mm")
+                }
+            }
+            Button { model.keepProportions.toggle() } label: {
+                Image(systemName: "link")
+                    .foregroundStyle(model.keepProportions ? Color.accentColor : Color.secondary)
+                    // Gelöst: durchgestrichene Kette (SF Symbols hat kein „link.slash“).
+                    .overlay { if !model.keepProportions { Rectangle().frame(width: 1.5, height: 20).rotationEffect(.degrees(45)).foregroundStyle(.secondary) } }
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.borderless)
+            .help(model.keepProportions ? tr("Seitenverhältnis beibehalten") : tr("Seitenverhältnis frei"))
+            .accessibilityLabel(model.keepProportions ? tr("Seitenverhältnis beibehalten") : tr("Seitenverhältnis frei"))
+        }
+    }
+}
+
+/// Zahlenfeld mit der Einheit im Feld, wie in Grafikprogrammen.
+struct UnitField: View {
+    let title: String
+    @Binding var value: Double
+    let unit: String
+    var width: CGFloat = 76
+    var body: some View {
+        TextField(title, value: $value, format: .number.precision(.fractionLength(0...2)))
+            .textFieldStyle(.roundedBorder).labelsHidden()
+            .frame(width: width)
+            .overlay(alignment: .trailing) {
+                Text(unit).font(.callout).foregroundStyle(.secondary).padding(.trailing, 6).allowsHitTesting(false)
+            }
     }
 }
 
@@ -1801,16 +1851,30 @@ final class BedView: NSView {
     private var originalPosition = NSPoint.zero
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
-    init(model: AppModel) { self.model = model; super.init(frame: .zero) }
+    init(model: AppModel) {
+        self.model = model
+        super.init(frame: .zero)
+        // Seit macOS 14 zeichnen NSViews sonst über ihren Rand, etwa über den Kopfbereich.
+        clipsToBounds = true
+    }
     required init?(coder: NSCoder) { fatalError("Not used") }
 
     private var scale: Double {
-        min(max(1, bounds.width - 42) / model.project.bed_width_mm,
+        // 32 pt links, 20 pt rechts (Platz für die Linealzahl 1000), 30 oben, 12 unten.
+        min(max(1, bounds.width - 52) / model.project.bed_width_mm,
             max(1, bounds.height - 42) / model.project.bed_height_mm) * model.zoom
     }
     private var bed: NSRect {
-        NSRect(x: 32 + model.pan.width, y: 30 + model.pan.height,
-               width: model.project.bed_width_mm * scale, height: model.project.bed_height_mm * scale)
+        let pan = clamped(model.pan)
+        return NSRect(x: 32 + pan.width, y: 30 + pan.height,
+                      width: model.project.bed_width_mm * scale, height: model.project.bed_height_mm * scale)
+    }
+    /// Verschiebung nur innerhalb des Betts: Der Ursprung oben links kommt nicht
+    /// über seine Ausgangslage hinaus, die Ecke unten rechts nicht über den Rand.
+    private func clamped(_ pan: CGSize) -> CGSize {
+        let width = model.project.bed_width_mm * scale, height = model.project.bed_height_mm * scale
+        return CGSize(width: min(0, max(pan.width, bounds.width - 52 - width)),
+                      height: min(0, max(pan.height, bounds.height - 42 - height)))
     }
     /// Zoomt um den Punkt unter dem Mauszeiger.
     private func zoom(by factor: Double, at point: NSPoint) {
@@ -1819,15 +1883,15 @@ final class BedView: NSView {
         model.zoomBy(factor)
         guard model.zoom > 1 else { needsDisplay = true; return }
         let newScale = scale
-        model.pan = CGSize(width: point.x - mm.x * newScale - 32, height: point.y - mm.y * newScale - 30)
+        model.pan = clamped(CGSize(width: point.x - mm.x * newScale - 32, height: point.y - mm.y * newScale - 30))
         needsDisplay = true
     }
     override func scrollWheel(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         if event.hasPreciseScrollingDeltas && !event.modifierFlags.contains(.command) && model.zoom > 1 {
             // Zwei Finger auf dem Trackpad verschieben das vergrößerte Bett.
-            model.pan.width += event.scrollingDeltaX
-            model.pan.height += event.scrollingDeltaY
+            let pan = clamped(model.pan)
+            model.pan = clamped(CGSize(width: pan.width + event.scrollingDeltaX, height: pan.height + event.scrollingDeltaY))
             needsDisplay = true
         } else {
             // Mausrad (oder ⌘ + Scrollen) zoomt.
@@ -2144,16 +2208,6 @@ func runUITest(_ model: AppModel) {
         model.applyPreset()
         guard model.preset != nil, model.project.power_percent == 100,
               abs(model.project.speed_percent - 9) < 0.001 else { throw CoreError("Materialprofil nicht übernommen") }
-        guard let profileButton = popupControl(root, identifier: "profileSetPicker"),
-              profileButton.indexOfItem(withTitle: "Epilog Zing") >= 0 else { throw CoreError("Profil-Dropdown fehlt") }
-        profileButton.selectItem(withTitle: "Epilog Zing")
-        guard let profileAction = profileButton.action,
-              NSApp.sendAction(profileAction, to: profileButton.target, from: profileButton),
-              model.profileSet == 1, model.project.material == "Acryl",
-              model.project.power_percent == 100, abs(model.project.speed_percent - 36) < 0.001
-        else { throw CoreError("Epilog-Profile nicht übernommen") }
-        model.selectProfileSet(0)
-        guard abs(model.project.speed_percent - 9) < 0.001 else { throw CoreError("LTT-Profile nicht wiederhergestellt") }
         model.project.operation = .engrave
         model.applyPreset()
         guard model.project.power_percent == 20, abs(model.project.speed_percent - 100) < 0.01 else { throw CoreError("Gravurprofil nicht übernommen") }
@@ -2240,7 +2294,7 @@ func runUITest(_ model: AppModel) {
         model.jobImage = nil
         model.previewJob()
         model.dirty = false
-        print("Native UI state tests passed: material, thickness, operation, presets, proportional scaling, native save / Rust reload, cut order and legacy files, bitmap vectorization, Rust export, object assignments, mixed job preview and estimate, stale preview invalidation, devices, rotary axis, camera background and calibration, rule mapping, 3D engraving, dithering, parameter sets, material library, profile sets, text, sign, copies, nesting")
+        print("Native UI state tests passed: material, thickness, operation, presets, proportional scaling, native save / Rust reload, cut order and legacy files, bitmap vectorization, Rust export, object assignments, mixed job preview and estimate, stale preview invalidation, devices, rotary axis, camera background and calibration, rule mapping, 3D engraving, dithering, parameter sets, material library, text, sign, copies, nesting")
     } catch {
         fputs("Native UI tests failed: \(error)\n", stderr)
         exit(1)

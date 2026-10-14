@@ -120,7 +120,6 @@
   "FAU wiederherstellen": "Restore FAU",
   "FAU-Bibliothek": "FAU library",
   "FAU-Materialbibliothek wiederhergestellt": "FAU material library restored",
-  "FAU-Materialprofile eines Lasercutters für Material, Stärke und Parameter": "FAU material profiles of a laser cutter for material, thickness and parameters",
   "FAU: grün markieren, rot und blau ignorieren, Rest gravieren": "FAU: mark green, ignore red and blue, engrave rest",
   "FAU: rot schneiden, grün markieren, blau ignorieren, Rest gravieren": "FAU: cut red, mark green, ignore blue, engrave rest",
   "Farbe": "Color",
@@ -335,8 +334,6 @@
   "Positive Winkel drehen im Uhrzeigersinn": "Positive angles rotate clockwise",
   "Profil entfernen": "Remove profile",
   "Profil hinzufügen": "Add profile",
-  "Profile": "Profiles",
-  "Profile eines anderen Lasercutters: Werte vor dem Lasern am LTT prüfen.": "Profiles of another laser cutter: check the values on the LTT before lasering.",
   "Projekt": "Project",
   "Projekt geöffnet": "Project opened",
   "Projekt mit eingebetteter SVG gesichert": "Project saved with embedded SVG",
@@ -865,5 +862,8 @@
   "{count} ungesicherte Stände löschen?": "Delete {count} unsaved states?",
   "Die abgelegten Projekte im Zwischenspeicher werden endgültig gelöscht. Gesicherte Projekte und das geöffnete Projekt bleiben erhalten.": "The projects kept in the cache are deleted permanently. Saved projects and the open project are kept.",
   "Zwischenspeicher geleert ({count} Stände)": "Cache cleared ({count} states)",
-  "Zwischenspeicher nicht geleert: {error}": "Cache not cleared: {error}"
+  "Zwischenspeicher nicht geleert: {error}": "Cache not cleared: {error}",
+  "Seitenverhältnis frei": "Aspect ratio free",
+  "Position X des Bezugspunkts": "X position of the reference point",
+  "Position Y des Bezugspunkts": "Y position of the reference point"
 }

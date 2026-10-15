@@ -898,5 +898,20 @@
   "„Kürzeste Leerfahrten“ gibt es in VisiCut nicht; gespeichert als „innen zuerst“ (Klassisch)": "« Déplacements à vide minimaux » n’existe pas dans VisiCut ; enregistré comme « intérieur d’abord » (Classique)",
   "Nur Umriss": "Contour uniquement",
   "Schneidet nur den Rand der Fläche, die alle Objekte dieses Schritts zusammen bedecken (VisiCut „Kontur“): Überlappungen und innere Linien entfallen, Bilder zählen als Rechteck.": "Ne découpe que le bord de la surface couverte ensemble par tous les objets de cette étape (VisiCut « contour ») : les chevauchements et les lignes intérieures disparaissent, les images comptent comme rectangles.",
-  "Nur Umriss: Die Objekte umschließen keine Fläche": "Contour uniquement : les objets n’entourent aucune surface"
+  "Nur Umriss: Die Objekte umschließen keine Fläche": "Contour uniquement : les objets n’entourent aucune surface",
+  "Kamera-Benutzer": "Utilisateur caméra",
+  "Kamera-Passwort": "Mot de passe caméra",
+  "Kamera-Passwörter wurden nicht exportiert": "Les mots de passe des caméras n’ont pas été exportés",
+  "Optionale HTTP-Anmeldung für die Kamera-URL; wird nur mit Benutzer und Passwort gesendet. Das Passwort liegt im Schlüsselbund und wird beim Exportieren weggelassen.": "Connexion HTTP facultative pour l’URL de la caméra ; envoyée uniquement avec utilisateur et mot de passe. Le mot de passe est conservé dans le trousseau et omis à l’exportation.",
+  "Optionale HTTP-Anmeldung für die Kamera-URL; wird nur mit Benutzer und Passwort gesendet. Das Passwort steht in der Geräteliste und wird beim Exportieren weggelassen.": "Connexion HTTP facultative pour l’URL de la caméra ; envoyée uniquement avec utilisateur et mot de passe. Le mot de passe est enregistré dans la liste des appareils et omis à l’exportation.",
+  "{device}: Kamera-Aktualisierung muss 0 (aus) oder {min} ms bis 1 h sein": "{device} : l’actualisation de la caméra doit être 0 (désactivée) ou de {min} ms à 1 h",
+  "Pause zwischen zwei Kamerabildern, solange das Kamerabild eingeblendet ist (VisiCut „Zeiten (ms) Kamera“), mindestens 50 ms. 0: nur beim Einblenden und mit „Kamerabild aktualisieren“.": "Pause entre deux images de la caméra tant que l’image est affichée (VisiCut « Timings (ms) caméra »), au moins 50 ms. 0 : seulement à l’affichage et avec « Actualiser l'image caméra ».",
+  "Aktualisierung (ms)": "Actualisation (ms)",
+  "Suchen": "Rechercher",
+  "Sucht …": "Recherche …",
+  "Sucht VisiCam-Kameras im lokalen Netz (wie VisiCut)": "Recherche les caméras VisiCam dans le réseau local (comme VisiCut)",
+  "Gefunden": "Trouvées",
+  "Suche VisiCam-Kameras im lokalen Netz …": "Recherche de caméras VisiCam dans le réseau local …",
+  "Keine VisiCam im Netz gefunden": "Aucune VisiCam trouvée sur le réseau",
+  "Kamera gefunden: {url}": "Caméra trouvée : {url}"
 }

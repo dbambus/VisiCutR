@@ -10,6 +10,8 @@ use std::{
 
 const LTT_CLASS: &str = "de.thomas_oster.liblasercut.drivers.LaserToolsTechnicsCutter";
 const STORE_FILE: &str = "devices.json";
+/// Shortest pause between camera pictures (VisiCut's default `cameraTiming`).
+pub const MIN_CAMERA_REFRESH_MS: u32 = 50;
 
 /// Camera correspondences as in VisiCut: bed positions in mm and the pixel
 /// positions where the markers appear in the camera image.
@@ -32,6 +34,14 @@ pub struct LaserDevice {
     /// protocol has no commands for them; they are set at the machine.
     pub job_sent_text: String,
     pub camera_url: String,
+    /// Optional HTTP authentication for the camera URL (VisiCut `URLUser`,
+    /// `URLPassword`); sent only when both are set. The macOS app keeps the
+    /// password in the keychain and stores it empty here.
+    pub camera_user: String,
+    pub camera_password: String,
+    /// Pause in ms between two camera pictures while the picture is shown
+    /// (VisiCut `cameraTiming`); 0: only when shown and on request.
+    pub camera_refresh_ms: u32,
     pub camera_calibration: Option<CameraCalibration>,
     /// Coordinates are shown from the bottom left corner of the bed (VisiCut
     /// `originBottomLeft`): rulers and Y count upwards. Display only; the
@@ -51,6 +61,9 @@ impl Default for LaserDevice {
             rotary_axis: false,
             job_sent_text: String::new(),
             camera_url: String::new(),
+            camera_user: String::new(),
+            camera_password: String::new(),
+            camera_refresh_ms: 0,
             camera_calibration: None,
             origin_bottom_left: false,
             machine: MachineSettings::default(),
@@ -80,6 +93,15 @@ impl LaserDevice {
         self.machine
             .validate()
             .map_err(|e| format!("{}: {e}", self.name))?;
+        if self.camera_refresh_ms != 0
+            && !(MIN_CAMERA_REFRESH_MS..=3_600_000).contains(&self.camera_refresh_ms)
+        {
+            return Err(tr!(
+                "{device}: Kamera-Aktualisierung muss 0 (aus) oder {min} ms bis 1 h sein",
+                device = self.name,
+                min = MIN_CAMERA_REFRESH_MS
+            ));
+        }
         if let Some(c) = &self.camera_calibration {
             if c.reference_points.len() != c.view_points.len()
                 || !(c.reference_points.len() == 2 || c.reference_points.len() >= 4)
@@ -172,6 +194,16 @@ impl DeviceStore {
         })?;
         store.validate()?;
         Ok(store)
+    }
+
+    /// The same list without camera passwords (for the macOS keychain and
+    /// for exports).
+    pub fn without_passwords(&self) -> Self {
+        let mut store = self.clone();
+        for device in &mut store.devices {
+            device.camera_password.clear();
+        }
+        store
     }
 
     pub fn save(&self, dir: &Path) -> Result<(), String> {
@@ -311,6 +343,13 @@ pub fn from_visicut_xml(source: &str) -> Result<LaserDevice, String> {
         rotary_axis: text(cutter, "rotaryAxisSupported").as_deref() == Some("true"),
         job_sent_text: text(root, "jobSentText").unwrap_or_default(),
         camera_url: text(root, "cameraURL").unwrap_or_default(),
+        camera_user: text(root, "URLUser").unwrap_or_default(),
+        camera_password: text(root, "URLPassword").unwrap_or_default(),
+        // VisiCut refreshes every 50 ms at 0; here 0 keeps the picture still.
+        camera_refresh_ms: match number(root, "cameraTiming")? {
+            Some(ms) if ms > 0.0 => (ms.round() as u32).max(MIN_CAMERA_REFRESH_MS),
+            _ => 0,
+        },
         camera_calibration,
         origin_bottom_left: text(root, "originBottomLeft").as_deref() == Some("true"),
         machine,
@@ -367,15 +406,20 @@ fn import_archive(bytes: &[u8]) -> Result<Vec<LaserDevice>, String> {
     Ok(devices)
 }
 
-pub fn export(path: &Path, devices: &[LaserDevice]) -> Result<(), String> {
+/// Writes the devices for sharing; camera passwords stay out. Returns
+/// whether a password was left out.
+pub fn export(path: &Path, devices: &[LaserDevice]) -> Result<bool, String> {
     let store = DeviceStore {
         format_version: 1,
         devices: devices.to_vec(),
         selected: 0,
     };
     store.validate()?;
-    let json = serde_json::to_string_pretty(&store).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())
+    let omitted = devices.iter().any(|d| !d.camera_password.is_empty());
+    let json =
+        serde_json::to_string_pretty(&store.without_passwords()).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())?;
+    Ok(omitted)
 }
 
 /// Lab settings published for VisiCut (LabSettings.java). Only LTT devices
@@ -494,6 +538,38 @@ pub fn download(url: &str) -> Result<Vec<LaserDevice>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn camera_login_and_refresh_come_from_visicut_and_stay_out_of_exports() {
+        let xml = include_str!("../reference/FAU-LTT-iLaser-4000.xml")
+            .replace("<cameraTiming>0</cameraTiming>", "<cameraTiming>500</cameraTiming><URLUser>laser</URLUser><URLPassword>geheim</URLPassword>");
+        let device = from_visicut_xml(&xml).unwrap();
+        assert_eq!(
+            (device.camera_user.as_str(), device.camera_password.as_str()),
+            ("laser", "geheim")
+        );
+        assert_eq!(device.camera_refresh_ms, 500);
+        // VisiCut's 0 (every 50 ms) keeps the picture still here.
+        assert_eq!(LaserDevice::fau().camera_refresh_ms, 0);
+        let path = std::env::temp_dir().join(format!(
+            "visicutrust-devices-{}.vcrdevices",
+            std::process::id()
+        ));
+        assert!(export(&path, std::slice::from_ref(&device)).unwrap());
+        let text = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(!text.contains("geheim") && text.contains("laser"));
+        let mut invalid = device.clone();
+        invalid.camera_refresh_ms = 10;
+        assert!(invalid.validate().is_err());
+        // Older device lists without the fields still load.
+        let mut value = serde_json::to_value(LaserDevice::default()).unwrap();
+        for key in ["camera_user", "camera_password", "camera_refresh_ms"] {
+            value.as_object_mut().unwrap().remove(key);
+        }
+        let old: LaserDevice = serde_json::from_value(value).unwrap();
+        assert_eq!(old.camera_refresh_ms, 0);
+    }
 
     #[test]
     fn fau_reference_device_is_imported_with_camera_and_rotary() {

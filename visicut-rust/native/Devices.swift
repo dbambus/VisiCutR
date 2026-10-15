@@ -1,6 +1,56 @@
 import AppKit
+import Security
 import SwiftUI
 import UniformTypeIdentifiers
+
+/// Kamera-Passwörter im Schlüsselbund statt in der Geräteliste; Konto ist
+/// „Benutzer@Kamera-URL“. Im UI-Test nur im Speicher.
+enum CameraKeychain {
+    private static let service = "io.github.dbambus.visicutrust.camera"
+    private static var memory: [String: String] = [:]
+    private static var inMemory: Bool { CommandLine.arguments.contains("--ui-test") }
+
+    private static func account(_ device: LaserDevice) -> String? {
+        let user = device.camera_user.trimmingCharacters(in: .whitespaces)
+        let url = device.camera_url.trimmingCharacters(in: .whitespaces)
+        return user.isEmpty || url.isEmpty ? nil : "\(user)@\(url)"
+    }
+
+    static func password(for device: LaserDevice) -> String {
+        guard let account = account(device) else { return "" }
+        if inMemory { return memory[account] ?? "" }
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                    kSecAttrAccount as String: account, kSecReturnData as String: true,
+                                    kSecMatchLimit as String: kSecMatchLimitOne]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return "" }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    /// Legt das Passwort des Geräts ab; leer löscht den Eintrag.
+    static func store(_ device: LaserDevice) {
+        guard let account = account(device) else { return }
+        let password = device.camera_password ?? ""
+        if inMemory { memory[account] = password.isEmpty ? nil : password; return }
+        let key: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                  kSecAttrAccount as String: account]
+        SecItemDelete(key as CFDictionary)
+        guard !password.isEmpty else { return }
+        var item = key
+        item[kSecValueData as String] = Data(password.utf8)
+        item[kSecAttrLabel as String] = "VisiCutRust Kamera"
+        SecItemAdd(item as CFDictionary, nil)
+    }
+
+    /// Ergänzt die Passwörter aus dem Schlüsselbund (die Geräteliste speichert sie leer).
+    static func filled(_ store: DeviceStore) -> DeviceStore {
+        var store = store
+        for index in store.devices.indices where (store.devices[index].camera_password ?? "").isEmpty {
+            store.devices[index].camera_password = password(for: store.devices[index])
+        }
+        return store
+    }
+}
 
 struct CameraCalibration: Codable, Equatable {
     var reference_points: [[Double]]
@@ -15,6 +65,12 @@ struct LaserDevice: Codable, Equatable {
     var rotary_axis: Bool
     var job_sent_text: String
     var camera_url: String
+    /// Optionale HTTP-Anmeldung der Kamera (VisiCut URLUser/URLPassword); das
+    /// Passwort liegt im Schlüsselbund, in der Geräteliste bleibt es leer.
+    var camera_user: String
+    var camera_password: String?
+    /// Pause zwischen zwei Kamerabildern in ms (VisiCut cameraTiming); 0 = aus.
+    var camera_refresh_ms: Int
     var camera_calibration: CameraCalibration?
     /// VisiCut `originBottomLeft`: Lineale und Y zählen von unten links; nur Anzeige.
     var origin_bottom_left: Bool = false
@@ -47,6 +103,8 @@ struct DeviceList: Decodable { let store: DeviceStore; let labs: [LabSetting]; l
 struct DeviceImport: Decodable { let store: DeviceStore; let imported: Int }
 struct CameraPicture: Decodable { let png: [UInt8]; let width: Int; let height: Int }
 struct CameraBackground: Decodable { let png: [UInt8] }
+struct DeviceExport: Decodable { let passwords_omitted: Bool }
+struct CameraList: Decodable { let urls: [String] }
 
 extension AppModel {
     var device: LaserDevice { devices.devices[devices.selected] }
@@ -83,9 +141,11 @@ extension AppModel {
     @discardableResult
     func saveDevices(_ store: DeviceStore) -> Bool {
         do {
-            _ = try RustCore.call("save_devices", values: ["store": RustCore.json(store)])
+            store.devices.forEach(CameraKeychain.store)
+            _ = try RustCore.call("save_devices", values: ["store": RustCore.json(store), "keychain": true])
             let old = device, new = store.devices[store.selected]
             let cameraChanged = old.camera_url != new.camera_url || old.camera_calibration != new.camera_calibration
+                || old.camera_user != new.camera_user || old.camera_password != new.camera_password
             devices = store
             applyDevice()
             if cameraChanged { cameraImage = nil; if showCamera { refreshCamera() } }
@@ -121,8 +181,11 @@ extension AppModel {
         do {
             var request = values
             request["store"] = try RustCore.json(devices)
+            request["keychain"] = true
             let result: DeviceImport = try RustCore.decode(action, values: request)
-            devices = result.store
+            // Passwörter aus VisiCut-Dateien wandern in den Schlüsselbund.
+            result.store.devices.forEach(CameraKeychain.store)
+            devices = CameraKeychain.filled(result.store)
             status = tr("{count} LTT iLaser 4000 importiert", ["count": result.imported])
             return Array(result.store.devices.suffix(result.imported))
         } catch {
@@ -138,30 +201,49 @@ extension AppModel {
         panel.nameFieldStringValue = "Lasercutter.vcrdevices"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            _ = try RustCore.call("export_devices", path: url.path, values: ["devices": RustCore.json(devices)])
+            let result: DeviceExport = try RustCore.decode("export_devices", path: url.path, values: ["devices": RustCore.json(devices)])
             status = tr("{count} Lasercutter exportiert", ["count": devices.count])
+                + (result.passwords_omitted ? " · " + tr("Kamera-Passwörter wurden nicht exportiert") : "")
         } catch { self.error = error.localizedDescription }
     }
 
+    /// Lädt das Kamerabild. Mit „Kamera-Aktualisierung“ folgt nach jedem Bild
+    /// die eingestellte Pause und ein neues, solange es eingeblendet ist; nach
+    /// Fehlern wird länger gewartet (wie VisiCuts RefreshCameraThread).
     func refreshCamera() {
         guard !cameraLoading else { return }
         cameraLoading = true
-        status = tr("Kamerabild wird geladen …")
+        let live = device.camera_refresh_ms > 0
+        if !live || cameraErrors > 0 || cameraImage == nil { status = tr("Kamerabild wird geladen …") }
         let device = self.device, project = self.project
+        cameraGeneration += 1
+        let generation = cameraGeneration
         DispatchQueue.global(qos: .userInitiated).async {
             let result = Result { () throws -> CameraBackground in
                 try RustCore.decode("camera_background", project: project, values: ["device": RustCore.json(device)])
             }
             DispatchQueue.main.async {
                 self.cameraLoading = false
+                var pause = Double(device.camera_refresh_ms) / 1000
                 switch result {
                 case .success(let background):
                     self.cameraImage = NSImage(data: Data(background.png))
-                    self.status = tr("Kamerabild aktualisiert")
+                    if !live || self.cameraErrors > 0 { self.status = tr("Kamerabild aktualisiert") }
+                    self.cameraErrors = 0
+                case .failure(let error) where live && self.showCamera:
+                    self.cameraErrors += 1
+                    pause += 5 * Double(max(self.cameraErrors, 2))
+                    self.status = tr("Kamerabild: {error}", ["error": error.localizedDescription])
                 case .failure(let error):
                     self.showCamera = false
                     self.error = tr("Kamerabild: {error}", ["error": error.localizedDescription])
                     self.status = tr("Kamerabild nicht verfügbar.")
+                }
+                guard live else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + pause) {
+                    guard self.showCamera, generation == self.cameraGeneration,
+                          self.device.camera_refresh_ms > 0 else { return }
+                    self.refreshCamera()
                 }
             }
         }
@@ -169,7 +251,8 @@ extension AppModel {
 
     func toggleCamera() {
         showCamera.toggle()
-        if showCamera && cameraImage == nil { refreshCamera() }
+        cameraErrors = 0
+        if showCamera && (cameraImage == nil || device.camera_refresh_ms > 0) { refreshCamera() }
     }
 
     /// Opens VisiCut's calibration marks as a marking job on the whole bed.
@@ -204,11 +287,33 @@ struct DeviceSettings: View {
     @State private var editing: Int
     @State private var calibrating = false
     @State private var shiftTest = false
+    /// „Suchen“: läuft, gefundene URLs zur Auswahl, Meldung ohne Fund.
+    @State private var searching = false
+    @State private var found: [String] = []
+    @State private var searchMessage: String?
 
     init(model: AppModel) {
         self.model = model
         _draft = State(initialValue: model.devices)
         _editing = State(initialValue: model.devices.selected)
+    }
+
+    /// VisiCam-Suche wie in VisiCut: eine Kamera wird übernommen, mehrere zur Wahl.
+    private func searchCameras() {
+        searching = true; found = []; searchMessage = tr("Suche VisiCam-Kameras im lokalen Netz …")
+        let index = min(editing, draft.devices.count - 1)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let urls = (try? RustCore.decode("find_cameras") as CameraList)?.urls ?? []
+            DispatchQueue.main.async {
+                searching = false
+                searchMessage = nil
+                switch urls.count {
+                case 0: searchMessage = tr("Keine VisiCam im Netz gefunden")
+                case 1: if draft.devices.indices.contains(index) { draft.devices[index].camera_url = urls[0] }
+                default: found = urls
+                }
+            }
+        }
     }
 
     private var current: Binding<LaserDevice> {
@@ -249,7 +354,37 @@ struct DeviceSettings: View {
                             .help(tr("Lineale und Y-Koordinate zählen von unten links wie am Gerät; ändert den Auftrag nicht"))
                     }
                     Section(tr("Kamera")) {
-                        TextField(tr("Kamera-URL"), text: current.camera_url, prompt: Text("http://…/visicam.jpg"))
+                        // Aufbau wie im VisiCut-Dialog: URL mit „Suchen“, Anmeldung, Zeiten.
+                        LabeledContent(tr("Kamera-URL")) {
+                            HStack {
+                                TextField("", text: current.camera_url, prompt: Text("http://…/visicam.jpg")).labelsHidden()
+                                Button(searching ? tr("Sucht …") : tr("Suchen")) { searchCameras() }
+                                    .disabled(searching)
+                                    .help(tr("Sucht VisiCam-Kameras im lokalen Netz (wie VisiCut)"))
+                            }
+                        }
+                        if !found.isEmpty {
+                            LabeledContent(tr("Gefunden")) {
+                                VStack(alignment: .trailing) {
+                                    ForEach(found, id: \.self) { url in
+                                        Button(url) { current.wrappedValue.camera_url = url; found = [] }
+                                    }
+                                }
+                            }
+                        }
+                        if let searchMessage {
+                            Text(searchMessage).font(.caption).foregroundStyle(.secondary)
+                        }
+                        TextField(tr("Kamera-Benutzer"), text: current.camera_user)
+                            .help(tr("Optionale HTTP-Anmeldung für die Kamera-URL; wird nur mit Benutzer und Passwort gesendet. Das Passwort liegt im Schlüsselbund und wird beim Exportieren weggelassen."))
+                        SecureField(tr("Kamera-Passwort"), text: Binding(get: { current.wrappedValue.camera_password ?? "" },
+                                                                         set: { current.wrappedValue.camera_password = $0 }))
+                        TextField(tr("Aktualisierung (ms)"), value: Binding(
+                            get: { current.wrappedValue.camera_refresh_ms },
+                            // 1 … 49 ms gibt es nicht; wie in VisiCut gelten mindestens 50 ms.
+                            set: { current.wrappedValue.camera_refresh_ms = $0 <= 0 ? 0 : min(3_600_000, max(50, $0)) }),
+                                  format: .number.grouping(.never), prompt: Text("0"))
+                            .help(tr("Pause zwischen zwei Kamerabildern, solange das Kamerabild eingeblendet ist (VisiCut „Zeiten (ms) Kamera“), mindestens 50 ms. 0: nur beim Einblenden und mit „Kamerabild aktualisieren“."))
                         LabeledContent(tr("Kalibrierung")) {
                             HStack {
                                 Text(current.wrappedValue.camera_calibration.map { tr("{count} Punkte", ["count": $0.reference_points.count]) } ?? tr("Nicht kalibriert"))

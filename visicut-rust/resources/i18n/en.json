@@ -898,5 +898,20 @@
   "„Kürzeste Leerfahrten“ gibt es in VisiCut nicht; gespeichert als „innen zuerst“ (Klassisch)": "“Shortest travel” does not exist in VisiCut; saved as “inner first” (Legacy)",
   "Nur Umriss": "Outline only",
   "Schneidet nur den Rand der Fläche, die alle Objekte dieses Schritts zusammen bedecken (VisiCut „Kontur“): Überlappungen und innere Linien entfallen, Bilder zählen als Rechteck.": "Cuts only the border of the area all objects of this step cover together (VisiCut “outline”): overlaps and inner lines are dropped, images count as rectangles.",
-  "Nur Umriss: Die Objekte umschließen keine Fläche": "Outline only: the objects enclose no area"
+  "Nur Umriss: Die Objekte umschließen keine Fläche": "Outline only: the objects enclose no area",
+  "Kamera-Benutzer": "Camera user",
+  "Kamera-Passwort": "Camera password",
+  "Kamera-Passwörter wurden nicht exportiert": "Camera passwords were not exported",
+  "Optionale HTTP-Anmeldung für die Kamera-URL; wird nur mit Benutzer und Passwort gesendet. Das Passwort liegt im Schlüsselbund und wird beim Exportieren weggelassen.": "Optional HTTP login for the camera URL; sent only with user and password. The password is kept in the keychain and left out when exporting.",
+  "Optionale HTTP-Anmeldung für die Kamera-URL; wird nur mit Benutzer und Passwort gesendet. Das Passwort steht in der Geräteliste und wird beim Exportieren weggelassen.": "Optional HTTP login for the camera URL; sent only with user and password. The password is stored in the device list and left out when exporting.",
+  "{device}: Kamera-Aktualisierung muss 0 (aus) oder {min} ms bis 1 h sein": "{device}: camera refresh must be 0 (off) or {min} ms to 1 h",
+  "Pause zwischen zwei Kamerabildern, solange das Kamerabild eingeblendet ist (VisiCut „Zeiten (ms) Kamera“), mindestens 50 ms. 0: nur beim Einblenden und mit „Kamerabild aktualisieren“.": "Pause between two camera pictures while the camera picture is shown (VisiCut “Timings (ms) camera”), at least 50 ms. 0: only when shown and with “Refresh camera image”.",
+  "Aktualisierung (ms)": "Refresh (ms)",
+  "Suchen": "Search",
+  "Sucht …": "Searching …",
+  "Sucht VisiCam-Kameras im lokalen Netz (wie VisiCut)": "Searches for VisiCam cameras in the local network (as in VisiCut)",
+  "Gefunden": "Found",
+  "Suche VisiCam-Kameras im lokalen Netz …": "Searching for VisiCam cameras in the local network …",
+  "Keine VisiCam im Netz gefunden": "No VisiCam found in the network",
+  "Kamera gefunden: {url}": "Camera found: {url}"
 }

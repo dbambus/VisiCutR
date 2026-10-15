@@ -357,6 +357,17 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
 - **Kamera** (⌘K): Das Foto der Kamera-URL wird über die Homographie der
   Kalibrierung entzerrt und unter das Arbeitsbett gelegt (⇧⌘K aktualisiert).
   Das FAU-Kamerabild ist nur im FAU-Netz erreichbar.
+- **Kamera-Einstellungen** (Einstellungen → Lasercutter → Kamera, aufgebaut
+  wie VisiCuts Dialog): **Suchen** neben der Kamera-URL findet VisiCam-Kameras
+  im lokalen Netz (UDP-Rundsendung „VisiCamDiscover“ an Port 8888, drei
+  Sekunden); eine wird direkt übernommen, mehrere stehen zur Wahl. Benutzer und
+  Passwort gehen als HTTP-Basic-Anmeldung mit, nur wenn beides gesetzt ist.
+  Unter macOS liegt das Passwort im Schlüsselbund, unter Windows und Linux in
+  der Geräteliste; Exporte lassen es immer weg. **Aktualisierung (ms)** (VisiCut
+  „Zeiten (ms) Kamera“) holt bei eingeblendetem Bild nach jeder Pause (mindestens
+  50 ms) ein neues, 0 lädt nur beim Einblenden und mit ⇧⌘K; nach Fehlern
+  mit wachsendem Abstand ab 10 s. VisiCut-Geräte mit Zeiten 0 (dort 50 ms)
+  bleiben hier beim Einzelbild.
 - **Kalibrieren**: Im Kalibrierdialog die Kalibrierseite als Projekt öffnen
   und auf Restmaterial markieren (je Marker ein 10-mm-Kreuz mit
   Zählstrichen wie in VisiCut). Danach ein Foto aufnehmen, die nummerierten

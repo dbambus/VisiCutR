@@ -445,6 +445,9 @@ final class AppModel: ObservableObject {
     @Published var showCamera = false
     @Published var cameraImage: NSImage?
     @Published var cameraLoading = false
+    /// Laufende Kamera-Aktualisierung: Fehler in Folge und Zähler gegen doppelte Schleifen.
+    var cameraErrors = 0
+    var cameraGeneration = 0
     let labs: [LabSetting]
     @Published var materials: [Material]
     @Published var materialsCustom = false
@@ -464,7 +467,7 @@ final class AppModel: ObservableObject {
         do {
             let initial: ProjectResponse = try RustCore.decode("default")
             let list: DeviceList = try RustCore.decode("devices")
-            devices = list.store
+            devices = CameraKeychain.filled(list.store)
             labs = list.labs
             project = initial.project
             let catalog: MaterialCatalog = try RustCore.decode("materials")
@@ -2680,6 +2683,8 @@ func testDevicesRotaryAndCamera(_ model: AppModel) throws {
     defer { try? FileManager.default.removeItem(at: camera) }
     second.camera_url = camera.path
     second.camera_calibration = CameraCalibration(reference_points: [[0, 0], [1000, 600]], view_points: [[0, 0], [100, 60]])
+    // Kamera-Anmeldung: Passwort nur im (Test-)Schlüsselbund, nicht in der Geräteliste.
+    second.camera_user = "laser"; second.camera_password = "geheim"; second.camera_refresh_ms = 500
     store.devices.append(second)
     guard model.saveDevices(store) else { throw CoreError("Geräteliste nicht gespeichert") }
     model.project.rotary_axis = true
@@ -2687,7 +2692,13 @@ func testDevicesRotaryAndCamera(_ model: AppModel) throws {
     guard model.project.hostname == "127.0.0.1", model.project.port == 9101, !model.project.rotary_axis
     else { throw CoreError("Gerätewechsel übernimmt Ziel oder Drehachse nicht") }
     let reloaded: DeviceList = try RustCore.decode("devices")
-    guard reloaded.store == model.devices, reloaded.store.selected == 1 else { throw CoreError("Geräteliste nicht dauerhaft gespeichert") }
+    guard CameraKeychain.filled(reloaded.store) == model.devices, reloaded.store.selected == 1 else { throw CoreError("Geräteliste nicht dauerhaft gespeichert") }
+    let configDir = ProcessInfo.processInfo.environment["VISICUT_RUST_CONFIG_DIR"].map { URL(fileURLWithPath: $0) }
+    if let file = configDir?.appendingPathComponent("devices.json") {
+        let saved = try String(contentsOf: file, encoding: .utf8)
+        guard !saved.contains("geheim"), saved.contains("laser"), model.device.camera_password == "geheim",
+              model.device.camera_refresh_ms == 500 else { throw CoreError("Kamera-Passwort landet in der Geräteliste") }
+    }
 
     let background: CameraBackground = try RustCore.decode("camera_background", project: model.project,
         values: ["device": RustCore.json(model.device)])
@@ -2921,7 +2932,7 @@ func runUITest(_ model: AppModel) {
         model.jobImage = nil
         model.previewJob()
         model.dirty = false
-        print("Native UI state tests passed: material, thickness, operation, presets, proportional scaling, handles, PLF export, native save / Rust reload, cut order and legacy files, bitmap vectorization, Rust export, object assignments, mixed job preview and estimate, stale preview invalidation, devices, rotary axis, camera background and calibration, rule mapping, 3D engraving, dithering, parameter sets, material library, text, sign, copies, nesting")
+        print("Native UI state tests passed: material, thickness, operation, presets, proportional scaling, handles, PLF export, camera login, native save / Rust reload, cut order and legacy files, bitmap vectorization, Rust export, object assignments, mixed job preview and estimate, stale preview invalidation, devices, rotary axis, camera background and calibration, rule mapping, 3D engraving, dithering, parameter sets, material library, text, sign, copies, nesting")
     } catch {
         fputs("Native UI tests failed: \(error)\n", stderr)
         exit(1)

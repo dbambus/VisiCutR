@@ -3,6 +3,17 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## 0.18.0 – 15.10.2026
+
+- **Kamera wie in VisiCut** (Einstellungen → Lasercutter → Kamera, egui und
+  macOS): **Suchen** findet VisiCam-Kameras im lokalen Netz; **Kamera-Benutzer**
+  und **Kamera-Passwort** werden als HTTP-Basic-Anmeldung gesendet;
+  **Aktualisierung (ms)** holt bei eingeblendetem Kamerabild laufend neue
+  Bilder (mindestens 50 ms, nach Fehlern mit wachsendem Abstand).
+- **Passwörter geschützt**: unter macOS im Schlüsselbund statt in der
+  Geräteliste; Exporte lassen sie immer weg. VisiCut-Geräte bringen Benutzer,
+  Passwort und Zeiten beim Import mit.
+
 ## 0.17.0 – 15.10.2026
 
 - **Weitere Schnittreihenfolgen aus VisiCut** (Menü **Job →

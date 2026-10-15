@@ -898,5 +898,20 @@
   "„Kürzeste Leerfahrten“ gibt es in VisiCut nicht; gespeichert als „innen zuerst“ (Klassisch)": "«Spostamenti a vuoto minimi» non esiste in VisiCut; salvato come «prima l’interno» (Classico)",
   "Nur Umriss": "Solo contorno",
   "Schneidet nur den Rand der Fläche, die alle Objekte dieses Schritts zusammen bedecken (VisiCut „Kontur“): Überlappungen und innere Linien entfallen, Bilder zählen als Rechteck.": "Taglia solo il bordo dell’area coperta insieme da tutti gli oggetti di questo passaggio (VisiCut «contorno»): sovrapposizioni e linee interne scompaiono, le immagini contano come rettangoli.",
-  "Nur Umriss: Die Objekte umschließen keine Fläche": "Solo contorno: gli oggetti non racchiudono alcuna area"
+  "Nur Umriss: Die Objekte umschließen keine Fläche": "Solo contorno: gli oggetti non racchiudono alcuna area",
+  "Kamera-Benutzer": "Utente telecamera",
+  "Kamera-Passwort": "Password telecamera",
+  "Kamera-Passwörter wurden nicht exportiert": "Le password delle telecamere non sono state esportate",
+  "Optionale HTTP-Anmeldung für die Kamera-URL; wird nur mit Benutzer und Passwort gesendet. Das Passwort liegt im Schlüsselbund und wird beim Exportieren weggelassen.": "Accesso HTTP facoltativo per l’URL della telecamera; inviato solo con utente e password. La password resta nel portachiavi e viene omessa nell’esportazione.",
+  "Optionale HTTP-Anmeldung für die Kamera-URL; wird nur mit Benutzer und Passwort gesendet. Das Passwort steht in der Geräteliste und wird beim Exportieren weggelassen.": "Accesso HTTP facoltativo per l’URL della telecamera; inviato solo con utente e password. La password è salvata nell’elenco dei dispositivi e omessa nell’esportazione.",
+  "{device}: Kamera-Aktualisierung muss 0 (aus) oder {min} ms bis 1 h sein": "{device}: l’aggiornamento della telecamera deve essere 0 (spento) o da {min} ms a 1 h",
+  "Pause zwischen zwei Kamerabildern, solange das Kamerabild eingeblendet ist (VisiCut „Zeiten (ms) Kamera“), mindestens 50 ms. 0: nur beim Einblenden und mit „Kamerabild aktualisieren“.": "Pausa tra due immagini della camera finché l’immagine è visibile (VisiCut «Timings (ms) camera»), almeno 50 ms. 0: solo alla visualizzazione e con «Aggiorna immagine della camera».",
+  "Aktualisierung (ms)": "Aggiornamento (ms)",
+  "Suchen": "Cerca",
+  "Sucht …": "Ricerca …",
+  "Sucht VisiCam-Kameras im lokalen Netz (wie VisiCut)": "Cerca telecamere VisiCam nella rete locale (come VisiCut)",
+  "Gefunden": "Trovate",
+  "Suche VisiCam-Kameras im lokalen Netz …": "Ricerca di telecamere VisiCam nella rete locale …",
+  "Keine VisiCam im Netz gefunden": "Nessuna VisiCam trovata nella rete",
+  "Kamera gefunden: {url}": "Telecamera trovata: {url}"
 }

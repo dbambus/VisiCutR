@@ -8,14 +8,79 @@ use std::{io::Read, time::Duration};
 
 pub type Matrix = [[f64; 3]; 3];
 
+/// Port and request of VisiCam's network discovery (VisiCut
+/// `Helper.findVisiCamInstances`).
+const DISCOVERY_PORT: u16 = 8888;
+const DISCOVERY_REQUEST: &[u8] = b"VisiCamDiscover";
+
+/// Searches the local network for VisiCam cameras like VisiCut's „Suchen“:
+/// a UDP broadcast, then every answer starting with `http` within three
+/// seconds, without duplicates.
+pub fn discover() -> Vec<String> {
+    let target = std::net::SocketAddr::from(([255, 255, 255, 255], DISCOVERY_PORT));
+    discover_at(&[target], Duration::from_secs(3))
+}
+
+fn discover_at(targets: &[std::net::SocketAddr], wait: Duration) -> Vec<String> {
+    let Ok(socket) = std::net::UdpSocket::bind(("0.0.0.0", 0)) else {
+        return Vec::new();
+    };
+    let _ = socket.set_broadcast(true);
+    for target in targets {
+        let _ = socket.send_to(DISCOVERY_REQUEST, target);
+    }
+    let deadline = std::time::Instant::now() + wait;
+    let mut found = Vec::new();
+    let mut buffer = [0u8; 15000];
+    while let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) {
+        if left.is_zero() || socket.set_read_timeout(Some(left)).is_err() {
+            break;
+        }
+        let Ok((length, _)) = socket.recv_from(&mut buffer) else {
+            break;
+        };
+        let message = String::from_utf8_lossy(&buffer[..length])
+            .trim_matches(|c: char| c.is_whitespace() || c == '\0')
+            .to_string();
+        if message.starts_with("http") && !found.contains(&message) {
+            found.push(message);
+        }
+    }
+    found
+}
+
 /// Fetches http(s) URLs or reads local files (`file://` or a plain path).
 pub fn fetch(url: &str, limit: u64) -> Result<Vec<u8>, String> {
+    fetch_with(url, limit, None)
+}
+
+/// HTTP Basic header value, as VisiCut sends it: only with user and password.
+fn basic_auth(user: &str, password: &str) -> Option<String> {
+    use base64::Engine;
+    (!user.is_empty() && !password.is_empty()).then(|| {
+        format!(
+            "Basic {}",
+            base64::engine::general_purpose::STANDARD.encode(format!("{user}:{password}"))
+        )
+    })
+}
+
+/// [`fetch`] with optional HTTP authentication `(user, password)`.
+pub fn fetch_with(
+    url: &str,
+    limit: u64,
+    credentials: Option<(&str, &str)>,
+) -> Result<Vec<u8>, String> {
     if url.starts_with("http://") || url.starts_with("https://") {
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(20)))
             .build()
             .into();
-        let mut response = agent.get(url).call().map_err(|e| format!("{url}: {e}"))?;
+        let mut request = agent.get(url);
+        if let Some(header) = credentials.and_then(|(user, password)| basic_auth(user, password)) {
+            request = request.header("Authorization", header);
+        }
+        let mut response = request.call().map_err(|e| format!("{url}: {e}"))?;
         return response
             .body_mut()
             .with_config()
@@ -257,7 +322,11 @@ pub fn capture(device: &LaserDevice) -> Result<RgbaImage, String> {
             device = device.name
         ));
     }
-    decode(&fetch(device.camera_url.trim(), 30 * 1024 * 1024)?)
+    decode(&fetch_with(
+        device.camera_url.trim(),
+        30 * 1024 * 1024,
+        Some((&device.camera_user, &device.camera_password)),
+    )?)
 }
 
 /// Camera picture projected onto the bed.
@@ -399,6 +468,81 @@ mod tests {
         };
         let h = homography(&legacy).unwrap();
         assert_eq!(transform(&h, [500.0, 300.0]), [250.0, 150.0]);
+    }
+
+    #[test]
+    fn discovery_collects_visicam_answers() {
+        // Two fake cameras on loopback answer the request; one sends junk.
+        let mut targets = Vec::new();
+        let mut threads = Vec::new();
+        for answer in [
+            "http://192.168.0.5:8080/image\0\0",
+            "kein Link",
+            "http://192.168.0.5:8080/image",
+        ] {
+            let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+            targets.push(socket.local_addr().unwrap());
+            threads.push(std::thread::spawn(move || {
+                let mut buffer = [0u8; 64];
+                let (length, from) = socket.recv_from(&mut buffer).unwrap();
+                assert_eq!(&buffer[..length], DISCOVERY_REQUEST);
+                socket.send_to(answer.as_bytes(), from).unwrap();
+            }));
+        }
+        let found = discover_at(&targets, Duration::from_millis(500));
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(found, vec!["http://192.168.0.5:8080/image".to_string()]);
+    }
+
+    #[test]
+    fn camera_login_is_sent_as_http_basic_like_visicut() {
+        assert_eq!(basic_auth("", "geheim"), None);
+        assert_eq!(basic_auth("laser", ""), None);
+        // A one-shot HTTP server that answers only with the right header.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/bild.png", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            use std::io::{BufRead, Write};
+            let mut answers = Vec::new();
+            for _ in 0..2 {
+                let (stream, _) = listener.accept().unwrap();
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut authorized = false;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line.trim().is_empty() {
+                        break;
+                    }
+                    let lower = line.to_ascii_lowercase();
+                    authorized |= lower.starts_with("authorization: basic bgfzzxi6z2vozwlt");
+                }
+                answers.push(authorized);
+                let body = if authorized { &b"ok"[..] } else { &b"no"[..] };
+                let status = if authorized {
+                    "200 OK"
+                } else {
+                    "401 Unauthorized"
+                };
+                let mut stream = stream;
+                write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                )
+                .unwrap();
+                stream.write_all(body).unwrap();
+            }
+            answers
+        });
+        assert!(fetch_with(&url, 1024, None).is_err());
+        assert_eq!(
+            fetch_with(&url, 1024, Some(("laser", "geheim"))).unwrap(),
+            b"ok"
+        );
+        assert_eq!(server.join().unwrap(), vec![false, true]);
     }
 
     #[test]

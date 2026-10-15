@@ -11,6 +11,19 @@ use visicut_core::{
 };
 use visicut_core::{i18n::tr, tr};
 
+/// Tooltip der Kamera-Anmeldung.
+fn camera_login_help() -> &'static str {
+    tr(
+        "Optionale HTTP-Anmeldung für die Kamera-URL; wird nur mit Benutzer und Passwort gesendet. Das Passwort steht in der Geräteliste und wird beim Exportieren weggelassen.",
+    )
+}
+/// Tooltip der Kamera-Aktualisierung.
+fn camera_refresh_help() -> &'static str {
+    tr(
+        "Pause zwischen zwei Kamerabildern, solange das Kamerabild eingeblendet ist (VisiCut „Zeiten (ms) Kamera“), mindestens 50 ms. 0: nur beim Einblenden und mit „Kamerabild aktualisieren“.",
+    )
+}
+
 type Pending = Receiver<Result<image::RgbaImage, String>>;
 type Download = Receiver<Result<Vec<LaserDevice>, String>>;
 
@@ -81,6 +94,12 @@ pub struct DeviceUi {
     show_camera: bool,
     camera: Option<egui::TextureHandle>,
     camera_loading: Option<Pending>,
+    /// Laufende Kamera-Aktualisierung: nächstes Bild und Fehler in Folge.
+    camera_next: Option<std::time::Instant>,
+    camera_errors: u32,
+    /// „Suchen“: laufende VisiCam-Suche und gefundene URLs zur Auswahl.
+    camera_search: Option<Receiver<Vec<String>>>,
+    camera_found: Vec<String>,
     calibration: Option<Calibration>,
     shift_test: Option<ShiftTest>,
     /// Laufender Download von Labor-Einstellungen (Laborname, Ergebnis).
@@ -102,6 +121,10 @@ impl DeviceUi {
             show_camera: false,
             camera: None,
             camera_loading: None,
+            camera_next: None,
+            camera_errors: 0,
+            camera_search: None,
+            camera_found: Vec::new(),
             calibration: None,
             shift_test: None,
             download: None,
@@ -160,7 +183,8 @@ impl DeviceUi {
             return;
         }
         self.show_camera = !self.show_camera;
-        if self.show_camera && self.camera.is_none() {
+        self.camera_errors = 0;
+        if self.show_camera && (self.camera.is_none() || self.device().camera_refresh_ms > 0) {
             self.refresh_camera(project);
         }
     }
@@ -172,7 +196,10 @@ impl DeviceUi {
         }
         let camera_changed = {
             let (old, new) = (self.device(), &store.devices[store.selected]);
-            old.camera_url != new.camera_url || old.camera_calibration != new.camera_calibration
+            old.camera_url != new.camera_url
+                || old.camera_calibration != new.camera_calibration
+                || old.camera_user != new.camera_user
+                || old.camera_password != new.camera_password
         };
         self.store = store;
         if camera_changed {
@@ -256,16 +283,38 @@ impl DeviceUi {
         project: &mut Project,
         status: &mut String,
     ) -> Option<Action> {
+        // Laufende Aktualisierung wie VisiCuts RefreshCameraThread: nach jedem
+        // Bild die eingestellte Pause, nach Fehlern länger (ab 10 s).
+        let refresh = self.device().camera_refresh_ms;
+        let pause = std::time::Duration::from_millis(u64::from(refresh));
         match poll(&mut self.camera_loading, ctx) {
             Some(Ok(image)) => {
                 self.camera = Some(texture(ctx, "Kamera", &image));
-                *status = tr("Kamerabild aktualisiert").into();
+                if refresh == 0 || self.camera_errors > 0 {
+                    *status = tr("Kamerabild aktualisiert").into();
+                }
+                self.camera_errors = 0;
+                self.camera_next = Some(std::time::Instant::now() + pause);
+            }
+            Some(Err(e)) if refresh > 0 && self.show_camera => {
+                self.camera_errors += 1;
+                let wait = std::time::Duration::from_secs(5 * u64::from(self.camera_errors.max(2)));
+                self.camera_next = Some(std::time::Instant::now() + wait + pause);
+                *status = tr!("Kamerabild: {error}", error = e);
             }
             Some(Err(e)) => {
                 self.show_camera = false;
                 *status = tr!("Kamerabild: {error}", error = e);
             }
             None => {}
+        }
+        if refresh > 0 && self.show_camera && self.camera_loading.is_none() {
+            match self.camera_next {
+                Some(next) if next > std::time::Instant::now() => {
+                    ctx.request_repaint_after(next - std::time::Instant::now());
+                }
+                _ => self.refresh_camera(project),
+            }
         }
         self.poll_download(ctx, status);
         let mut action = None;
@@ -385,6 +434,29 @@ impl DeviceUi {
         let mut shift_test = false;
         let mut download = None;
         let downloading = self.download.as_ref().map(|(name, _)| name.clone());
+        // Ergebnis von „Suchen“: eine Kamera wird übernommen, mehrere zur Wahl.
+        if let Some(receiver) = &self.camera_search {
+            match receiver.try_recv() {
+                Ok(urls) => {
+                    self.camera_search = None;
+                    match urls.as_slice() {
+                        [] => *status = tr("Keine VisiCam im Netz gefunden").into(),
+                        [url] => {
+                            draft.devices[editing].camera_url = url.clone();
+                            *status = tr!("Kamera gefunden: {url}", url = url);
+                        }
+                        _ => self.camera_found = urls,
+                    }
+                }
+                Err(TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(100))
+                }
+                Err(TryRecvError::Disconnected) => self.camera_search = None,
+            }
+        }
+        let searching = self.camera_search.is_some();
+        let mut search = false;
+        let found = std::mem::take(&mut self.camera_found);
         egui::Window::new(tr("Lasercutter verwalten"))
             .id(egui::Id::new("device_manager"))
             .open(&mut open)
@@ -436,7 +508,6 @@ impl DeviceUi {
                                 (tr("Name"), &mut device.name),
                                 (tr("Beschreibung"), &mut device.description),
                                 (tr("Hostname / IP"), &mut device.hostname),
-                                (tr("Kamera-URL"), &mut device.camera_url),
                             ] {
                                 ui.label(label);
                                 ui.text_edit_singleline(value);
@@ -457,6 +528,64 @@ impl DeviceUi {
                                 "Lineale und Y-Koordinate zählen von unten links wie am Gerät; \
                                  ändert den Auftrag nicht",
                             ));
+                            ui.end_row();
+                        });
+                        // Kamera wie im VisiCut-Dialog: URL mit „Suchen“, Anmeldung, Zeiten.
+                        ui.add_space(6.0);
+                        ui.strong(tr("Kamera"));
+                        egui::Grid::new("camera").num_columns(2).show(ui, |ui| {
+                            ui.label(tr("Kamera-URL"));
+                            ui.horizontal(|ui| {
+                                ui.text_edit_singleline(&mut device.camera_url);
+                                if searching {
+                                    ui.spinner();
+                                } else if ui
+                                    .button(tr("Suchen"))
+                                    .on_hover_text(tr(
+                                        "Sucht VisiCam-Kameras im lokalen Netz (wie VisiCut)",
+                                    ))
+                                    .clicked()
+                                {
+                                    search = true;
+                                }
+                            });
+                            ui.end_row();
+                            if !found.is_empty() {
+                                ui.label(tr("Gefunden"));
+                                ui.vertical(|ui| {
+                                    for url in &found {
+                                        if ui.button(url).clicked() {
+                                            device.camera_url = url.clone();
+                                        }
+                                    }
+                                });
+                                ui.end_row();
+                            }
+                            ui.label(tr("Kamera-Benutzer"));
+                            ui.text_edit_singleline(&mut device.camera_user)
+                                .on_hover_text(camera_login_help());
+                            ui.end_row();
+                            ui.label(tr("Kamera-Passwort"));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut device.camera_password)
+                                    .password(true),
+                            )
+                            .on_hover_text(camera_login_help());
+                            ui.end_row();
+                            ui.label(tr("Aktualisierung (ms)"));
+                            let response = ui
+                                .add(
+                                    egui::DragValue::new(&mut device.camera_refresh_ms)
+                                        .range(0..=3_600_000),
+                                )
+                                .on_hover_text(camera_refresh_help());
+                            // 1 … 49 ms gibt es nicht; wie in VisiCut gelten mindestens 50 ms.
+                            if (response.lost_focus() || response.drag_stopped())
+                                && (1..device::MIN_CAMERA_REFRESH_MS)
+                                    .contains(&device.camera_refresh_ms)
+                            {
+                                device.camera_refresh_ms = device::MIN_CAMERA_REFRESH_MS;
+                            }
                             ui.end_row();
                             ui.label(tr("Kalibrierung"));
                             ui.horizontal(|ui| {
@@ -537,10 +666,17 @@ impl DeviceUi {
                             .save_file()
                     {
                         *status = match device::export(&path, &draft.devices) {
-                            Ok(()) => tr!(
-                                "{count} Lasercutter exportiert",
-                                count = draft.devices.len()
-                            ),
+                            Ok(omitted) => {
+                                let mut text = tr!(
+                                    "{count} Lasercutter exportiert",
+                                    count = draft.devices.len()
+                                );
+                                if omitted {
+                                    text += " · ";
+                                    text += tr("Kamera-Passwörter wurden nicht exportiert");
+                                }
+                                text
+                            }
                             Err(e) => e,
                         };
                     }
@@ -600,6 +736,17 @@ impl DeviceUi {
         }
         if let Some((name, url)) = download {
             self.start_download(name, url, status);
+        }
+        // Die Auswahl bleibt, bis eine neue Suche startet oder das Fenster schließt.
+        if search {
+            let (tx, rx) = channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(camera::discover());
+            });
+            self.camera_search = Some(rx);
+            *status = tr("Suche VisiCam-Kameras im lokalen Netz …").into();
+        } else if open {
+            self.camera_found = found;
         }
         if save {
             self.save(draft.clone(), project, status);

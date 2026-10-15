@@ -63,8 +63,18 @@ fn path(request: &Value) -> Result<&str, String> {
 fn merge_devices(request: &Value, devices: Vec<LaserDevice>) -> Result<Value, String> {
     let mut store: DeviceStore = get(request, "store")?;
     let imported = store.merge(devices);
-    store.save(&device::config_dir())?;
+    save_store(request, &store)?;
     Ok(json!({"store": store, "imported": imported}))
+}
+
+/// Saves the device list; with `keychain` (macOS) without camera passwords,
+/// which the app keeps in the keychain.
+fn save_store(request: &Value, store: &DeviceStore) -> Result<(), String> {
+    if request["keychain"].as_bool().unwrap_or(false) {
+        store.without_passwords().save(&device::config_dir())
+    } else {
+        store.save(&device::config_dir())
+    }
 }
 
 fn file_stem(path: &std::path::Path) -> String {
@@ -272,7 +282,7 @@ pub(crate) fn execute(request: &Value) -> Result<Value, String> {
             }))
         }
         "save_devices" => {
-            get::<DeviceStore>(request, "store")?.save(&device::config_dir())?;
+            save_store(request, &get::<DeviceStore>(request, "store")?)?;
             Ok(json!({}))
         }
         "import_devices" => {
@@ -284,12 +294,13 @@ pub(crate) fn execute(request: &Value) -> Result<Value, String> {
             device::download(request["url"].as_str().ok_or(tr("URL fehlt"))?)?,
         ),
         "export_devices" => {
-            device::export(
+            let omitted = device::export(
                 std::path::Path::new(path(request)?),
                 &get::<Vec<LaserDevice>>(request, "devices")?,
             )?;
-            Ok(json!({}))
+            Ok(json!({ "passwords_omitted": omitted }))
         }
+        "find_cameras" => Ok(json!({ "urls": camera::discover() })),
         "homography" => Ok(json!({"matrix": camera::homography(&get(request, "calibration")?)?})),
         "camera_image" => {
             let image = camera::capture(&get(request, "device")?)?;

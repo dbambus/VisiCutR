@@ -898,5 +898,20 @@
   "„Kürzeste Leerfahrten“ gibt es in VisiCut nicht; gespeichert als „innen zuerst“ (Klassisch)": "‘Kortste verplaatsingen’ bestaat niet in VisiCut; opgeslagen als ‘binnen eerst’ (Klassiek)",
   "Nur Umriss": "Alleen omtrek",
   "Schneidet nur den Rand der Fläche, die alle Objekte dieses Schritts zusammen bedecken (VisiCut „Kontur“): Überlappungen und innere Linien entfallen, Bilder zählen als Rechteck.": "Snijdt alleen de rand van het vlak dat alle objecten van deze stap samen bedekken (VisiCut ‘omtrek’): overlappingen en binnenlijnen vervallen, afbeeldingen tellen als rechthoek.",
-  "Nur Umriss: Die Objekte umschließen keine Fläche": "Alleen omtrek: de objecten omsluiten geen vlak"
+  "Nur Umriss: Die Objekte umschließen keine Fläche": "Alleen omtrek: de objecten omsluiten geen vlak",
+  "Kamera-Benutzer": "Cameragebruiker",
+  "Kamera-Passwort": "Camerawachtwoord",
+  "Kamera-Passwörter wurden nicht exportiert": "Camerawachtwoorden zijn niet geëxporteerd",
+  "Optionale HTTP-Anmeldung für die Kamera-URL; wird nur mit Benutzer und Passwort gesendet. Das Passwort liegt im Schlüsselbund und wird beim Exportieren weggelassen.": "Optionele HTTP-aanmelding voor de camera-URL; wordt alleen met gebruiker en wachtwoord verzonden. Het wachtwoord staat in de sleutelhanger en wordt bij het exporteren weggelaten.",
+  "Optionale HTTP-Anmeldung für die Kamera-URL; wird nur mit Benutzer und Passwort gesendet. Das Passwort steht in der Geräteliste und wird beim Exportieren weggelassen.": "Optionele HTTP-aanmelding voor de camera-URL; wordt alleen met gebruiker en wachtwoord verzonden. Het wachtwoord staat in de apparatenlijst en wordt bij het exporteren weggelaten.",
+  "{device}: Kamera-Aktualisierung muss 0 (aus) oder {min} ms bis 1 h sein": "{device}: camera vernieuwen moet 0 (uit) of {min} ms tot 1 h zijn",
+  "Pause zwischen zwei Kamerabildern, solange das Kamerabild eingeblendet ist (VisiCut „Zeiten (ms) Kamera“), mindestens 50 ms. 0: nur beim Einblenden und mit „Kamerabild aktualisieren“.": "Pauze tussen twee camerabeelden zolang het camerabeeld getoond wordt (VisiCut ‘Timings (ms) camera’), minstens 50 ms. 0: alleen bij het tonen en met ‘Camerabeeld vernieuwen’.",
+  "Aktualisierung (ms)": "Vernieuwen (ms)",
+  "Suchen": "Zoeken",
+  "Sucht …": "Zoekt …",
+  "Sucht VisiCam-Kameras im lokalen Netz (wie VisiCut)": "Zoekt VisiCam-camera’s in het lokale netwerk (zoals VisiCut)",
+  "Gefunden": "Gevonden",
+  "Suche VisiCam-Kameras im lokalen Netz …": "Zoeken naar VisiCam-camera’s in het lokale netwerk …",
+  "Keine VisiCam im Netz gefunden": "Geen VisiCam in het netwerk gevonden",
+  "Kamera gefunden: {url}": "Camera gevonden: {url}"
 }

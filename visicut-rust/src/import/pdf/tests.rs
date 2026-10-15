@@ -69,18 +69,21 @@ fn project(svg: &str) -> Project {
 }
 
 #[test]
-fn converts_vector_page_with_physical_size_and_colours() {
-    // 283.465 × 141.732 pt = 100 × 50 mm.
+fn converts_vector_page_trimmed_to_the_drawing_with_physical_size_and_colours() {
+    // The page is 283.465 × 141.732 pt = 100 × 50 mm; the drawing reaches
+    // from x = 10 to 270 pt and from y = 10 pt up to the hairline at 130 pt.
     let imported = convert(pdf(&[DRAWING], [0.0, 0.0, 283.465, 141.732], "")).unwrap();
     assert!(imported.warnings.is_empty(), "{:?}", imported.warnings);
     let preview = crate::svg::render(&imported.svg).unwrap();
+    let mm = |pt: f32| pt * MM_PER_PT;
+    let hairline_pt = HAIRLINE_MM / MM_PER_PT;
     assert!(
-        (preview.width_mm - 100.0).abs() < 0.01,
+        (preview.width_mm - mm(260.0)).abs() < 0.01,
         "{}",
         preview.width_mm
     );
     assert!(
-        (preview.height_mm - 50.0).abs() < 0.01,
+        (preview.height_mm - mm(120.0 + hairline_pt / 2.0)).abs() < 0.01,
         "{}",
         preview.height_mm
     );
@@ -93,20 +96,17 @@ fn converts_vector_page_with_physical_size_and_colours() {
     let project = project(&imported.svg);
     let contours = crate::geometry::contours(&project).unwrap();
     assert_eq!(contours.len(), 3, "rect, circle and hairline");
-    // The rectangle starts at 20 pt = 7.06 mm from the left and its bottom edge
-    // at 20 pt above the page bottom, i.e. 50 - 7.06 mm from the top (y down).
+    // The rectangle starts 10 pt right of the drawing's left edge and its
+    // bottom edge (20 pt) lies 110 pt plus half a hairline below the top.
     let rect = contours
         .iter()
         .find(|c| c.len() == 5)
         .expect("closed rectangle");
     let min_x = rect.iter().map(|p| p[0]).fold(f64::MAX, f64::min) - f64::from(project.x_mm);
     let max_y = rect.iter().map(|p| p[1]).fold(f64::MIN, f64::max) - f64::from(project.y_mm);
+    assert!((min_x - f64::from(mm(10.0))).abs() < 0.01, "{min_x}");
     assert!(
-        (min_x - 20.0 * f64::from(MM_PER_PT)).abs() < 0.01,
-        "{min_x}"
-    );
-    assert!(
-        (max_y - (50.0 - 20.0 * f64::from(MM_PER_PT))).abs() < 0.01,
+        (max_y - f64::from(mm(110.0 + hairline_pt / 2.0))).abs() < 0.01,
         "{max_y}"
     );
 }
@@ -268,7 +268,8 @@ fn imports_eps_through_ghostscript() {
     if !ghostscript_available() {
         return;
     }
-    // BoundingBox 10 10 → 154 82 pt: 144 × 72 pt = 50.8 × 25.4 mm.
+    // BoundingBox 10 10 → 154 82 pt; the drawing itself spans x 19 → 150 pt
+    // (stroked rectangle to the circle) and y 19 → 71 pt.
     let eps = "%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 10 10 154 82\n%%EndComments\n\
         1 0 0 setrgbcolor 2 setlinewidth newpath 20 20 moveto 100 0 rlineto 0 50 rlineto \
         -100 0 rlineto closepath stroke\n\
@@ -281,12 +282,12 @@ fn imports_eps_through_ghostscript() {
     let imported = crate::import::read_file(&path.0).unwrap();
     let preview = crate::svg::render(&imported.svg).unwrap();
     assert!(
-        (preview.width_mm - 50.8).abs() < 0.1,
+        (preview.width_mm - 131.0 * MM_PER_PT).abs() < 0.1,
         "{}",
         preview.width_mm
     );
     assert!(
-        (preview.height_mm - 25.4).abs() < 0.1,
+        (preview.height_mm - 52.0 * MM_PER_PT).abs() < 0.1,
         "{}",
         preview.height_mm
     );
@@ -339,4 +340,24 @@ fn unsupported_text_without_ghostscript_names_the_operator() {
     let error = crate::import::read_file(&path.0).err().unwrap();
     assert!(error.contains("„show“"), "{error}");
     assert!(error.contains("Ghostscript"), "{error}");
+}
+
+#[test]
+fn a_page_is_one_drawing_when_nesting() {
+    // Rectangle, circle and hairline stay together as one part.
+    let imported = convert(pdf(&[DRAWING], [0.0, 0.0, 283.465, 141.732], "")).unwrap();
+    let project = project(&imported.svg);
+    assert_eq!(crate::selection::objects(&project.svg).unwrap().len(), 3);
+    let settings = crate::compose::NestSettings {
+        quantity: 2,
+        ..Default::default()
+    };
+    let nested = crate::compose::nest(&project, &settings).unwrap();
+    assert_eq!((nested.placed, nested.missing), (2, 0));
+    assert_eq!(
+        crate::selection::objects(&nested.project.svg)
+            .unwrap()
+            .len(),
+        6
+    );
 }

@@ -131,6 +131,25 @@ extension AppModel {
         project.steps.append(step)
     }
 
+    /// „+“ im Schrittkopf: gleiche Bearbeitung direkt darunter, leere Bedingungen.
+    func insertRuleStep(after index: Int) {
+        guard project.steps.indices.contains(index) else { return }
+        var step = defaultStep(project.steps[index].operation)
+        step.filters = []
+        project.steps.insert(step, at: index + 1)
+    }
+
+    /// Andere Bearbeitung für einen Regel-Schritt: Bedingungen bleiben, Leistung
+    /// und Tempo kommen aus dem Profil der neuen Bearbeitung.
+    func changeRuleStep(_ index: Int, to operation: Operation) {
+        guard project.steps.indices.contains(index), project.steps[index].operation != operation else { return }
+        let old = project.steps[index]
+        var step = defaultStep(operation)
+        step.filters = old.filters
+        step.rest = old.rest
+        project.steps[index] = step
+    }
+
     func objectCount(_ index: Int) -> Int {
         guard project.steps.indices.contains(index) else { return 0 }
         if project.steps[index].isRule {
@@ -231,9 +250,13 @@ struct RasterOptions: View {
         }
         NumberField(tr("Helligkeit"), value: Binding(get: { Double(settings.color_shift) },
                                                  set: { settings.color_shift = Int(max(-255, min(255, $0))) }), unit: "±255")
+            .help(tr("Verschiebt die Graustufen vor dem Rastern: Plus hellt auf (weniger Gravur), Minus dunkelt ab (mehr Gravur)."))
         Toggle(tr("Farben invertieren"), isOn: $settings.invert)
+            .help(tr("Tauscht Hell und Dunkel: Helle Flächen werden graviert, dunkle bleiben frei – etwa für Negativbilder oder dunkle Materialien."))
         Toggle(tr("Bidirektional"), isOn: $settings.bidirectional)
+            .help(tr("Graviert jede Zeile abwechselnd hin und zurück statt immer in dieselbe Richtung – fast doppelt so schnell; Kanten können leicht versetzt sein (Versatz am Gerät kalibrieren)."))
         Toggle(tr("Von unten nach oben"), isOn: $settings.bottom_up)
+            .help(tr("Beginnt mit der untersten Zeile statt der obersten. Je nach Lage der Absaugung zieht der Rauch dann nicht über bereits gravierte Flächen."))
     }
 }
 
@@ -320,20 +343,90 @@ struct FilterRow: View {
                 }
                 TextField(tr("Wert"), text: $filter.value).textFieldStyle(.roundedBorder)
                 if !suggestions.isEmpty {
-                    Menu {
-                        ForEach(suggestions, id: \.self) { item in
-                            Button("\(item.value) (\(item.count))") { filter.value = item.value }
-                        }
-                    } label: { Image(systemName: "list.bullet") }
-                        .menuStyle(.borderlessButton).fixedSize().help(tr("Werte aus der SVG"))
+                    ValueMenu(items: suggestions.map { item in
+                        (item.value, "\(item.value) (\(item.count))", filter.attribute.isColor ? swatchImage(item.value) : nil)
+                    }) { filter.value = $0 }
+                    .fixedSize().help(tr("Werte aus der SVG"))
                 }
             }
         }.padding(.vertical, 2)
     }
 
+    /// Farbkästchen für Menüeinträge; „none“ ist weiß mit rotem Schrägstrich.
+    func swatchImage(_ value: String) -> NSImage? {
+        let fill: NSColor
+        if value == "none" {
+            fill = .white
+        } else if let color = swatch(value) {
+            fill = NSColor(color)
+        } else {
+            return nil
+        }
+        let image = NSImage(size: NSSize(width: 14, height: 14), flipped: false) { rect in
+            let box = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3)
+            fill.setFill(); box.fill()
+            NSColor.secondaryLabelColor.setStroke(); box.lineWidth = 1; box.stroke()
+            if value == "none" {
+                let slash = NSBezierPath()
+                slash.move(to: NSPoint(x: rect.minX + 2, y: rect.minY + 2))
+                slash.line(to: NSPoint(x: rect.maxX - 2, y: rect.maxY - 2))
+                NSColor.systemRed.setStroke(); slash.lineWidth = 1.5; slash.stroke()
+            }
+            return true
+        }
+        return image
+    }
+
     private func swatch(_ value: String) -> Color? {
         guard value.count == 7, value.hasPrefix("#"), let rgb = Int(value.dropFirst(), radix: 16) else { return nil }
         return Color(red: Double(rgb >> 16 & 0xff) / 255, green: Double(rgb >> 8 & 0xff) / 255, blue: Double(rgb & 0xff) / 255)
+    }
+}
+
+/// Aufklappmenü mit den Werten aus der SVG; Farben mit Kästchen im Titel.
+struct ValueMenu: NSViewRepresentable {
+    /// Wert, Titel und optionales Bild je Eintrag.
+    let items: [(String, String, NSImage?)]
+    let choose: (String) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let button = NSPopUpButton(frame: .zero, pullsDown: true)
+        button.bezelStyle = .push
+        button.isBordered = false
+        (button.cell as? NSPopUpButtonCell)?.arrowPosition = .arrowAtBottom
+        button.setAccessibilityIdentifier("filterValues")
+        return button
+    }
+    func updateNSView(_ button: NSPopUpButton, context: Context) {
+        context.coordinator.choose = choose
+        button.removeAllItems()
+        // Der erste Eintrag eines Aufklappmenüs ist der Knopf selbst.
+        button.addItem(withTitle: "")
+        button.item(at: 0)?.image = NSImage(systemSymbolName: "list.bullet", accessibilityDescription: tr("Werte aus der SVG"))
+        for (value, title, image) in items {
+            let item = NSMenuItem(title: title, action: #selector(Coordinator.chosen(_:)), keyEquivalent: "")
+            item.target = context.coordinator
+            item.representedObject = value
+            if let image {
+                // Kästchen im Titel: Bilder von Menüeinträgen blendet macOS
+                // in Aufklappmenüs teils aus, den Titel zeichnet es immer.
+                let swatch = NSTextAttachment()
+                swatch.image = image
+                swatch.bounds = CGRect(x: 0, y: -2, width: image.size.width, height: image.size.height)
+                let text = NSMutableAttributedString(attachment: swatch)
+                text.append(NSAttributedString(string: "  " + title))
+                text.addAttribute(.font, value: NSFont.menuFont(ofSize: 0), range: NSRange(location: 0, length: text.length))
+                item.attributedTitle = text
+            }
+            button.menu?.addItem(item)
+        }
+    }
+    final class Coordinator: NSObject {
+        var choose: (String) -> Void = { _ in }
+        @objc func chosen(_ sender: NSMenuItem) {
+            if let value = sender.representedObject as? String { choose(value) }
+        }
     }
 }
 
@@ -350,10 +443,9 @@ struct RulesSection: View {
             }
             Text(tr("Jeder Schritt bearbeitet die Objekte, die alle Bedingungen erfüllen. Ein Objekt kann mehrere Schritte durchlaufen; „Rest“ erfasst alles, was sonst nicht bearbeitet oder ignoriert wird."))
                 .font(.caption).foregroundStyle(.secondary)
-            Menu(tr("Schritt hinzufügen")) {
-                ForEach(Operation.allCases) { operation in
-                    Button { model.addRuleStep(operation) } label: { Label(operation.title, systemImage: operation.symbol) }
-                }
+            // Weitere Schritte über „+“ im Schrittkopf; ohne Schritt hier der erste.
+            if !model.project.steps.contains(where: \.isRule) {
+                Button(tr("Schritt hinzufügen"), systemImage: "plus") { model.addRuleStep(.cut) }
             }
             if let error = model.mappingError {
                 Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)

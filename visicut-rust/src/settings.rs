@@ -16,6 +16,8 @@ pub struct AppSettings {
     pub language: Option<String>,
     /// Zuletzt geöffnete Dateien, neueste zuerst.
     pub recent: Vec<PathBuf>,
+    /// Alle Verfahren in einen LTT-Auftrag (Auftragsvorschau).
+    pub single_job: bool,
 }
 
 impl AppSettings {

@@ -495,11 +495,27 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, String
     if instances.len() > MAX_COPIES {
         return Err(tr!("Höchstens {max} Teile sind möglich", max = MAX_COPIES));
     }
-    // Largest first; ties keep the drawing order.
+    // Engraved parts first: the controller engraves line by line in X with an
+    // overscan at both ends of every line, so they are lined up side by side
+    // (few lines) before the cut parts fill the rest. Then largest first;
+    // ties keep the drawing order.
+    let engraved = raster_objects(project)?;
+    let raster: Vec<bool> = parts
+        .iter()
+        .map(|p| {
+            p.objects
+                .iter()
+                .any(|o| engraved.get(*o).copied().unwrap_or(false))
+        })
+        .collect();
     instances.sort_by(|a, b| {
         let area = |p: usize| parts[p].bounds[2] * parts[p].bounds[3];
-        area(*b).total_cmp(&area(*a))
+        raster[*b]
+            .cmp(&raster[*a])
+            .then(area(*b).total_cmp(&area(*a)))
     });
+    // Y ranges already covered by engravings: lines the laser engraves anyway.
+    let mut engraved_rows: Vec<[f64; 2]> = Vec::new();
     let gap = settings.gap_mm;
     let mut free = vec![[ax, ay, aw + gap, ah + gap]];
     // (part, x, y, rotated)
@@ -516,9 +532,18 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, String
                 let (pw, ph) = if rotated { (h, w) } else { (w, h) };
                 let (pw, ph) = (pw + gap, ph + gap);
                 if pw <= rect[2] + 1e-9 && ph <= rect[3] + 1e-9 {
-                    // Best short side fit, then lowest position.
-                    let fit = (rect[2] - pw).min(rect[3] - ph);
-                    let score = (fit, rect[1] + rect[0] * 1e-6);
+                    // Engravings: fewest additional engrave lines, then the
+                    // position nearest the top left. Others: best short side
+                    // fit, then lowest position.
+                    let score = if raster[part] {
+                        let rows = [rect[1], rect[1] + ph - gap];
+                        (
+                            covered(&engraved_rows, Some(rows)) - covered(&engraved_rows, None),
+                            rect[1] + rect[0] * 1e-6,
+                        )
+                    } else {
+                        ((rect[2] - pw).min(rect[3] - ph), rect[1] + rect[0] * 1e-6)
+                    };
                     if best.is_none_or(|b| (score.0, score.1) < (b.0, b.1)) {
                         best = Some((score.0, score.1, index, rotated));
                     }
@@ -532,6 +557,9 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, String
         let rect = free[index];
         let (pw, ph) = if rotated { (h, w) } else { (w, h) };
         let used = [rect[0], rect[1], pw + gap, ph + gap];
+        if raster[part] {
+            engraved_rows.push([rect[1], rect[1] + ph]);
+        }
         placements.push((part, rect[0], rect[1], rotated));
         split(&mut free, used);
     }
@@ -602,6 +630,10 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, String
     remap(&mut result, |old| {
         new_ids.get(old).cloned().unwrap_or_default()
     });
+    // Without a gap neighbouring parts share their edges; cut them once.
+    if settings.gap_mm == 0.0 {
+        result.remove_duplicate_lines = true;
+    }
     Ok(Nested {
         project: result,
         placed: placements.len(),
@@ -991,13 +1023,54 @@ impl Parts {
     }
 }
 
-/// Bounds of the visible content; empty groups do not count.
+/// Objects processed by an engrave or 3D engrave step, by object index.
+fn raster_objects(project: &Project) -> Result<Vec<bool>, String> {
+    let count = selection::objects(&project.svg)?.len();
+    if project.steps.is_empty() {
+        return Ok(vec![project.operation.is_raster(); count]);
+    }
+    let mut raster = vec![false; count];
+    for (step, selected) in project.steps.iter().zip(crate::mapping::resolve(project)?) {
+        if step.operation.is_raster() {
+            for object in selected {
+                if let Some(flag) = raster.get_mut(object) {
+                    *flag = true;
+                }
+            }
+        }
+    }
+    Ok(raster)
+}
+
+/// Total length of the union of Y ranges, with an optional extra range.
+fn covered(ranges: &[[f64; 2]], extra: Option<[f64; 2]>) -> f64 {
+    let mut all: Vec<[f64; 2]> = ranges.iter().copied().chain(extra).collect();
+    all.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    let mut total = 0.0;
+    let mut current: Option<[f64; 2]> = None;
+    for [start, end] in all {
+        current = match current {
+            Some([s, e]) if start <= e => Some([s, e.max(end)]),
+            Some([s, e]) => {
+                total += e - s;
+                Some([start, end])
+            }
+            None => Some([start, end]),
+        };
+    }
+    total + current.map_or(0.0, |[s, e]| e - s)
+}
+
+/// Bounds of the content without stroke width; empty groups do not count.
+/// The laser cuts along the centre line, so with a gap of 0 mm adjacent
+/// contours lie exactly on top of each other and "Doppelte Linien
+/// entfernen" cuts them once.
 fn content_bounds(group: &usvg::Group) -> Option<tiny_skia::Rect> {
     let mut bounds: Option<tiny_skia::Rect> = None;
     for node in group.children() {
         let b = match node {
             usvg::Node::Group(g) => content_bounds(g),
-            other => Some(other.abs_stroke_bounding_box()),
+            other => Some(other.abs_bounding_box()),
         };
         bounds = match (bounds, b) {
             (Some(a), Some(b)) => tiny_skia::Rect::from_ltrb(
@@ -2060,6 +2133,80 @@ mod tests {
         let p = &nested.project;
         assert!(p.width_mm <= 990.0 + 1e-3 && p.height_mm <= 590.0 + 1e-3);
         ltt::prepare(p).unwrap();
+    }
+
+    #[test]
+    fn nesting_without_gap_shares_edges_and_cuts_them_once() {
+        let settings = NestSettings {
+            gap_mm: 0.0,
+            quantity: 4,
+            ..NestSettings::default()
+        };
+        let nested = nest(&demo(), &settings).unwrap();
+        assert!(nested.project.remove_duplicate_lines);
+        // The frames are stacked along their cut lines, not their 0.5 mm
+        // strokes, so the shared straight edges are removed.
+        let job = ltt::prepare(&nested.project).unwrap();
+        assert!(
+            job.description.contains("doppelte Abschnitte"),
+            "{}",
+            job.description
+        );
+        let separate = ltt::prepare(&Project {
+            remove_duplicate_lines: false,
+            ..nested.project.clone()
+        })
+        .unwrap();
+        assert!(job.estimated_seconds < separate.estimated_seconds);
+        let with_gap = nest(
+            &demo(),
+            &NestSettings {
+                gap_mm: 1.0,
+                ..settings
+            },
+        )
+        .unwrap();
+        assert!(!with_gap.project.remove_duplicate_lines);
+    }
+
+    #[test]
+    fn nesting_lines_up_engravings_to_save_engrave_lines() {
+        // Frame cut, circle engraved, triangle marked, as in the example.
+        let step = |operation, object: usize| JobStep {
+            objects: vec![object],
+            ..JobStep::new(operation)
+        };
+        let project = Project {
+            steps: vec![
+                step(Operation::Cut, 0),
+                step(Operation::Engrave, 1),
+                step(Operation::Mark, 2),
+            ],
+            ..demo()
+        };
+        let settings = NestSettings {
+            gap_mm: 0.0,
+            quantity: 12,
+            ..NestSettings::default()
+        };
+        let nested = nest(&project, &settings).unwrap();
+        assert_eq!(nested.missing, 0);
+        let job = ltt::prepare(&nested.project).unwrap();
+        let engrave = job
+            .steps
+            .iter()
+            .find(|s| s.operation == Operation::Engrave)
+            .unwrap();
+        // All twelve circles (32 mm) side by side: one band of engrave lines
+        // instead of a column twelve circles high.
+        let lines: usize = engrave
+            .description
+            .split(' ')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(lines < 2 * 33 * 500 / 25, "{}", engrave.description);
     }
 
     #[test]

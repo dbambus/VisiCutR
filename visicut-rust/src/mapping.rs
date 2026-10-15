@@ -380,8 +380,10 @@ fn color(value: &str) -> Vec<Filter> {
     }]
 }
 
+/// Templates for rule mappings. "Everything one operation" is not offered:
+/// the assignment "Gesamt" does exactly that.
 pub fn predefined() -> Vec<Predefined> {
-    let mut list = vec![
+    vec![
         // Reine RGB-Farben wie in vielen Laser-Workflows.
         Predefined {
             name: tr("Farben: Rot schneiden, Blau gravieren, Grün markieren"),
@@ -418,20 +420,7 @@ pub fn predefined() -> Vec<Predefined> {
             ],
             ignore: vec![],
         },
-    ];
-    for operation in Operation::ALL {
-        list.push(Predefined {
-            name: match operation {
-                Operation::Cut => tr("Alles schneiden"),
-                Operation::Engrave => tr("Alles gravieren"),
-                Operation::Engrave3d => tr("Alles 3D-gravieren"),
-                Operation::Mark => tr("Alles markieren"),
-            },
-            rules: vec![(operation, Some(Vec::new()), false)],
-            ignore: vec![],
-        });
-    }
-    list
+    ]
 }
 
 #[cfg(test)]

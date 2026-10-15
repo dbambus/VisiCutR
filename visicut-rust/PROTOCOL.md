@@ -107,6 +107,11 @@ Wiederholung nach Fehlern.
   Objekte bearbeiten. Pro Verfahren entsteht ein eigenständig gerahmter
   LTT-Job mit allen Schritten dieses Verfahrens, in der Reihenfolge
   Engrav → Eng3D → Mark → Cut, mit jeweils eigener TCP-Verbindung.
+  Wahlweise („Alles in eine Datei“) enthält ein Job `Job_…` alle Verfahren
+  wie in Java (`sortiert Vektorteile ans Ende`): Rasterteile zuerst; der
+  Jobmodus (`ESC M`, 1 oder 8 Bit je Pixel) wird wie Javas `setJobMode` nur
+  bei einem Wechsel gesendet, die Bounding Box umfasst alle Teile und der
+  Overscan ist der größte aller Gravuren.
   Text wird beim Schneiden und Markieren als Glyphenumriss bearbeitet
   (Systemschriften, Ersatz Ubuntu Light/Hack aus egui); fehlt für ein
   Zeichen jede Schrift, wird der Auftrag abgewiesen. Rasterbilder werden beim
@@ -211,7 +216,9 @@ Wiederholung nach Fehlern.
 - PDF-Import (neu gegenüber Java-VisiCut, das kein PDF liest): Seite 1 wird
   mit `hayro-svg` (reines Rust, MIT/Apache-2.0) in SVG umgewandelt; Pfade,
   Farben, Linienstärken und eingebettete Bilder bleiben erhalten, Text wird zu
-  Glyphenkonturen. Größe aus der CropBox in pt (× 25,4/72 mm). Linienstärke 0
+  Glyphenkonturen. Maßstab aus der CropBox in pt (× 25,4/72 mm); die Seite
+  wird auf den sichtbaren Inhalt (mit Strichbreite) zugeschnitten, damit eine
+  Zeichenfläche wie A4 nicht als Motivrahmen gilt. Linienstärke 0
   (PDF: dünnste Linie) wird zu 0,1 mm. Clip-Pfade bleiben erhalten und werden
   beim Schneiden berücksichtigt; Soft-Masks bleiben für die Vorschau erhalten,
   verhindern aber das Schneiden (Hinweis beim Import).

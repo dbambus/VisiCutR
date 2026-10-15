@@ -178,33 +178,10 @@ fn overscan(operation: Operation, speed_percent: f32) -> f32 {
     }
 }
 
-pub fn prepare(project: &Project) -> Result<PreparedJob, String> {
-    project.validate()?;
-    if (project.bed_width_mm - BED_WIDTH as f32).abs() > 0.01
-        || (project.bed_height_mm - BED_HEIGHT as f32).abs() > 0.01
-    {
-        return Err(tr("Das FAU-LTT-Profil benötigt ein Arbeitsbett von 1000 × 600 mm").into());
-    }
-    // All parts together: the preview covers their bounding box, rotary
-    // limits apply to the whole layout.
-    let [frame_x, frame_y, frame_width, frame_height] = project.bounds();
-    let frame = Frame {
-        x: frame_x,
-        y: frame_y,
-        width: frame_width,
-        height: frame_height,
-    };
-    if project.rotary_axis
-        && frame.height > std::f32::consts::PI * project.rotary_diameter_mm + 0.001
-    {
-        return Err(tr!(
-            "Motiv ist höher als der Umfang des Werkstücks ({circumference} mm bei {diameter} mm Durchmesser)",
-            circumference = format!("{:.1}", std::f32::consts::PI * project.rotary_diameter_mm),
-            diameter = format!("{:.1}", project.rotary_diameter_mm)
-        ));
-    }
-    // Each project part on its own (shared settings plus that part), in
-    // list order; their steps are merged into one LTT job per operation.
+/// Every project part on its own (shared settings plus that part), in list
+/// order, and the objects of each processing step; their steps are merged
+/// into one LTT job per operation.
+fn collect_parts(project: &Project) -> Result<(Vec<Project>, Vec<Part>), String> {
     let views: Vec<Project> = project
         .all_parts()
         .iter()
@@ -252,6 +229,167 @@ pub fn prepare(project: &Project) -> Result<PreparedJob, String> {
     if parts.is_empty() {
         return Err(tr("Keine Objekte zur Bearbeitung ausgewählt").into());
     }
+    Ok((views, parts))
+}
+
+/// The objects in the colours of their processing without preparing the
+/// job: cut and mark as outlines, engravings as drawn (what the raster
+/// burns). Shown on the canvas while assigning; covers `Project::bounds`
+/// like `preview_png`.
+pub fn processing_preview(project: &Project) -> Result<Vec<u8>, String> {
+    let (views, parts) = collect_parts(project)?;
+    let [x, y, width, height] = project.bounds();
+    let frame = Frame {
+        x,
+        y,
+        width,
+        height,
+    };
+    let scale = 1600.0 / frame.width.max(frame.height);
+    let mut preview = tiny_skia::Pixmap::new(
+        (frame.width * scale).ceil().max(1.0) as u32,
+        (frame.height * scale).ceil().max(1.0) as u32,
+    )
+    .ok_or(tr("Vorschau konnte nicht erstellt werden"))?;
+    // Areas first, outlines on top.
+    let ordered = parts
+        .iter()
+        .filter(|p| p.operation.is_raster())
+        .chain(parts.iter().filter(|p| !p.operation.is_raster()));
+    for part in ordered {
+        let mut source = views[part.source].clone();
+        source.steps.clear();
+        source.svg = part.svg.clone();
+        if part.operation.is_raster() {
+            draw_area(
+                &mut preview,
+                frame,
+                &source,
+                operation_color(part.operation),
+            )?;
+        } else {
+            // Kräftig genug, um auch auf einer Gravurfläche erkennbar zu sein.
+            draw_contours(
+                &mut preview,
+                frame,
+                &geometry::contours(&source)?,
+                part.operation,
+                (0.35 * scale).max(2.0),
+            );
+        }
+    }
+    preview.encode_png().map_err(|e| e.to_string())
+}
+
+/// What an engraving would burn, tinted in the operation colour: the darker
+/// a pixel, the more opaque.
+fn draw_area(
+    preview: &mut tiny_skia::Pixmap,
+    frame: Frame,
+    source: &Project,
+    color: [u8; 3],
+) -> Result<(), String> {
+    let tree =
+        usvg::Tree::from_str(&source.svg, &crate::svg::options()).map_err(|e| e.to_string())?;
+    let size = tree.size();
+    let sx = preview.width() as f32 / frame.width;
+    let sy = preview.height() as f32 / frame.height;
+    // Canvas units → mm on the bed → preview pixels.
+    let transform = tiny_skia::Transform::from_row(
+        source.width_mm / size.width() * sx,
+        0.0,
+        0.0,
+        source.height_mm / size.height() * sy,
+        (source.x_mm - frame.x) * sx,
+        (source.y_mm - frame.y) * sy,
+    );
+    let mut layer = tiny_skia::Pixmap::new(preview.width(), preview.height())
+        .ok_or(tr("Vorschau konnte nicht erstellt werden"))?;
+    resvg::render(&tree, transform, &mut layer.as_mut());
+    for pixel in layer.data_mut().chunks_exact_mut(4) {
+        let a = u32::from(pixel[3]);
+        if a == 0 {
+            continue;
+        }
+        // Premultiplied: unpremultiply for the brightness.
+        let luma =
+            (299 * u32::from(pixel[0]) + 587 * u32::from(pixel[1]) + 114 * u32::from(pixel[2]))
+                / 1000
+                * 255
+                / a;
+        let alpha = a * (255 - luma.min(255)) / 255;
+        pixel.copy_from_slice(&[
+            (u32::from(color[0]) * alpha / 255) as u8,
+            (u32::from(color[1]) * alpha / 255) as u8,
+            (u32::from(color[2]) * alpha / 255) as u8,
+            alpha as u8,
+        ]);
+    }
+    preview.draw_pixmap(
+        0,
+        0,
+        layer.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        tiny_skia::Transform::identity(),
+        None,
+    );
+    Ok(())
+}
+
+/// Name eines Verfahrens in Meldungen.
+fn operation_name(operation: Operation) -> &'static str {
+    match operation {
+        Operation::Cut => tr("Schneiden"),
+        Operation::Engrave => tr("Gravieren"),
+        Operation::Engrave3d => tr("3D-Gravur"),
+        Operation::Mark => tr("Markieren"),
+    }
+}
+
+/// Vor Vorschau, Export und Senden: Ohne gewähltes Material fehlen die
+/// Laserparameter; die Meldung sagt das statt einer Leistungsgrenze.
+pub fn require_material(project: &Project) -> Result<(), String> {
+    if project.material.trim().is_empty() {
+        return Err(tr(
+            "Kein Material zum Lasern gewählt: unter „Material“ ein Material wählen (oder „Eigenes Material …“ mit eigener Leistung).",
+        )
+        .into());
+    }
+    Ok(())
+}
+
+pub fn prepare(project: &Project) -> Result<PreparedJob, String> {
+    prepare_with(project, false)
+}
+
+/// Like `prepare`; with `single_job` all operations go into one LTT job
+/// (one file, one transfer) instead of one per operation.
+pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, String> {
+    project.validate()?;
+    if (project.bed_width_mm - BED_WIDTH as f32).abs() > 0.01
+        || (project.bed_height_mm - BED_HEIGHT as f32).abs() > 0.01
+    {
+        return Err(tr("Das FAU-LTT-Profil benötigt ein Arbeitsbett von 1000 × 600 mm").into());
+    }
+    // All parts together: the preview covers their bounding box, rotary
+    // limits apply to the whole layout.
+    let [frame_x, frame_y, frame_width, frame_height] = project.bounds();
+    let frame = Frame {
+        x: frame_x,
+        y: frame_y,
+        width: frame_width,
+        height: frame_height,
+    };
+    if project.rotary_axis
+        && frame.height > std::f32::consts::PI * project.rotary_diameter_mm + 0.001
+    {
+        return Err(tr!(
+            "Motiv ist höher als der Umfang des Werkstücks ({circumference} mm bei {diameter} mm Durchmesser)",
+            circumference = format!("{:.1}", std::f32::consts::PI * project.rotary_diameter_mm),
+            diameter = format!("{:.1}", project.rotary_diameter_mm)
+        ));
+    }
+    let (views, parts) = collect_parts(project)?;
     let mut jobs = Vec::new();
     let mut total_bytes: usize = 0;
     let scale = 1600.0 / frame.width.max(frame.height);
@@ -282,14 +420,6 @@ pub fn prepare(project: &Project) -> Result<PreparedJob, String> {
             right = format!("{right:.0}")
         ));
     }
-    if project.cut_order == CutOrder::ShortestTravel
-        && parts.iter().any(|p| !p.operation.is_raster())
-    {
-        warnings.push(
-            tr("Experimentelle Schnittreihenfolge „Kürzeste Leerfahrten“: weicht von VisiCut ab und ist am Gerät nicht erprobt; den ersten Auftrag beaufsichtigen")
-                .into(),
-        );
-    }
     if project.machine.experimental_curves() && parts.iter().any(|p| !p.operation.is_raster()) {
         warnings.push(tr!(
             "Experimentelle Kurvenbeschleunigung {acceleration} mm/s² (LibLaserCut: 2000): Kurven und Kreise werden anders geplant als in VisiCut; den ersten Auftrag beaufsichtigen",
@@ -304,30 +434,55 @@ pub fn prepare(project: &Project) -> Result<PreparedJob, String> {
     }
     // Finishing operations first, cutting last; one LTT file per operation
     // holding its steps in order.
-    for operation in Operation::ALL {
-        let group: Vec<&Part> = parts.iter().filter(|p| p.operation == operation).collect();
-        if group.is_empty() {
-            continue;
-        }
-        let name = device_job_name(operation, &project.name);
+    // One job per operation, or (`single_job`) one job with all of them like
+    // Java: engravings first, then marking and cutting.
+    let ordered: Vec<&Part> = Operation::ALL
+        .iter()
+        .flat_map(|operation| parts.iter().filter(move |p| p.operation == *operation))
+        .collect();
+    let groups: Vec<Vec<&Part>> = if single_job {
+        vec![ordered]
+    } else {
+        Operation::ALL
+            .iter()
+            .map(|operation| {
+                ordered
+                    .iter()
+                    .copied()
+                    .filter(|p| p.operation == *operation)
+                    .collect()
+            })
+            .filter(|group: &Vec<&Part>| !group.is_empty())
+            .collect()
+    };
+    for group in groups {
+        let operation = group[0].operation;
+        let name = if single_job {
+            device_job_name("Job", &project.name)
+        } else {
+            device_job_name(operation.prefix(), &project.name)
+        };
         let overscan = group
             .iter()
-            .flat_map(|p| p.sets.iter().map(|s| overscan(operation, s.speed_percent)))
+            .flat_map(|p| {
+                p.sets
+                    .iter()
+                    .map(|s| overscan(p.operation, s.speed_percent))
+            })
             .fold(0.0, f32::max);
         // The header holds the bounds of the actual content (LaserJob
         // .getBoundingBox in Java), so it is written after the parts.
         let mut body = Vec::new();
         let mut bounds: Option<Bounds> = None;
-        let mut state = DeviceState::default();
+        let mut state = DeviceState::new(project);
         timeline.start_job(HOME_MM);
-        for (index, part) in group.iter().enumerate() {
+        for part in &group {
             let (step, part_bounds) = append_part(
                 &mut body,
                 &mut state,
                 &mut warnings,
                 &views[part.source],
                 part,
-                index == 0,
                 &name,
                 (&mut preview, frame),
                 &mut timeline,
@@ -363,8 +518,8 @@ pub fn prepare(project: &Project) -> Result<PreparedJob, String> {
     })
 }
 
-fn device_job_name(operation: Operation, name: &str) -> String {
-    format!("{}_{}", operation.prefix(), name)
+fn device_job_name(prefix: &str, name: &str) -> String {
+    format!("{prefix}_{name}")
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
@@ -394,13 +549,26 @@ fn finish(out: &mut Vec<u8>) -> Result<(), String> {
 struct DeviceState {
     speed: f32,
     power: f32,
+    /// Job mode (`ESC M`) as last sent; the header sets one bit per pixel.
+    job_mode: u8,
 }
 
-impl Default for DeviceState {
-    fn default() -> Self {
+impl DeviceState {
+    fn new(project: &Project) -> Self {
         Self {
             speed: -1.0,
             power: -1.0,
+            job_mode: if project.rotary_axis { 0x10 } else { 0 },
+        }
+    }
+
+    /// Bits per raster pixel like Java `setJobMode`: sent only on a change,
+    /// so one file can hold normal and 3D engravings.
+    fn raster_mode(&mut self, out: &mut Vec<u8>, bits_per_pixel: u8) {
+        let mode = (self.job_mode & !0x0f) | if bits_per_pixel == 8 { 0x02 } else { 0 };
+        if mode != self.job_mode {
+            out.extend([0x1b, 0x4d, mode]);
+            self.job_mode = mode;
         }
     }
 }
@@ -428,13 +596,15 @@ fn append_part(
     warnings: &mut Vec<String>,
     project: &Project,
     part: &Part,
-    first_in_file: bool,
     name: &str,
     (preview, frame): (&mut tiny_skia::Pixmap, Frame),
     timeline: &mut Timeline,
 ) -> Result<(PreparedStep, Bounds), String> {
     if part.sets.iter().any(|s| s.power_percent < 0.1) {
-        return Err(tr("Leistung für einen LTT-Job muss mindestens 0,1 % sein").into());
+        return Err(tr!(
+            "{operation}: Leistung ist 0 %; im Schritt eine Leistung eintragen (mindestens 0,1 %)",
+            operation = operation_name(part.operation)
+        ));
     }
     let mut source = project.clone();
     source.svg = part.svg.clone();
@@ -468,7 +638,7 @@ fn append_part(
             if estimated_bytes > 256 * 1024 * 1024 {
                 return Err(tr("Vektorjob ist größer als 256 MB").into());
             }
-            draw_contours(preview, frame, &paths, part.operation);
+            draw_contours(preview, frame, &paths, part.operation, 1.6);
             for point in paths.iter().flatten() {
                 if !point[0].is_finite()
                     || !point[1].is_finite()
@@ -538,7 +708,7 @@ fn append_part(
                 )
                 .unwrap_or_else(|o| {
                     warnings.push(
-                        tr("Zu viele Vektorpfade für „Kürzeste Leerfahrten“; dieser Schritt nutzt die VisiCut-Reihenfolge")
+                        tr("Zu viele Vektorpfade für „Kürzeste Leerfahrten“; dieser Schritt nutzt die klassische Reihenfolge")
                             .into(),
                     );
                     o
@@ -624,11 +794,8 @@ fn append_part(
             let color = operation_color(part.operation);
             draw_raster(preview, frame, &raster, area, color);
             let raster_png = raster_preview(&raster, color)?;
-            if first_in_file && raster.bits_per_pixel == 8 {
-                // Job mode: eight bits per pixel ("engrave 3D").
-                let mode = if project.rotary_axis { 0x10 } else { 0 };
-                out.extend([0x1b, 0x4d, mode | 0x02]);
-            }
+            // Job mode: one or eight bits per pixel ("engrave 3D").
+            state.raster_mode(out, raster.bits_per_pixel);
             let mut lines = 0;
             for set in &part.sets {
                 let mut program = Program::new(part.operation);
@@ -817,6 +984,7 @@ fn draw_contours(
     frame: Frame,
     paths: &[geometry::Contour],
     operation: Operation,
+    width_px: f32,
 ) {
     let sx = preview.width() as f32 / frame.width;
     let sy = preview.height() as f32 / frame.height;
@@ -840,7 +1008,7 @@ fn draw_contours(
                 &path,
                 &paint,
                 &tiny_skia::Stroke {
-                    width: 1.6,
+                    width: width_px,
                     ..Default::default()
                 },
                 tiny_skia::Transform::identity(),
@@ -1418,7 +1586,8 @@ mod tests {
     }
 
     #[test]
-    fn shortest_travel_is_opt_in_and_reduces_time() {
+    fn shortest_travel_is_the_default_and_reduces_time() {
+        assert_eq!(Project::default().cut_order, CutOrder::ShortestTravel);
         // Parts at alternating heights: the inner-first sweep zigzags across.
         let mut body = String::new();
         for i in 0..6 {
@@ -1430,6 +1599,7 @@ mod tests {
             );
         }
         let visicut = Project {
+            cut_order: CutOrder::VisiCut,
             width_mm: 600.0,
             height_mm: 200.0,
             svg: format!(
@@ -1444,7 +1614,7 @@ mod tests {
             ..visicut
         };
         let job = prepare(&nearest).unwrap();
-        assert!(job.warnings[0].contains("Experimentelle Schnittreihenfolge"));
+        assert!(job.warnings.is_empty(), "{:?}", job.warnings);
         assert!(
             job.estimated_seconds < default_job.estimated_seconds * 0.9,
             "{} vs {}",
@@ -1514,8 +1684,50 @@ mod tests {
     }
 
     #[test]
+    fn single_job_holds_all_operations_and_switches_the_raster_mode() {
+        // Engrave, 3D engrave (same object), mark and cut in one file.
+        let mut p = three_modes();
+        p.steps.push(crate::project::JobStep {
+            objects: vec![1],
+            power_percent: 30.0,
+            ..crate::project::JobStep::new(Operation::Engrave3d)
+        });
+        let separate = prepare(&p).unwrap();
+        assert_eq!(separate.jobs.len(), 4);
+        let single = prepare_with(&p, true).unwrap();
+        assert_eq!(single.jobs.len(), 1);
+        let job = &single.jobs[0];
+        assert!(
+            job.name.starts_with("Job_") && job.name.len() <= 15,
+            "{}",
+            job.name
+        );
+        assert_framing(&job.bytes);
+        let at = |pattern: &[u8]| job.bytes.windows(pattern.len()).position(|w| w == pattern);
+        // 8 bits per pixel for the 3D engraving, rasters before the vector mode.
+        let mode_3d = at(&[0x1b, 0x4d, 0x02]).expect("3D-Modus");
+        let vector = at(&[0x1b, 0x56]).expect("Vektormodus");
+        assert!(mode_3d < vector);
+        // Same steps, estimates and simulation as the separate jobs except
+        // that the head no longer returns home between operations.
+        assert_eq!(single.steps.len(), separate.steps.len());
+        assert!(single.estimated_seconds <= separate.estimated_seconds);
+        let from_home = single
+            .timeline
+            .runs
+            .iter()
+            .filter(|r| r.from_mm == HOME_MM)
+            .count();
+        assert_eq!(from_home, 1);
+    }
+
+    #[test]
     fn three_modes_have_distinct_prefixed_files_and_ordered_simulation() {
-        let p = three_modes();
+        // Pfadrichtung wie in VisiCut.
+        let p = Project {
+            cut_order: CutOrder::VisiCut,
+            ..three_modes()
+        };
         let job = prepare(&p).unwrap();
         assert_eq!(job.jobs.len(), 3);
         for (i, prefix) in ["Engrav_", "Mark_", "Cut_"].iter().enumerate() {
@@ -1644,7 +1856,7 @@ mod tests {
     #[test]
     fn estimates_quantized_cut_distance_speed_and_passes() {
         let mut p = Project { x_mm: 0.0, y_mm: 0.0, width_mm: 100.0, height_mm: 10.0,
-            speed_percent: 10.0,
+            speed_percent: 10.0, cut_order: CutOrder::VisiCut,
             svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="10mm" viewBox="0 0 100 10"><path d="M0 0L100 0" stroke="black"/></svg>"#.into(), ..Default::default() };
         // Travel from home (top right) to the start of the line, then the
         // Java estimate: distance plus acceleration distance v²/a at 2000 mm/s²,
@@ -1963,6 +2175,60 @@ mod tests {
         assert!(job.steps[2].description.contains("1 Vektorpfade"));
         let saved: Project = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
         assert_eq!(prepare(&saved).unwrap().jobs[2].bytes, job.jobs[2].bytes);
+    }
+
+    #[test]
+    fn processing_preview_colours_outlines_and_engravings_as_drawn() {
+        // A dark rectangle and an outline rectangle engraved, a line cut.
+        let p = Project {
+            x_mm: 0.0,
+            y_mm: 0.0,
+            width_mm: 100.0,
+            height_mm: 50.0,
+            svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 100 50"><rect x="5" y="5" width="20" height="40" fill="black"/><rect x="30" y="5" width="20" height="40" fill="none" stroke="black"/><path d="M60 25 L95 25" stroke="black"/></svg>"#.into(),
+            steps: vec![
+                crate::project::JobStep { objects: vec![0, 1], ..crate::project::JobStep::new(Operation::Engrave) },
+                crate::project::JobStep { objects: vec![2], ..crate::project::JobStep::new(Operation::Cut) },
+            ],
+            ..Default::default()
+        };
+        let png = processing_preview(&p).unwrap();
+        let image = tiny_skia::Pixmap::decode_png(&png).unwrap();
+        let at = |x_mm: f32, y_mm: f32| {
+            let s = image.width() as f32 / 100.0;
+            image
+                .pixel((x_mm * s) as u32, (y_mm * s) as u32)
+                .unwrap()
+                .demultiply()
+        };
+        // The dark area in the engrave colour; the outline stays an outline,
+        // as the raster engraves exactly what is drawn.
+        assert_eq!(at(40.0, 25.0).alpha(), 0);
+        let inside = at(15.0, 25.0);
+        assert_eq!(
+            (inside.red(), inside.green(), inside.blue()),
+            (35, 113, 210)
+        );
+        assert!(inside.alpha() > 200);
+        // On the cut line: red; next to it: empty.
+        let cut = at(77.0, 25.0);
+        assert!(
+            cut.red() > 150 && cut.blue() < 100 && cut.alpha() > 100,
+            "{cut:?}"
+        );
+        assert_eq!(at(77.0, 40.0).alpha(), 0);
+    }
+
+    #[test]
+    fn missing_material_and_zero_power_are_named() {
+        let mut p = mixed();
+        p.material.clear();
+        assert!(require_material(&p).unwrap_err().contains("Kein Material"));
+        p.material = "Acryl".into();
+        assert!(require_material(&p).is_ok());
+        p.steps[1].power_percent = 0.0;
+        let error = prepare(&p).err().unwrap();
+        assert!(error.starts_with("Gravieren: Leistung ist 0 %"), "{error}");
     }
 
     #[test]

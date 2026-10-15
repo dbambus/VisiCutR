@@ -234,10 +234,17 @@ enum SessionCache {
 
 /// Reihenfolge der Vektorpfade (visicut_core::project::CutOrder).
 enum CutOrder: String, Codable, CaseIterable, Identifiable {
-    case visiCut = "VisiCut", shortestTravel = "ShortestTravel"
+    // Standard zuerst (Reihenfolge im Menü Job).
+    case shortestTravel = "ShortestTravel", visiCut = "VisiCut"
     var id: String { rawValue }
     var title: String {
-        switch self { case .visiCut: return tr("Wie VisiCut"); case .shortestTravel: return tr("Kürzeste Leerfahrten (experimentell)") }
+        switch self { case .visiCut: return tr("Klassisch"); case .shortestTravel: return tr("Kürzeste Leerfahrten") }
+    }
+    var help: String {
+        switch self {
+        case .visiCut: return tr("Innere Konturen zuerst, Reihenfolge wie VisiCut.")
+        case .shortestTravel: return tr("Innere Konturen zuerst, dann jeweils der nächstgelegene Pfad ab dem Referenzpunkt oben rechts.")
+        }
     }
 }
 
@@ -280,6 +287,37 @@ struct PreparedStep: Decodable {
 }
 struct ProjectResponse: Decodable { let project: Project; let preview: Preview?; let objects: [SVGObject]?; let warnings: [String]?; let cached: Bool? }
 struct PathResponse: Decodable { let path: String? }
+struct OutlineResponse: Decodable { let contours: [[[Double]]] }
+struct OutlinesResponse: Decodable { let outlines: [[[[Double]]]] }
+
+/// Objekt unter einem Punkt (mm relativ zur Motivecke), wie Rust `object_at`:
+/// zuerst eine nahe Linie (oberstes Objekt zuerst), sonst die kleinste
+/// geschlossene Form, die den Punkt enthält.
+func objectAt(_ outlines: [[[CGPoint]]], _ point: CGPoint, tolerance: Double) -> Int? {
+    func near(_ a: CGPoint, _ b: CGPoint) -> Bool {
+        let dx = b.x - a.x, dy = b.y - a.y, length = dx * dx + dy * dy
+        let t = length > 0 ? min(1, max(0, ((point.x - a.x) * dx + (point.y - a.y) * dy) / length)) : 0
+        return hypot(a.x + t * dx - point.x, a.y + t * dy - point.y) <= tolerance
+    }
+    for index in outlines.indices.reversed() {
+        for contour in outlines[index] where contour.count > 1 {
+            for i in 1..<contour.count where near(contour[i - 1], contour[i]) { return index }
+        }
+    }
+    var best: (area: Double, index: Int)?
+    for (index, outline) in outlines.enumerated() {
+        for contour in outline where contour.count > 3 && contour.first == contour.last {
+            var inside = false, area = 0.0
+            for i in 1..<contour.count {
+                let a = contour[i - 1], b = contour[i]
+                if (a.y > point.y) != (b.y > point.y) && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x { inside.toggle() }
+                area += a.x * b.y - b.x * a.y
+            }
+            if inside && (best == nil || abs(area) / 2 < best!.area) { best = (abs(area) / 2, index) }
+        }
+    }
+    return best?.index
+}
 struct PathsResponse: Decodable { let paths: [String] }
 struct Preview: Decodable { let png: [UInt8] }
 struct OutputJob: Decodable {
@@ -316,6 +354,19 @@ final class AppModel: ObservableObject {
         if oldValue.parts != project.parts || oldValue.active_part != project.active_part {
             refreshPartImages()
         }
+        if oldValue.svg != project.svg || oldValue.width_mm != project.width_mm || oldValue.height_mm != project.height_mm {
+            outlineCache = [:]
+            objectOutlines = nil
+            if hoveredObject != nil { hoverObject(nil) }
+        }
+        // Farbige Bearbeitung auf der Arbeitsfläche: nur bei Inhalt oder
+        // Zuordnung neu; reines Verschieben eines Teils verschiebt das Bild.
+        if oldValue.svg != project.svg || oldValue.steps != project.steps || oldValue.ignore_filters != project.ignore_filters
+            || oldValue.operation != project.operation || oldValue.parts != project.parts || oldValue.active_part != project.active_part
+            || oldValue.width_mm != project.width_mm || oldValue.height_mm != project.height_mm
+            || (!project.parts.isEmpty && (oldValue.x_mm != project.x_mm || oldValue.y_mm != project.y_mm)) {
+            scheduleProcessingRefresh()
+        }
         if preparedJob != nil { status = tr("Auftrag geändert. Vorschau und Zeit neu berechnen.") }
         preparedJob = nil
         jobImage = nil
@@ -326,6 +377,29 @@ final class AppModel: ObservableObject {
     @Published var objects: [SVGObject] = []
     @Published var preparedJob: PreparedJob?
     @Published var jobImage: NSImage?
+    /// Objekte in den Farben ihrer Bearbeitung (Rust `processing_preview`).
+    @Published var processingImage: NSImage?
+    /// Alle Verfahren in einen LTT-Auftrag (eine Datei) statt einen je
+    /// Verfahren; App-Einstellung, wird in der Auftragsvorschau umgeschaltet.
+    @Published var singleJob = UserDefaults.standard.bool(forKey: "singleJob") {
+        didSet {
+            guard singleJob != oldValue else { return }
+            if SessionCache.enabled { UserDefaults.standard.set(singleJob, forKey: "singleJob") }
+            // Offene Vorschau neu berechnen; die bisherige bleibt bis dahin stehen.
+            if preparedJob != nil { previewJob(refresh: true) }
+        }
+    }
+    /// Umriss des Objekts unter der Maus in der Objektliste, in mm relativ zur
+    /// Motivecke (Rust `object_outline`); Umrisse werden je Objekt gemerkt.
+    @Published var hoverOutline: [[CGPoint]]?
+    @Published private(set) var hoveredObject: Int?
+    /// Die Maus steht auf der Arbeitsfläche (die Liste scrollt dann mit).
+    private(set) var hoverFromCanvas = false
+    /// Umrisse aller Objekte für den Treffertest auf der Arbeitsfläche.
+    private(set) var objectOutlines: [[[CGPoint]]]?
+    private var outlinesLoading = false
+    private var outlineCache: [Int: [[CGPoint]]] = [:]
+    private var processingGeneration = 0
     @Published var showJobPreview = false
     @Published var showProcessing = true
     @Published var image: NSImage?
@@ -494,6 +568,62 @@ final class AppModel: ObservableObject {
     // MARK: Teile
 
     /// Lädt die Vorschaubilder der Teile im Hintergrund (nur bei mehreren Teilen).
+    /// Hebt das Objekt unter der Maus in der Objektliste auf der Arbeitsfläche hervor.
+    func hoverObject(_ index: Int?, fromCanvas: Bool = false) {
+        hoverFromCanvas = fromCanvas && index != nil
+        if hoveredObject != index { hoveredObject = index }
+        guard let index else { hoverOutline = nil; return }
+        if let all = objectOutlines, all.indices.contains(index) { hoverOutline = all[index]; return }
+        if let cached = outlineCache[index] { hoverOutline = cached; return }
+        let snapshot = project
+        DispatchQueue.global(qos: .userInitiated).async {
+            let response = try? RustCore.decode("object_outline", project: snapshot, values: ["index": index]) as OutlineResponse
+            DispatchQueue.main.async {
+                let outline = response?.contours.map { $0.map { CGPoint(x: $0[0], y: $0[1]) } } ?? []
+                // Nur für den Stand, aus dem der Umriss stammt.
+                guard snapshot.svg == self.project.svg, snapshot.width_mm == self.project.width_mm,
+                      snapshot.height_mm == self.project.height_mm else { return }
+                self.outlineCache[index] = outline
+                if self.hoveredObject == index { self.hoverOutline = outline }
+            }
+        }
+    }
+
+    /// Holt die Umrisse aller Objekte einmal im Hintergrund (für den Treffertest).
+    func ensureObjectOutlines() {
+        guard objectOutlines == nil, !outlinesLoading, project.hasArtwork else { return }
+        outlinesLoading = true
+        let snapshot = project
+        DispatchQueue.global(qos: .userInitiated).async {
+            let response = try? RustCore.decode("object_outlines", project: snapshot) as OutlinesResponse
+            DispatchQueue.main.async {
+                self.outlinesLoading = false
+                guard snapshot.svg == self.project.svg, snapshot.width_mm == self.project.width_mm,
+                      snapshot.height_mm == self.project.height_mm else { return }
+                self.objectOutlines = response?.outlines.map { $0.map { $0.map { CGPoint(x: $0[0], y: $0[1]) } } } ?? []
+            }
+        }
+    }
+
+    /// Rechnet die farbige Bearbeitung kurz nach der letzten Änderung im
+    /// Hintergrund neu; ältere Ergebnisse werden verworfen.
+    func scheduleProcessingRefresh() {
+        processingGeneration += 1
+        let generation = processingGeneration
+        guard project.hasArtwork else { processingImage = nil; return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            guard generation == self.processingGeneration else { return }
+            let snapshot = self.project
+            DispatchQueue.global(qos: .userInitiated).async {
+                let preview = try? RustCore.decode("processing_preview", project: snapshot) as Preview
+                DispatchQueue.main.async {
+                    guard generation == self.processingGeneration else { return }
+                    self.processingImage = preview.flatMap { NSImage(data: Data($0.png)) }
+                }
+            }
+        }
+    }
+
     func refreshPartImages() {
         partImageGeneration += 1
         let generation = partImageGeneration
@@ -693,10 +823,17 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Ohne gewähltes Material fehlen die Laserparameter: das sagen statt einer Leistungsgrenze.
+    private func requireMaterial() -> Bool {
+        guard project.material.trimmingCharacters(in: .whitespaces).isEmpty else { return true }
+        error = tr("Kein Material zum Lasern gewählt: unter „Material“ ein Material wählen (oder „Eigenes Material …“ mit eigener Leistung).")
+        return false
+    }
+
     func export() {
-        guard sendEnabled else { return }
+        guard sendEnabled, requireMaterial() else { return }
         do {
-            let prepared: PreparedJob = try preparedJob ?? RustCore.decode("prepare", project: project)
+            let prepared: PreparedJob = try preparedJob ?? RustCore.decode("prepare", project: project, values: ["single_job": singleJob])
             guard let first = prepared.jobs.first else { return }
             if prepared.jobs.count == 1 {
                 let panel = NSSavePanel()
@@ -790,20 +927,25 @@ final class AppModel: ObservableObject {
         project.steps[index].passes = 1
     }
 
-    func previewJob() {
-        guard sendEnabled else { return }
-        if preparedJob != nil { showJobPreview = true; return }
+    /// Berechnet Auftragsvorschau und Zeit; mit `refresh` neu, wobei die
+    /// bisherige Vorschau bis zum Ergebnis sichtbar bleibt (kein Neuaufbau).
+    func previewJob(refresh: Bool = false) {
+        guard sendEnabled, requireMaterial() else { return }
+        if preparedJob != nil && !refresh { showJobPreview = true; return }
         busy = true
         status = tr("Auftragsvorschau und Bearbeitungszeit werden berechnet …")
         let snapshot = project
+        let single = singleJob
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Result { try RustCore.decode("prepare", project: snapshot) as PreparedJob }
+            let result = Result { try RustCore.decode("prepare", project: snapshot, values: ["single_job": single]) as PreparedJob }
             DispatchQueue.main.async {
                 self.busy = false
                 guard self.project == snapshot else {
                     self.status = tr("Auftrag geändert. Vorschau und Zeit neu berechnen.")
                     return
                 }
+                // Inzwischen erneut umgeschaltet: das spätere Ergebnis zählt.
+                guard self.singleJob == single else { return }
                 switch result {
                 case .success(let prepared):
                     self.playback.seek(0, duration: prepared.estimated_seconds)
@@ -829,7 +971,7 @@ final class AppModel: ObservableObject {
         alert.messageText = prepared.jobs.count == 1
             ? tr("{count} Auftrag an den Lasercutter senden?", count)
             : tr("{count} Aufträge an den Lasercutter senden?", count)
-        let jobs = tr("Aufträge: {jobs} (je Verfahren ein separater Auftrag) · ca. {time}",
+        let jobs = tr("Aufträge: {jobs} · ca. {time}",
                       ["jobs": prepared.jobs.map(\.name).joined(separator: " → "), "time": duration(prepared.estimated_seconds)])
         let target = tr("Lasercutter: {name} ({host}:{port})",
                         ["name": device.name, "host": snapshot.hostname, "port": String(snapshot.port)])
@@ -841,8 +983,9 @@ final class AppModel: ObservableObject {
         showJobPreview = false
         busy = true
         status = tr("Job wird an den Lasercutter übertragen …")
+        let single = singleJob
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Result { try RustCore.decode("transmit", project: snapshot) as TransmissionResponse }
+            let result = Result { try RustCore.decode("transmit", project: snapshot, values: ["single_job": single]) as TransmissionResponse }
             DispatchQueue.main.async {
                 self.busy = false
                 switch result {
@@ -869,6 +1012,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
     var materialsWindow: NSWindow?
     /// Untermenü „Zuletzt geöffnet“ (wird bei jedem Aufklappen neu gefüllt).
     private var recentMenu: NSMenu?
+    /// Untermenü „Ablage → Lasercutter“ (wird bei jedem Aufklappen neu gefüllt).
+    private var deviceMenu: NSMenu?
     private var changes: AnyCancellable?
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -908,7 +1053,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
             // Mit .fullSizeContentView: Die geteilte Ansicht zeichnet ihren Symbolleisten-Bereich
             // sonst zusätzlich in den Inhalt, der Kopf der Arbeitsfläche wirkt verblasst und angeschnitten.
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
-        window.contentView = NSHostingView(rootView: Workspace(model: model))
+        let hosting = NSHostingView(rootView: Workspace(model: model))
+        // Sonst ersetzt SwiftUI die Symbolleiste des Fensters durch eine eigene,
+        // die nur den Seitenleisten-Knopf enthält; der Titel kommt aus refreshWindow().
+        hosting.sceneBridgingOptions = []
+        window.contentView = hosting
         // Widerrufen von Werkzeug- und Löschaktionen über Bearbeiten → Widerrufen.
         model.undoManager = window.undoManager
         window.minSize = NSSize(width: 960, height: 700)
@@ -952,7 +1101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         let app = submenu("VisiCutRust")
         app.addItem(menuItem(tr("Über VisiCutRust"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), target: NSApp))
         app.addItem(.separator())
-        app.addItem(menuItem(tr("Lasercutter …"), action: #selector(showSettings), key: ","))
+        app.addItem(menuItem(tr("Einstellungen …"), action: #selector(showSettings), key: ","))
         app.addItem(.separator())
         let services = NSMenuItem(title: tr("Dienste"), action: nil, keyEquivalent: "")
         services.submenu = NSMenu(title: tr("Dienste")); app.addItem(services); NSApp.servicesMenu = services.submenu
@@ -977,6 +1126,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         file.addItem(menuItem(tr("Hinzufügen …"), action: #selector(addFiles), key: "o", modifiers: [.command, .shift]))
         file.addItem(menuItem(tr("Beispiel öffnen"), action: #selector(openDemo)))
         file.addItem(menuItem(tr("Bitmap vektorisieren …"), action: #selector(vectorizeBitmap)))
+        file.addItem(.separator())
+        // Aktiver Lasercutter und Einstellungen statt einer Auswahl in der Seitenleiste.
+        let devices = NSMenu(title: tr("Lasercutter"))
+        devices.delegate = self
+        deviceMenu = devices
+        fillDeviceMenu(devices)
+        let devicesItem = NSMenuItem(title: tr("Lasercutter"), action: nil, keyEquivalent: "")
+        devicesItem.submenu = devices
+        file.addItem(devicesItem)
+        file.addItem(menuItem(tr("Einstellungen …"), action: #selector(showSettings)))
         file.addItem(.separator())
         file.addItem(menuItem(tr("Sichern"), action: #selector(saveProject), key: "s"))
         file.addItem(menuItem(tr("Sichern unter …"), action: #selector(saveAs), key: "s", modifiers: [.command, .shift]))
@@ -1008,7 +1167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         object.addItem(menuItem(tr("Horizontal spiegeln"), action: #selector(flipHorizontal)))
         object.addItem(menuItem(tr("Vertikal spiegeln"), action: #selector(flipVertical)))
         let view = submenu(tr("Darstellung"))
-        view.addItem(menuItem(tr("Ansicht einpassen"), action: #selector(fitView), key: "0"))
+        view.addItem(menuItem(tr("Zoom zurücksetzen"), action: #selector(fitView), key: "0"))
         view.addItem(menuItem(tr("Raster anzeigen"), action: #selector(toggleGrid)))
         view.addItem(.separator())
         view.addItem(menuItem(tr("Kamerabild anzeigen"), action: #selector(toggleCamera), key: "k"))
@@ -1033,6 +1192,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         job.addItem(menuItem(tr("FAU-Materialprofil übernehmen"), action: #selector(applyProfile)))
         job.addItem(menuItem(tr("Materialbibliothek …"), action: #selector(showMaterials), key: "m", modifiers: [.command, .shift]))
         job.addItem(menuItem(tr("Auftragsvorschau und Zeit …"), action: #selector(previewJob), key: "p", modifiers: [.command, .shift]))
+        job.addItem(.separator())
+        // Reihenfolge der Schnitt- und Markierpfade; das Häkchen setzt validateMenuItem.
+        let order = NSMenu(title: tr("Schnittreihenfolge"))
+        for cutOrder in CutOrder.allCases {
+            let item = menuItem(cutOrder.title, action: #selector(chooseCutOrder(_:)))
+            item.representedObject = cutOrder.rawValue
+            item.toolTip = cutOrder.help
+            order.addItem(item)
+        }
+        let orderItem = NSMenuItem(title: tr("Schnittreihenfolge"), action: nil, keyEquivalent: "")
+        orderItem.submenu = order
+        job.addItem(orderItem)
         job.addItem(.separator())
         job.addItem(menuItem(tr("An Lasercutter senden …"), action: #selector(sendJob)))
         let windows = submenu(tr("Fenster"))
@@ -1061,7 +1232,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         menu.addItem(menuItem(tr("Liste leeren"), action: #selector(clearRecent)))
     }
 
+    /// Eingerichtete Lasercutter; der aktive hat ein Häkchen.
+    private func fillDeviceMenu(_ menu: NSMenu) {
+        menu.removeAllItems()
+        for (index, device) in model.devices.devices.enumerated() {
+            let item = menuItem(device.name, action: #selector(chooseDevice(_:)))
+            item.representedObject = index
+            item.state = index == model.devices.selected ? .on : .off
+            item.toolTip = "\(device.hostname):\(device.port)"
+            menu.addItem(item)
+        }
+    }
+    @objc func chooseDevice(_ sender: NSMenuItem) {
+        guard let index = sender.representedObject as? Int else { return }
+        model.selectDevice(index)
+        refreshWindow()
+    }
+
     func menuNeedsUpdate(_ menu: NSMenu) {
+        if menu === deviceMenu { fillDeviceMenu(menu) }
         if menu === recentMenu { fillRecentMenu(menu) }
     }
 
@@ -1070,6 +1259,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         showWorkspace()
         // Erst nach dem Schließen des Menüs öffnen (Zwischenspeichern, Liste wird neu sortiert).
         DispatchQueue.main.async { self.model.openRecent(path) }
+    }
+    @objc func chooseCutOrder(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let order = CutOrder(rawValue: raw),
+              model.project.cut_order != order else { return }
+        model.project.cut_order = order
     }
     @objc func clearRecent() {
         RecentFiles.clear()
@@ -1105,7 +1299,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
             item.label = spec.0; item.paletteLabel = spec.0; item.toolTip = spec.0
             item.image = NSImage(systemSymbolName: spec.1, accessibilityDescription: spec.0)
         }
-        settingsWindow?.title = tr("Lasercutter")
+        settingsWindow?.title = tr("Einstellungen")
         materialsWindow?.title = tr("Materialbibliothek")
         model.objectWillChange.send()
         refreshWindow()
@@ -1123,7 +1317,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         case #selector(toggleGrid): item.state = model.showGrid ? .on : .off; return true
         case #selector(toggleCamera): item.state = model.showCamera ? .on : .off; return !model.device.camera_url.isEmpty
         case #selector(refreshCamera): return model.showCamera && !model.cameraLoading
-        case #selector(openFile), #selector(openDemo), #selector(newProject), #selector(showSettings), #selector(openRecent(_:)): return !model.busy
+        case #selector(openFile), #selector(openDemo), #selector(newProject), #selector(showSettings), #selector(openRecent(_:)),
+             #selector(chooseDevice(_:)): return !model.busy
+        case #selector(chooseCutOrder(_:)):
+            item.state = (item.representedObject as? String) == model.project.cut_order.rawValue ? .on : .off
+            return !model.busy
         case #selector(clearRecent): return !RecentFiles.paths.isEmpty
         case #selector(clearCache): return !model.busy && SessionCache.enabled && SessionCache.count > 0
         case #selector(addFiles): return !model.busy && !model.showJobPreview && model.composeTool == nil
@@ -1184,13 +1382,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         if let window = settingsWindow { window.makeKeyAndOrderFront(nil); return }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 560), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.contentView = NSHostingView(rootView: DeviceSettings(model: model))
-        window.title = tr("Lasercutter")
+        window.title = tr("Einstellungen")
         window.isReleasedWhenClosed = false
         settingsWindow = window
         window.center(); window.makeKeyAndOrderFront(nil)
     }
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) + [.space] }
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [.init("open"), .init("save"), .flexibleSpace, .init("preview"), .init("export"), .init("send")] }
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [.toggleSidebar, .init("open"), .init("save"), .flexibleSpace, .init("preview"), .init("export"), .init("send")] }
     /// Beschriftung, Symbol und Aktion eines Symbolleistenelements.
     private func toolbarSpec(_ identifier: NSToolbarItem.Identifier) -> (String, String, Selector)? {
         switch identifier.rawValue {
@@ -1245,7 +1443,11 @@ struct Workspace: View {
             VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(model.project.hasArtwork ? model.project.name : tr("Arbeitsbereich")).font(.title2).fontWeight(.semibold)
+                        if model.project.hasArtwork {
+                            EditableTitle(text: $model.project.name)
+                        } else {
+                            Text(tr("Arbeitsbereich")).font(.title2).fontWeight(.semibold)
+                        }
                         Text(bedSummary).foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -1263,7 +1465,9 @@ struct Workspace: View {
                     Button { model.zoomBy(1 / 1.25) } label: { Image(systemName: "minus.magnifyingglass") }.help(tr("Verkleinern"))
                     Text("\(Int(model.zoom * 100)) %").monospacedDigit().frame(width: 48)
                     Button { model.zoomBy(1.25) } label: { Image(systemName: "plus.magnifyingglass") }.help(tr("Vergrößern"))
-                    Button(tr("Einpassen")) { model.fitZoom() }
+                    // 100 % zeigt das ganze Arbeitsbett.
+                    Button(tr("Zurücksetzen")) { model.fitZoom() }
+                        .help(tr("Zoom auf 100 % zurücksetzen (ganzes Arbeitsbett)"))
                 }.buttonStyle(.borderless).padding(20)
                 if model.project.hasArtwork && !model.project.fitsBed {
                     Label(tr("Das Motiv liegt außerhalb des Arbeitsbetts und kann so nicht gesendet werden."), systemImage: "exclamationmark.triangle.fill")
@@ -1284,6 +1488,10 @@ struct Workspace: View {
                     } else {
                         Text(tr("Nach Änderungen neu berechnen")).font(.caption).foregroundStyle(.secondary)
                         Spacer()
+                        if model.processingImage != nil {
+                            Toggle(tr("Bearbeitung anzeigen"), isOn: $model.showProcessing)
+                            Text(tr("Rot: Schnitt · Blau: Gravur · Orange: 3D · Violett: Markieren")).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }.padding(.horizontal, 20).padding(.vertical, 10)
                 Divider()
@@ -1340,20 +1548,29 @@ struct Workspace: View {
     }
 }
 
+private struct ObjectRowsHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 struct Inspector: View {
     @ObservedObject var model: AppModel
+    /// Gemessene Höhe aller Zeilen der Objektliste.
+    @State private var objectRowsHeight: CGFloat = 0
+    /// Bis zu so vielen Objekten wächst die Liste mit, darüber scrollt sie.
+    private let visibleObjects = 5
     var material: Binding<String> { Binding(get: { model.materialSelection }, set: { model.selectMaterial($0) }) }
+
+    /// Höhe passend zur Anzahl; ab mehr als `visibleObjects` Zeilen scrollbar.
+    private var objectListHeight: CGFloat {
+        let count = model.objects.count
+        guard count > 0, objectRowsHeight > 0 else { return CGFloat(min(count, visibleObjects)) * 32 + 8 }
+        guard count > visibleObjects else { return objectRowsHeight }
+        return 8 + (objectRowsHeight - 8) / CGFloat(count) * CGFloat(visibleObjects)
+    }
 
     var body: some View {
         Form {
-            Section(tr("Projekt")) {
-                TextField(tr("Name"), text: $model.project.name)
-                LabeledContent(tr("Lasercutter")) {
-                    NativePopup(options: model.devices.devices.indices.map { PopupOption(String($0), model.devices.devices[$0].name) },
-                        selection: Binding(get: { String(model.devices.selected) }, set: { if let index = Int($0) { model.selectDevice(index) } }),
-                        identifier: "devicePicker", maxWidth: 210)
-                }
-            }
             if model.device.rotary_axis {
                 Section(tr("Rotationseinheit")) {
                     Toggle(tr("Rotationseinheit verwenden"), isOn: $model.project.rotary_axis)
@@ -1417,10 +1634,9 @@ struct Inspector: View {
                          + " " + tr("Vorlage wählen oder Bedingungen (Farbe, Linienstärke, Ebene, Typ, ID) anpassen; „Rest“ erfasst alle übrigen Objekte.")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 if model.assignmentMode == .objects {
-                    Text(tr("Schneiden, gravieren, markieren oder ignorieren."))
-                        .font(.caption).foregroundStyle(.secondary)
+                    ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
                             ForEach(model.objects) { object in
                                 HStack {
                                     Text(object.label).lineLimit(2).font(.callout)
@@ -1428,27 +1644,32 @@ struct Inspector: View {
                                     AssignmentMenu(selection: Binding(get: { model.assignment(object.id) },
                                         set: { model.assign(object.id, to: $0) }))
                                 }
+                                .padding(.horizontal, 6).padding(.vertical, 3)
+                                // Ausgewählt: Objekt unter der Maus (Liste oder Arbeitsfläche).
+                                .background(RoundedRectangle(cornerRadius: 6)
+                                    .fill(model.hoveredObject == object.id ? Color.accentColor.opacity(0.2) : Color.clear))
+                                .id(object.id)
                                 .contextMenu { Button(tr("Objekt löschen")) { model.deleteObject(object.id) } }
+                                .contentShape(Rectangle())
+                                // Objekt unter der Maus auf der Arbeitsfläche hervorheben.
+                                .onHover { inside in
+                                    if inside { model.hoverObject(object.id) }
+                                    else if model.hoveredObject == object.id { model.hoverObject(nil) }
+                                }
 
                             }
                         }.padding(.vertical, 4)
-                    }.frame(height: min(220, Double(model.objects.count) * 38))
-                }
-                if model.assignmentMode != .whole {
-                    Text(tr("Ein LTT-Auftrag je Verfahren: Engrav › Eng3D › Mark › Cut")).font(.caption).foregroundStyle(.secondary)
-                }
-                LabeledContent(tr("Schnittreihenfolge")) {
-                    NativePopup(options: CutOrder.allCases.map { PopupOption($0.rawValue, $0.title) },
-                        selection: Binding(get: { model.project.cut_order.rawValue }, set: {
-                            if let order = CutOrder(rawValue: $0) { model.project.cut_order = order }
-                        }), identifier: "cutOrderPicker")
-                        .fixedSize()
-                }
-                if model.project.cut_order == .shortestTravel {
-                    Text(tr("Experimentell: Die Reihenfolge der Schnitt- und Markierpfade weicht von VisiCut ab und ist am Gerät nicht erprobt. Den Auftrag am Gerät beaufsichtigen."))
-                        .font(.caption).foregroundStyle(.orange)
-                } else {
-                    Text(tr("Innere Konturen zuerst, Reihenfolge wie VisiCut.")).font(.caption).foregroundStyle(.secondary)
+                        .background(GeometryReader { geometry in
+                            Color.clear.preference(key: ObjectRowsHeight.self, value: geometry.size.height)
+                        })
+                    }
+                    .onPreferenceChange(ObjectRowsHeight.self) { objectRowsHeight = $0 }
+                    .frame(height: objectListHeight)
+                    // Steht die Maus auf der Arbeitsfläche, die Zeile ins Bild holen.
+                    .onChange(of: model.hoveredObject) { _, index in
+                        if model.hoverFromCanvas, let index { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(index, anchor: .center) } }
+                    }
+                    }
                 }
                 Toggle(tr("Doppelte Linien entfernen"), isOn: $model.project.remove_duplicate_lines)
                     .help(tr("Linien, die genau auf einer bereits geschnittenen Linie desselben Schritts liegen (z. B. gemeinsame Kanten), nur einmal schneiden"))
@@ -1476,7 +1697,11 @@ struct Inspector: View {
             }
             } else {
                 ForEach(model.project.steps.indices, id: \.self) { index in
-                    StepInspector(model: model, index: index)
+                    // In „Einzeln“ nur Verfahren, denen Objekte zugeordnet sind;
+                    // die Einstellungen der übrigen bleiben erhalten.
+                    if model.assignmentMode != .objects || model.objectCount(index) > 0 {
+                        StepInspector(model: model, index: index)
+                    }
                 }
             }
             Section(tr("Position und Größe")) {
@@ -1559,6 +1784,84 @@ struct AssignmentMenu: View {
     }
 }
 
+/// Farbige Bearbeitung im Schrittkopf mit Pfeil; ein Klick öffnet das Menü
+/// der Bearbeitungen. Ein SwiftUI-`Menu` würde die Farbe verlieren.
+struct OperationSwitcher: View {
+    let operation: Operation
+    let choose: (Operation) -> Void
+    var body: some View {
+        Button(action: show) {
+            HStack(spacing: 4) {
+                Label(operation.title, systemImage: operation.symbol).fontWeight(.semibold)
+                Image(systemName: "chevron.down").font(.caption2.weight(.bold))
+            }
+            .foregroundStyle(operation.color)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(tr("Bearbeitung ändern"))
+        .accessibilityLabel(tr("Bearbeitung ändern"))
+        .accessibilityValue(operation.title)
+    }
+    private func show() {
+        guard let window = NSApp.keyWindow, let view = window.contentView else { return }
+        let handler = Handler(choose)
+        let menu = NSMenu()
+        for candidate in Operation.allCases {
+            let item = NSMenuItem(title: candidate.title, action: #selector(Handler.chosen(_:)), keyEquivalent: "")
+            item.target = handler
+            item.representedObject = candidate.rawValue
+            item.image = NSImage(systemSymbolName: candidate.symbol, accessibilityDescription: nil)
+            item.state = candidate == operation ? .on : .off
+            menu.addItem(item)
+        }
+        // popUp läuft modal; der Handler lebt bis zur Auswahl.
+        menu.popUp(positioning: nil, at: view.convert(window.mouseLocationOutsideOfEventStream, from: nil), in: view)
+        _ = handler
+    }
+    private final class Handler: NSObject {
+        let choose: (Operation) -> Void
+        init(_ choose: @escaping (Operation) -> Void) { self.choose = choose }
+        @objc func chosen(_ sender: NSMenuItem) {
+            if let raw = sender.representedObject as? String, let operation = Operation(rawValue: raw) { choose(operation) }
+        }
+    }
+}
+
+/// Projektname über der Arbeitsfläche; Doppelklick zum Umbenennen, ⏎ oder
+/// Klick daneben übernimmt, Esc bricht ab.
+struct EditableTitle: View {
+    @Binding var text: String
+    @State private var draft = ""
+    @State private var editing = false
+    @FocusState private var focused: Bool
+    var body: some View {
+        if editing {
+            TextField(tr("Projektname"), text: $draft)
+                .font(.title2).fontWeight(.semibold)
+                .textFieldStyle(.plain)
+                .focused($focused)
+                .onSubmit(commit)
+                .onExitCommand { editing = false }
+                .onChange(of: focused) { _, isFocused in if !isFocused { commit() } }
+                .onAppear { focused = true }
+                .frame(maxWidth: 420, alignment: .leading)
+        } else {
+            Text(text).font(.title2).fontWeight(.semibold)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { draft = text; editing = true }
+                .help(tr("Doppelklick zum Umbenennen"))
+                .accessibilityAction(named: tr("Umbenennen")) { draft = text; editing = true }
+        }
+    }
+    private func commit() {
+        guard editing else { return }
+        editing = false
+        let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty && name != text { text = name }
+    }
+}
+
 struct StepInspector: View {
     @ObservedObject var model: AppModel
     let index: Int
@@ -1575,10 +1878,17 @@ struct StepInspector: View {
     var body: some View {
         Section {
             HStack {
-                Label(step.operation.title, systemImage: step.operation.symbol)
-                    .fontWeight(.semibold).foregroundStyle(step.operation.color)
+                if step.isRule {
+                    // Bearbeitung umschaltbar; Bedingungen bleiben erhalten.
+                    OperationSwitcher(operation: step.operation) { model.changeRuleStep(index, to: $0) }
+                } else {
+                    Label(step.operation.title, systemImage: step.operation.symbol)
+                        .fontWeight(.semibold).foregroundStyle(step.operation.color)
+                }
                 Spacer()
                 if step.isRule {
+                    Button { model.insertRuleStep(after: index) } label: { Image(systemName: "plus") }
+                        .buttonStyle(.borderless).help(tr("Schritt mit gleicher Bearbeitung darunter einfügen"))
                     Button { if model.project.steps.indices.contains(index) { model.project.steps.remove(at: index) } } label: { Image(systemName: "trash") }
                         .buttonStyle(.borderless).help(tr("Schritt entfernen"))
                 }
@@ -1664,7 +1974,13 @@ struct JobPreview: View {
                             .font(.caption).foregroundStyle(.secondary)
                         Text("\(ByteCountFormatter.string(fromByteCount: Int64(prepared.byteCount), countStyle: .file)) · \(model.project.hostname):\(String(model.project.port))")
                             .font(.caption).foregroundStyle(.secondary)
-                        Text(tr("{count} Einzelaufträge · Engrav → Eng3D → Mark → Cut", ["count": prepared.jobs.count])).font(.caption).foregroundStyle(.secondary)
+                        Divider()
+                        Toggle(tr("Alles in eine Datei"), isOn: $model.singleJob)
+                            .help(tr("Alle Verfahren in einem LTT-Auftrag statt einem je Verfahren"))
+                        Text(model.singleJob
+                             ? tr("Ein Auftrag mit allen Verfahren: Gravuren zuerst, dann Markieren und Schneiden.")
+                             : tr("{count} Einzelaufträge · Engrav → Eng3D → Mark → Cut; jeder wird am Gerät einzeln gestartet.", ["count": prepared.jobs.count]))
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                     }.frame(width: 270, alignment: .leading)
                 }
@@ -1851,6 +2167,23 @@ final class BedView: NSView {
     private var originalPosition = NSPoint.zero
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+    /// In „Einzeln“: Objekt unter der Maus in der Liste als ausgewählt zeigen.
+    override func mouseMoved(with event: NSEvent) {
+        guard model.assignmentMode == .objects, model.project.hasArtwork else { return }
+        guard let outlines = model.objectOutlines else { model.ensureObjectOutlines(); return }
+        let p = convert(event.locationInWindow, from: nil)
+        let mm = CGPoint(x: (p.x - bed.minX) / scale - model.project.x_mm, y: (p.y - bed.minY) / scale - model.project.y_mm)
+        let hit = objectAt(outlines, mm, tolerance: 4 / scale)
+        if hit != model.hoveredObject || (hit != nil && !model.hoverFromCanvas) { model.hoverObject(hit, fromCanvas: true) }
+    }
+    override func mouseExited(with event: NSEvent) {
+        if model.hoverFromCanvas { model.hoverObject(nil) }
+    }
     init(model: AppModel) {
         self.model = model
         super.init(frame: .zero)
@@ -1888,13 +2221,16 @@ final class BedView: NSView {
     }
     override func scrollWheel(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if event.hasPreciseScrollingDeltas && !event.modifierFlags.contains(.command) && model.zoom > 1 {
+        // Trackpad (und Magic Mouse) liefern Gesten-Phasen, ein Mausrad nicht –
+        // auch keines mit feiner Auflösung (z. B. weiches Scrollen bei Logitech).
+        let gesture = event.phase != [] || event.momentumPhase != []
+        if gesture && !event.modifierFlags.contains(.command) && model.zoom > 1 {
             // Zwei Finger auf dem Trackpad verschieben das vergrößerte Bett.
             let pan = clamped(model.pan)
             model.pan = clamped(CGSize(width: pan.width + event.scrollingDeltaX, height: pan.height + event.scrollingDeltaY))
             needsDisplay = true
         } else {
-            // Mausrad (oder ⌘ + Scrollen) zoomt.
+            // Mausrad (oder ⌘ + Scrollen) zoomt, auch über 100 % hinaus.
             let delta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY / 50 : event.scrollingDeltaY / 5
             guard delta != 0 else { return }
             zoom(by: pow(1.1, delta), at: point)
@@ -1931,28 +2267,43 @@ final class BedView: NSView {
         }
         let path = NSBezierPath(rect: bed); path.lineWidth = 1
         NSColor(calibratedWhite: 0.65, alpha: 1).setStroke(); path.stroke()
-        if model.showGrid && !(model.showCamera && model.cameraImage != nil) {
-            let grid = NSBezierPath(); grid.lineWidth = 0.5
-            let step = max(10, ceil(12 / scale / 10) * 10)
-            for x in stride(from: 0.0, through: model.project.bed_width_mm, by: step) {
-                grid.move(to: NSPoint(x: bed.minX + x * scale, y: bed.minY))
-                grid.line(to: NSPoint(x: bed.minX + x * scale, y: bed.maxY))
+        // Raster und Lineal in der Reihe 1 – 2 – 5 (… 1, 2, 5, 10, 20, 50 mm …);
+        // die Rasterlinien an den Linealzahlen sind kräftiger.
+        func niceStep(_ minPoints: Double) -> Double {
+            for exponent in -1...3 {
+                for mantissa in [1.0, 2.0, 5.0] {
+                    let step = mantissa * pow(10, Double(exponent))
+                    if step <= 1000 && step * scale >= minPoints { return step }
+                }
             }
-            for y in stride(from: 0.0, through: model.project.bed_height_mm, by: step) {
-                grid.move(to: NSPoint(x: bed.minX, y: bed.minY + y * scale))
-                grid.line(to: NSPoint(x: bed.maxX, y: bed.minY + y * scale))
+            return 1000
+        }
+        let labelStep = niceStep(40)
+        let visible = bed.intersection(bounds)
+        func marks(_ length: Double, _ step: Double, from: Double, to: Double) -> [Double] {
+            let first = max(0, floor(from / step)), last = min(floor(length / step + 1e-6), ceil(to / step))
+            guard first <= last else { return [] }
+            return (Int(first)...Int(last)).map { Double($0) * step }
+        }
+        let xRange = ((visible.minX - bed.minX) / scale, (visible.maxX - bed.minX) / scale)
+        let yRange = ((visible.minY - bed.minY) / scale, (visible.maxY - bed.minY) / scale)
+        if model.showGrid && !(model.showCamera && model.cameraImage != nil) && !visible.isEmpty {
+            let step = niceStep(6)
+            let fine = NSBezierPath(), major = NSBezierPath()
+            fine.lineWidth = 0.5; major.lineWidth = 0.5
+            func isMajor(_ mm: Double) -> Bool { abs((mm / labelStep).rounded() * labelStep - mm) < step * 0.01 }
+            for x in marks(model.project.bed_width_mm, step, from: xRange.0, to: xRange.1) {
+                let line = isMajor(x) ? major : fine
+                line.move(to: NSPoint(x: bed.minX + x * scale, y: bed.minY))
+                line.line(to: NSPoint(x: bed.minX + x * scale, y: bed.maxY))
             }
-            NSColor(calibratedWhite: 0.84, alpha: 1).setStroke(); grid.stroke()
-        }
-        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular), .foregroundColor: NSColor.secondaryLabelColor]
-        for x in stride(from: 0.0, through: model.project.bed_width_mm, by: 100.0) {
-            (String(Int(x)) as NSString).draw(at: NSPoint(x: bed.minX + x * scale - 8, y: 10), withAttributes: attributes)
-        }
-        // Bei Nullpunkt unten links zählt die Y-Skala vom unteren Bettrand aufwärts.
-        let bottomLeft = model.originBottomLeft
-        for y in stride(from: 0.0, through: model.project.bed_height_mm, by: 100.0) {
-            let position = bottomLeft ? model.project.bed_height_mm - y : y
-            (String(Int(y)) as NSString).draw(at: NSPoint(x: 2, y: bed.minY + position * scale - 6), withAttributes: attributes)
+            for y in marks(model.project.bed_height_mm, step, from: yRange.0, to: yRange.1) {
+                let line = isMajor(y) ? major : fine
+                line.move(to: NSPoint(x: bed.minX, y: bed.minY + y * scale))
+                line.line(to: NSPoint(x: bed.maxX, y: bed.minY + y * scale))
+            }
+            NSColor(calibratedWhite: 0.89, alpha: 1).setStroke(); fine.stroke()
+            NSColor(calibratedWhite: 0.78, alpha: 1).setStroke(); major.stroke()
         }
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: bed).addClip()
@@ -1960,6 +2311,9 @@ final class BedView: NSView {
         if model.showProcessing, let job = model.jobImage {
             // Die Auftragsvorschau umfasst alle Teile.
             job.draw(in: viewRect(model.project.partsBounds), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: hints)
+        } else if model.showProcessing, let live = model.processingImage {
+            // Bearbeitung in Farbe, schon vor der Auftragsvorschau.
+            live.draw(in: viewRect(model.project.partsBounds), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: hints)
         } else {
             for part in model.partImages where !part.active {
                 part.image?.draw(in: viewRect(part.rect), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: hints)
@@ -1973,9 +2327,49 @@ final class BedView: NSView {
             frame.lineWidth = 0.75
             frame.stroke()
         }
-        let selection = NSBezierPath(rect: motif); selection.lineWidth = 1.5
-        NSColor.controlAccentColor.setStroke(); selection.stroke()
+        // Auswahl schwarz gestrichelt: Blau, Rot, Orange und Violett stehen
+        // für Bearbeitungen und dürfen nicht verwechselt werden.
+        let selection = NSBezierPath(rect: motif.insetBy(dx: 0.5, dy: 0.5)); selection.lineWidth = 1
+        selection.setLineDash([5, 3], count: 2, phase: 0)
+        NSColor(calibratedWhite: 0, alpha: 0.75).setStroke(); selection.stroke()
+        // Objekt unter der Maus in der Objektliste: gelb (keine Bearbeitungsfarbe).
+        if let outline = model.hoverOutline, model.assignmentMode == .objects {
+            let path = NSBezierPath()
+            for contour in outline {
+                for (i, p) in contour.enumerated() {
+                    let point = NSPoint(x: bed.minX + (model.project.x_mm + p.x) * scale, y: bed.minY + (model.project.y_mm + p.y) * scale)
+                    if i == 0 { path.move(to: point) } else { path.line(to: point) }
+                }
+            }
+            path.lineJoinStyle = .round; path.lineCapStyle = .round
+            path.lineWidth = 4; NSColor.systemYellow.withAlphaComponent(0.9).setStroke(); path.stroke()
+            path.lineWidth = 1; NSColor(calibratedWhite: 0, alpha: 0.7).setStroke(); path.stroke()
+        }
         NSGraphicsContext.restoreGraphicsState()
+        // Lineale in eigenen Randstreifen über der Fläche: auch vergrößert oder
+        // verschoben (und im Dunkelmodus) bleiben die Zahlen lesbar.
+        NSColor.underPageBackgroundColor.setFill()
+        NSRect(x: 0, y: 0, width: 30, height: bounds.height).fill()
+        NSRect(x: 0, y: 0, width: bounds.width, height: 26).fill()
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular), .foregroundColor: NSColor.secondaryLabelColor]
+        func label(_ mm: Double) -> NSString { (labelStep >= 1 ? String(Int(mm.rounded())) : String(format: "%.1f", mm)) as NSString }
+        for x in marks(model.project.bed_width_mm, labelStep, from: xRange.0, to: xRange.1) {
+            let text = label(x), width = text.size(withAttributes: attributes).width
+            let px = bed.minX + x * scale - width / 2
+            // Nicht in die Ecke mit der Einheit schreiben.
+            if px >= 30 { text.draw(at: NSPoint(x: px, y: 10), withAttributes: attributes) }
+        }
+        // Bei Nullpunkt unten links zählt die Y-Skala vom unteren Bettrand aufwärts.
+        let bottomLeft = model.originBottomLeft
+        for y in marks(model.project.bed_height_mm, labelStep, from: 0, to: model.project.bed_height_mm) {
+            let position = bottomLeft ? model.project.bed_height_mm - y : y
+            let py = bed.minY + position * scale - 6
+            let text = label(y), width = text.size(withAttributes: attributes).width
+            // Rechtsbündig am Streifen.
+            if py >= 24 && py <= bounds.maxY - 10 { text.draw(at: NSPoint(x: 27 - width, y: py), withAttributes: attributes) }
+        }
+        // Einheit in der Ecke, an der sich die Lineale treffen.
+        ("mm" as NSString).draw(at: NSPoint(x: 2, y: 10), withAttributes: attributes)
     }
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
@@ -2142,7 +2536,18 @@ func testRulesEngravingAndMaterials(_ model: AppModel) throws {
     guard let cut = model.project.steps.firstIndex(where: { $0.operation == .cut }) else { throw CoreError("Vorlage ohne Schnitt") }
     model.project.steps[cut].filters = [Filter(attribute: .strokeColor, value: "#ef7141", compare: false, inverted: false)]
     model.project.steps[cut].additional = [ParameterSet(power_percent: 50, speed_percent: 30, passes: 1)]
-    model.addRuleStep(.engrave3d)
+    // „+“ fügt die gleiche Bearbeitung direkt darunter ein; das Umschalten
+    // behält die Bedingungen und übernimmt die neue Bearbeitung.
+    let before = model.project.steps.count
+    model.insertRuleStep(after: cut)
+    guard model.project.steps.count == before + 1, model.project.steps[cut + 1].operation == .cut,
+          model.project.steps[cut + 1].filters == [] else { throw CoreError("„+“ fügt keinen gleichen Schritt darunter ein") }
+    model.project.steps[cut + 1].filters = [Filter(attribute: .id, value: "Gravurkreis", compare: false, inverted: false)]
+    model.changeRuleStep(cut + 1, to: .engrave3d)
+    guard model.project.steps[cut + 1].operation == .engrave3d,
+          model.project.steps[cut + 1].filters?.first?.value == "Gravurkreis" else { throw CoreError("Bearbeitung nicht umgeschaltet") }
+    // Für den weiteren Test ans Ende verschieben (wie bisher „Schritt hinzufügen“).
+    model.project.steps.append(model.project.steps.remove(at: cut + 1))
     let deep = model.project.steps.count - 1
     model.project.steps[deep].filters = [Filter(attribute: .id, value: "Gravurkreis", compare: false, inverted: false)]
     model.project.steps[deep].power_percent = 40
@@ -2232,13 +2637,12 @@ func runUITest(_ model: AppModel) {
               loaded.project.operation == .cut, loaded.project.power_percent == 100,
               abs(loaded.project.speed_percent - model.project.speed_percent) < 0.001,
               loaded.preview != nil else { throw CoreError("Rust lädt Materialauswahl nicht korrekt") }
-        guard loaded.project.cut_order == .visiCut else { throw CoreError("Standard-Schnittreihenfolge nicht VisiCut") }
+        guard loaded.project.cut_order == .shortestTravel else { throw CoreError("Standard-Schnittreihenfolge nicht „Kürzeste Leerfahrten“") }
         model.project.cut_order = .shortestTravel
         guard model.save() else { throw CoreError("Schnittreihenfolge konnte nicht gesichert werden") }
         let ordered: ProjectResponse = try RustCore.decode("load", path: temporary.path)
         let orderedJob: PreparedJob = try RustCore.decode("prepare", project: model.project)
-        guard ordered.project.cut_order == .shortestTravel,
-              orderedJob.warnings.contains(where: { $0.contains("Kürzeste Leerfahrten") })
+        guard ordered.project.cut_order == .shortestTravel, orderedJob.warnings.isEmpty
         else { throw CoreError("Schnittreihenfolge geht beim Sichern/Laden verloren") }
         // Ältere Projektdateien ohne das Feld laden mit der VisiCut-Reihenfolge.
         guard var legacy = try JSONSerialization.jsonObject(with: Data(contentsOf: temporary)) as? [String: Any]

@@ -20,6 +20,112 @@ pub fn contours(project: &Project) -> Result<Vec<Contour>, String> {
     contours_with_fonts(project, crate::svg::fonts())
 }
 
+/// Outline of one object (index as in `selection::objects`) in mm relative
+/// to the top left corner of the motif: its contours, or for images and
+/// other objects without contours their bounding rectangle. For highlighting
+/// the object under the mouse in the object list.
+pub fn object_outline(project: &Project, index: usize) -> Result<Vec<Contour>, String> {
+    let svg = crate::selection::filter(&project.svg, &[index])?;
+    let alone = Project {
+        svg,
+        x_mm: 0.0,
+        y_mm: 0.0,
+        steps: Vec::new(),
+        parts: Vec::new(),
+        ..project.clone()
+    };
+    // Rasterbilder haben keine Konturen (dort meldet `contours` einen Fehler).
+    let outline = contours(&alone).unwrap_or_default();
+    if !outline.is_empty() {
+        return Ok(outline);
+    }
+    // Sonst der Rahmen der gezeichneten Pixel.
+    let rendered = crate::svg::render(&alone.svg)?;
+    let [w, h] = rendered.image.size;
+    let mut found: Option<[usize; 4]> = None;
+    for (i, pixel) in rendered.image.pixels.iter().enumerate() {
+        if pixel.a() > 0 {
+            let (x, y) = (i % w, i / w);
+            found = Some(match found {
+                Some([x0, y0, x1, y1]) => [x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1)],
+                None => [x, y, x + 1, y + 1],
+            });
+        }
+    }
+    let Some([px0, py0, px1, py1]) = found else {
+        return Ok(Vec::new());
+    };
+    let (sx, sy) = (
+        f64::from(alone.width_mm) / w as f64,
+        f64::from(alone.height_mm) / h as f64,
+    );
+    let (x0, y0) = (px0 as f64 * sx, py0 as f64 * sy);
+    let (x1, y1) = (px1 as f64 * sx, py1 as f64 * sy);
+    Ok(vec![vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]])
+}
+
+/// Outlines of all objects (see `object_outline`), for hit testing.
+pub fn object_outlines(project: &Project) -> Result<Vec<Vec<Contour>>, String> {
+    let count = crate::selection::objects(&project.svg)?.len();
+    (0..count).map(|i| object_outline(project, i)).collect()
+}
+
+/// The object under `point` (mm relative to the motif): first one whose line
+/// lies within `tolerance` (topmost first), otherwise the smallest closed
+/// outline containing the point, so a shape inside a frame wins over the
+/// frame.
+pub fn object_at(outlines: &[Vec<Contour>], point: Point, tolerance: f64) -> Option<usize> {
+    let near = |a: Point, b: Point| {
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let length = dx * dx + dy * dy;
+        let t = if length > 0.0 {
+            (((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / length).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        (a[0] + t * dx - point[0]).hypot(a[1] + t * dy - point[1]) <= tolerance
+    };
+    for (index, outline) in outlines.iter().enumerate().rev() {
+        if outline
+            .iter()
+            .any(|contour| contour.windows(2).any(|s| near(s[0], s[1])))
+        {
+            return Some(index);
+        }
+    }
+    let mut best: Option<(f64, usize)> = None;
+    for (index, outline) in outlines.iter().enumerate() {
+        for contour in outline {
+            let closed = contour.len() > 3 && contour.first() == contour.last();
+            if !closed {
+                continue;
+            }
+            // Ray casting (even-odd).
+            let mut inside = false;
+            for s in contour.windows(2) {
+                let (a, b) = (s[0], s[1]);
+                if (a[1] > point[1]) != (b[1] > point[1])
+                    && point[0] < (b[0] - a[0]) * (point[1] - a[1]) / (b[1] - a[1]) + a[0]
+                {
+                    inside = !inside;
+                }
+            }
+            if inside {
+                let area = contour
+                    .windows(2)
+                    .map(|s| s[0][0] * s[1][1] - s[1][0] * s[0][1])
+                    .sum::<f64>()
+                    .abs()
+                    / 2.0;
+                if best.is_none_or(|(a, _)| area < a) {
+                    best = Some((area, index));
+                }
+            }
+        }
+    }
+    best.map(|(_, index)| index)
+}
+
 fn contours_with_fonts(
     project: &Project,
     fonts: Arc<usvg::fontdb::Database>,
@@ -1138,5 +1244,74 @@ mod clip_tests {
             filter.contains("Filter") && filter.contains("Pixelbild"),
             "{filter}"
         );
+    }
+
+    #[test]
+    fn object_outline_is_relative_to_the_motif_and_covers_images() {
+        let project = Project {
+            x_mm: 100.0,
+            y_mm: 50.0,
+            width_mm: 100.0,
+            height_mm: 50.0,
+            svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 100 50"><rect x="10" y="5" width="20" height="10" fill="none" stroke="black"/><image x="50" y="20" width="30" height="20" preserveAspectRatio="none" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="/></svg>"#.into(),
+            ..Project::default()
+        };
+        let rect = object_outline(&project, 0).unwrap();
+        let xs: Vec<f64> = rect.iter().flatten().map(|p| p[0]).collect();
+        assert!(
+            (xs.iter().cloned().fold(f64::MAX, f64::min) - 10.0).abs() < 0.01,
+            "{xs:?}"
+        );
+        assert!((xs.iter().cloned().fold(f64::MIN, f64::max) - 30.0).abs() < 0.01);
+        // The image has no contours: its rectangle instead (pixel accurate).
+        let image = object_outline(&project, 1).unwrap();
+        let expected = [
+            [50.0, 20.0],
+            [80.0, 20.0],
+            [80.0, 40.0],
+            [50.0, 40.0],
+            [50.0, 20.0],
+        ];
+        assert_eq!(image.len(), 1);
+        for (p, e) in image[0].iter().zip(expected) {
+            assert!(
+                (p[0] - e[0]).abs() < 0.5 && (p[1] - e[1]).abs() < 0.5,
+                "{image:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn object_at_prefers_lines_then_the_smallest_enclosing_shape() {
+        let square = |x: f64, y: f64, s: f64| {
+            vec![vec![[x, y], [x + s, y], [x + s, y + s], [x, y + s], [x, y]]]
+        };
+        // A frame, a small square inside it and an open line.
+        let outlines = vec![
+            square(0.0, 0.0, 100.0),
+            square(20.0, 20.0, 10.0),
+            vec![vec![[60.0, 50.0], [90.0, 50.0]]],
+        ];
+        assert_eq!(
+            object_at(&outlines, [25.0, 25.0], 1.0),
+            Some(1),
+            "inside the small square"
+        );
+        assert_eq!(
+            object_at(&outlines, [50.0, 80.0], 1.0),
+            Some(0),
+            "inside the frame only"
+        );
+        assert_eq!(
+            object_at(&outlines, [75.0, 50.5], 1.0),
+            Some(2),
+            "near the line"
+        );
+        assert_eq!(
+            object_at(&outlines, [0.5, 50.0], 1.0),
+            Some(0),
+            "on the frame edge"
+        );
+        assert_eq!(object_at(&outlines, [150.0, 50.0], 1.0), None);
     }
 }

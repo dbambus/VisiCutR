@@ -246,6 +246,16 @@ pub(crate) fn execute(request: &Value) -> Result<Value, String> {
             session::discard(&session::dir(), std::path::Path::new(path(request)?));
             Ok(json!({}))
         }
+        "processing_preview" => {
+            Ok(json!({"png": ltt::processing_preview(&get_project(request)?)?}))
+        }
+        "object_outlines" => {
+            Ok(json!({"outlines": crate::geometry::object_outlines(&get_project(request)?)?}))
+        }
+        "object_outline" => {
+            let index = request["index"].as_u64().ok_or(tr("Objekt fehlt"))? as usize;
+            Ok(json!({"contours": crate::geometry::object_outline(&get_project(request)?, index)?}))
+        }
         "take_resume" => Ok(json!({"path": session::take_resume(&session::dir())})),
         "cached_states" => Ok(json!({"paths": session::states(&session::dir())})),
         "clear_cache" => Ok(json!({"paths": session::clear(&session::dir())?})),
@@ -457,7 +467,8 @@ pub(crate) fn execute(request: &Value) -> Result<Value, String> {
             Ok(json!({}))
         }
         "prepare" => {
-            let prepared = ltt::prepare(&get_project(request)?)?;
+            let single_job = request["single_job"].as_bool().unwrap_or(false);
+            let prepared = ltt::prepare_with(&get_project(request)?, single_job)?;
             Ok(
                 json!({"jobs": prepared.jobs, "description": prepared.description,
                 "estimated_seconds": prepared.estimated_seconds, "preview_png": prepared.preview_png,
@@ -467,7 +478,8 @@ pub(crate) fn execute(request: &Value) -> Result<Value, String> {
         }
         "transmit" => {
             let project = get_project(request)?;
-            let prepared = ltt::prepare(&project)?;
+            let single_job = request["single_job"].as_bool().unwrap_or(false);
+            let prepared = ltt::prepare_with(&project, single_job)?;
             let sent = ltt::transmit_jobs(&project.hostname, project.port, &prepared.jobs)?;
             Ok(
                 json!({"description": prepared.description, "sent": sent, "warnings": prepared.warnings}),

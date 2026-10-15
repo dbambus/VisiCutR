@@ -30,8 +30,18 @@ fn assignment_title(operation: Option<Operation>) -> &'static str {
 
 pub fn cut_order_title(order: CutOrder) -> &'static str {
     match order {
-        CutOrder::VisiCut => tr("Wie VisiCut"),
-        CutOrder::ShortestTravel => tr("Kürzeste Leerfahrten (experimentell)"),
+        CutOrder::VisiCut => tr("Klassisch"),
+        CutOrder::ShortestTravel => tr("Kürzeste Leerfahrten"),
+    }
+}
+
+/// Erklärung einer Schnittreihenfolge (Tooltip im Menü Job).
+pub fn cut_order_help(order: CutOrder) -> &'static str {
+    match order {
+        CutOrder::VisiCut => tr("Innere Konturen zuerst, Reihenfolge wie VisiCut."),
+        CutOrder::ShortestTravel => tr(
+            "Innere Konturen zuerst, dann jeweils der nächstgelegene Pfad ab dem Referenzpunkt oben rechts.",
+        ),
     }
 }
 
@@ -479,16 +489,20 @@ fn raster_options(
     crate::form::row(ui, tr("Helligkeit"), |ui| {
         changed |= ui
             .add(egui::DragValue::new(&mut settings.color_shift).range(-255..=255))
+            .on_hover_text(tr("Verschiebt die Graustufen vor dem Rastern: Plus hellt auf (weniger Gravur), Minus dunkelt ab (mehr Gravur)."))
             .changed();
     });
     changed |= ui
         .checkbox(&mut settings.invert, tr("Farben invertieren"))
+        .on_hover_text(tr("Tauscht Hell und Dunkel: Helle Flächen werden graviert, dunkle bleiben frei – etwa für Negativbilder oder dunkle Materialien."))
         .changed();
     changed |= ui
         .checkbox(&mut settings.bidirectional, tr("Bidirektional"))
+        .on_hover_text(tr("Graviert jede Zeile abwechselnd hin und zurück statt immer in dieselbe Richtung – fast doppelt so schnell; Kanten können leicht versetzt sein (Versatz am Gerät kalibrieren)."))
         .changed();
     changed |= ui
         .checkbox(&mut settings.bottom_up, tr("Von unten nach oben"))
+        .on_hover_text(tr("Beginnt mit der untersten Zeile statt der obersten. Je nach Lage der Absaugung zieht der Rauch dann nicht über bereits gravierte Flächen."))
         .changed();
     changed
 }
@@ -707,6 +721,15 @@ pub struct JobUi {
     document: Document,
     /// Objekt, das über das Kontextmenü gelöscht werden soll.
     delete_object: Option<usize>,
+    /// Objekt unter der Maus, in der Liste oder auf der Arbeitsfläche (in
+    /// diesem Bild); die Arbeitsfläche hebt es hervor.
+    pub hovered_object: Option<usize>,
+    /// Objekt unter der Maus auf der Arbeitsfläche (setzt die Arbeitsfläche);
+    /// seine Zeile gilt als ausgewählt und wird ins Bild geholt.
+    pub canvas_hover: Option<usize>,
+    /// Zeile unter der Maus im vorigen Bild.
+    list_hover: Option<usize>,
+    scrolled_to: Option<usize>,
 }
 
 impl JobUi {
@@ -722,6 +745,10 @@ impl JobUi {
             editor: None,
             document: Document::default(),
             delete_object: None,
+            hovered_object: None,
+            canvas_hover: None,
+            list_hover: None,
+            scrolled_to: None,
         };
         (ui, error)
     }
@@ -917,13 +944,7 @@ impl JobUi {
                         Ein Verfahren für das gesamte Motiv. Für Zuordnungen nach Strichfarbe \
                      oder anderen Merkmalen „Regeln“ wählen."),
                 ),
-                AssignmentMode::Objects => {
-                    crate::form::caption(
-                        ui,
-                        tr("Schneiden, gravieren, markieren oder ignorieren."),
-                    );
-                    self.objects(ui, project, dirty);
-                }
+                AssignmentMode::Objects => self.objects(ui, project, dirty),
                 AssignmentMode::Rules => {
                     crate::form::caption(
                         ui,
@@ -939,42 +960,6 @@ impl JobUi {
                          anpassen; „Rest“ erfasst alle übrigen Objekte."),
                     );
                 }
-            }
-            if assignment_mode(project) != AssignmentMode::Whole {
-                crate::form::caption(
-                    ui,
-                    tr("Ein LTT-Auftrag je Verfahren: Engrav › Eng3D › Mark › Cut"),
-                );
-            }
-            crate::form::row(ui, tr("Schnittreihenfolge"), |ui| {
-                egui::ComboBox::from_id_salt("cut_order")
-                    .width(150.0)
-                    .selected_text(cut_order_title(project.cut_order))
-                    .show_ui(ui, |ui| {
-                        for order in [CutOrder::VisiCut, CutOrder::ShortestTravel] {
-                            *dirty |= ui
-                                .selectable_value(
-                                    &mut project.cut_order,
-                                    order,
-                                    cut_order_title(order),
-                                )
-                                .changed();
-                        }
-                    });
-            });
-            if project.cut_order == CutOrder::ShortestTravel {
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(tr("\
-                            Experimentell: Die Reihenfolge der Schnitte weicht von VisiCut ab. \
-                             Den Auftrag am Gerät beaufsichtigen."))
-                        .size(11.5)
-                        .color(WARNING),
-                    )
-                    .wrap(),
-                );
-            } else {
-                crate::form::caption(ui, tr("Innere Konturen zuerst, Reihenfolge wie VisiCut."));
             }
             *dirty |= ui
                 .checkbox(
@@ -1036,48 +1021,77 @@ impl JobUi {
             return;
         }
         let library = &self.library;
+        let mut row_hover = None;
+        if self.canvas_hover.is_none() {
+            self.scrolled_to = None;
+        }
+        // Wächst bis zu fünf Zeilen mit, darüber scrollt die Liste.
+        let row = ui.spacing().interact_size.y + 2.0 + ui.spacing().item_spacing.y;
         egui::ScrollArea::vertical()
             .id_salt("objects")
-            .max_height(220.0)
+            .max_height(5.0 * row)
             .show(ui, |ui| {
                 for (i, row) in self.document.objects.iter().enumerate() {
-                    ui.horizontal(|ui| {
-                        swatch(ui, row.color);
-                        let current = assignment(project, i);
-                        egui::ComboBox::from_id_salt(("object", i))
-                            .width(90.0)
-                            .selected_text(assignment_title(current))
-                            .show_ui(ui, |ui| {
-                                let options = Operation::ALL.map(Some);
-                                for candidate in options.into_iter().chain([None]) {
-                                    if ui
-                                        .selectable_label(
-                                            current == candidate,
-                                            assignment_title(candidate),
-                                        )
-                                        .clicked()
-                                        && current != candidate
-                                    {
-                                        assign(library, project, i, candidate);
-                                        *dirty = true;
+                    // Ausgewählt: Objekt unter der Maus (Liste oder Arbeitsfläche).
+                    let selected = self.canvas_hover == Some(i) || self.list_hover == Some(i);
+                    let fill = if selected {
+                        ui.visuals().selection.bg_fill.gamma_multiply(0.45)
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    };
+                    let line = egui::Frame::new()
+                        .fill(fill)
+                        .corner_radius(4.0)
+                        .inner_margin(egui::Margin::symmetric(4, 1))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                swatch(ui, row.color);
+                                let current = assignment(project, i);
+                                egui::ComboBox::from_id_salt(("object", i))
+                                    .width(90.0)
+                                    .selected_text(assignment_title(current))
+                                    .show_ui(ui, |ui| {
+                                        let options = Operation::ALL.map(Some);
+                                        for candidate in options.into_iter().chain([None]) {
+                                            if ui
+                                                .selectable_label(
+                                                    current == candidate,
+                                                    assignment_title(candidate),
+                                                )
+                                                .clicked()
+                                                && current != candidate
+                                            {
+                                                assign(library, project, i, candidate);
+                                                *dirty = true;
+                                            }
+                                        }
+                                    });
+                                let label = ui
+                                    .add(
+                                        egui::Label::new(&row.label)
+                                            .truncate()
+                                            .sense(egui::Sense::click()),
+                                    )
+                                    .on_hover_text(&row.label);
+                                label.context_menu(|ui| {
+                                    if ui.button(tr("Objekt löschen")).clicked() {
+                                        self.delete_object = Some(i);
                                     }
-                                }
-                            });
-                        let label = ui
-                            .add(
-                                egui::Label::new(&row.label)
-                                    .truncate()
-                                    .sense(egui::Sense::click()),
-                            )
-                            .on_hover_text(&row.label);
-                        label.context_menu(|ui| {
-                            if ui.button(tr("Objekt löschen")).clicked() {
-                                self.delete_object = Some(i);
-                            }
+                                });
+                            })
                         });
-                    });
+                    if line.response.contains_pointer() {
+                        row_hover = Some(i);
+                    }
+                    // Steht die Maus auf der Arbeitsfläche, die Zeile ins Bild holen.
+                    if self.canvas_hover == Some(i) && self.scrolled_to != Some(i) {
+                        line.response.scroll_to_me(Some(egui::Align::Center));
+                        self.scrolled_to = Some(i);
+                    }
                 }
             });
+        self.list_hover = row_hover;
+        self.hovered_object = row_hover.or(self.canvas_hover);
     }
 
     fn rules_header(&mut self, ui: &mut egui::Ui, project: &mut Project, dirty: &mut bool) {
@@ -1090,18 +1104,17 @@ impl JobUi {
                     }
                 }
             });
-            ui.menu_button(tr("Schritt hinzufügen"), |ui| {
-                for operation in Operation::ALL {
-                    if ui.button(operation_title(operation)).clicked() {
-                        let step = JobStep {
-                            filters: Some(Vec::new()),
-                            ..default_step(self.active(), project, operation)
-                        };
-                        project.steps.push(step);
-                        *dirty = true;
-                    }
-                }
-            });
+            // Weitere Schritte über „➕“ im Schrittkopf; ohne Schritt hier der erste.
+            if !project.steps.iter().any(is_rule)
+                && ui.button(tr("➕ Schritt hinzufügen")).clicked()
+            {
+                let step = JobStep {
+                    filters: Some(Vec::new()),
+                    ..default_step(self.active(), project, Operation::Cut)
+                };
+                project.steps.push(step);
+                *dirty = true;
+            }
         });
         crate::form::caption(
             ui,
@@ -1118,22 +1131,41 @@ impl JobUi {
             ui.colored_label(WARNING, e);
         }
         let mut remove = None;
+        let mut insert_after = None;
+        let mut change = None;
         for i in 0..project.steps.len() {
             let objects = match &selections {
                 Ok(s) => s.get(i).map_or(0, Vec::len),
                 Err(_) if !is_rule(&project.steps[i]) => project.steps[i].objects.len(),
                 Err(_) => 0,
             };
+            // In „Einzeln“ nur Verfahren, denen Objekte zugeordnet sind; die
+            // Einstellungen der übrigen bleiben erhalten.
+            if objects == 0 && assignment_mode(project) == AssignmentMode::Objects {
+                continue;
+            }
             let profile = preset(self.active(), project, project.steps[i].operation).cloned();
             let step = &mut project.steps[i];
             crate::form::section(ui, &tr!("Schritt {number}", number = i + 1), |ui| {
                 let rule = is_rule(step);
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(operation_title(step.operation))
-                            .strong()
-                            .color(crate::preview_ui::operation_color(step.operation)),
-                    );
+                    let title = egui::RichText::new(operation_title(step.operation))
+                        .strong()
+                        .color(crate::preview_ui::operation_color(step.operation));
+                    if rule {
+                        // Bearbeitung umschaltbar; Bedingungen bleiben erhalten.
+                        ui.menu_button(title, |ui| {
+                            for operation in Operation::ALL {
+                                if ui.button(operation_title(operation)).clicked() {
+                                    change = Some((i, operation));
+                                }
+                            }
+                        })
+                        .response
+                        .on_hover_text(tr("Bearbeitung ändern"));
+                    } else {
+                        ui.label(title);
+                    }
                     ui.weak(tr!("{count} Objekte", count = objects));
                     if rule {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1143,6 +1175,15 @@ impl JobUi {
                                 .clicked()
                             {
                                 remove = Some(i);
+                            }
+                            if ui
+                                .add(egui::Button::new("➕").frame(false))
+                                .on_hover_text(tr(
+                                    "Schritt mit gleicher Bearbeitung darunter einfügen",
+                                ))
+                                .clicked()
+                            {
+                                insert_after = Some(i);
                             }
                         });
                     }
@@ -1206,6 +1247,26 @@ impl JobUi {
                     *dirty |= raster_options(ui, ("step", i), &mut step.raster, step.operation);
                 }
             });
+        }
+        if let Some((i, operation)) = change
+            && project.steps[i].operation != operation
+        {
+            // Bedingungen bleiben, Leistung und Tempo kommen aus dem Profil.
+            let old = project.steps[i].clone();
+            project.steps[i] = JobStep {
+                filters: old.filters,
+                rest: old.rest,
+                ..default_step(self.active(), project, operation)
+            };
+            *dirty = true;
+        }
+        if let Some(i) = insert_after {
+            let step = JobStep {
+                filters: Some(Vec::new()),
+                ..default_step(self.active(), project, project.steps[i].operation)
+            };
+            project.steps.insert(i + 1, step);
+            *dirty = true;
         }
         if let Some(i) = remove {
             project.steps.remove(i);

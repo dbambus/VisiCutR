@@ -3,6 +3,42 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## 0.16.0 – 15.10.2026
+
+- **Kürzeste Leerfahrten ist Standard**: Die Schnittreihenfolge steht im Menü
+  **Job** (egui und macOS) ohne „experimentell“; VisiCuts Reihenfolge heißt
+  „Klassisch“. Ältere Projekte ohne gespeicherte Reihenfolge öffnen klassisch.
+- **Alles in eine Datei** (Schalter in der Auftragsvorschau, bleibt
+  gespeichert): ein einziger Auftrag `Job_…` mit allen Verfahren wie in
+  Java-VisiCut, Gravuren zuerst; der Jobmodus wird nur bei einem Wechsel
+  gesendet. Die Vorschau lädt beim Umschalten nicht mehr sichtbar neu.
+- **Klarere Fehlermeldungen**: „Kein Material zum Lasern gewählt“ beim Senden
+  und Exportieren; bei 0 % Leistung nennt die Meldung das Verfahren.
+- **Arbeitsfläche zeigt die Bearbeitung**: Schnitt- und Markierkonturen in
+  ihren Farben, Gravuren so, wie sie graviert werden; „Bearbeitung anzeigen“
+  schaltet zurück auf das Original.
+- **Hervorheben unter der Maus**: Objekte auf der Arbeitsfläche werden gelb
+  umrandet und in der Objektliste markiert (und umgekehrt). Die Auswahl hat
+  einen gestrichelten schwarzen Rahmen statt des blauen.
+- **Raster und Lineale passen sich dem Zoom an** (Schritte 1–2–5) und nennen
+  die Einheit; „Zurücksetzen“ statt „Einpassen“. Mausrad-Zoom funktioniert
+  durchgehend (macOS).
+- **Nesting**: Gravuren werden nebeneinander gelegt (weniger Gravurzeilen,
+  der Laser graviert zeilenweise in X); gemessen wird an der Schnittlinie, bei
+  0 mm Abstand schneidet „Doppelte Linien entfernen“ gemeinsame Kanten nur
+  einmal. Importierte PDF- und EPS-Zeichnungen bleiben eine Gruppe.
+- **PDF-Import** schneidet die Seite auf den sichtbaren Inhalt zu; der
+  Seitenrand gilt nicht mehr als Motivrahmen.
+- **Regeln**: Die Vorlagen „Alles schneiden/gravieren/…“ entfallen (dafür gibt
+  es „Gesamt“); Farbwerte zeigen ein Farbfeld im Menü. Schritte haben ➕
+  (Kopie anlegen) und ein umschaltbares Verfahren.
+- **Einzeln**: Es erscheinen nur Verfahren, denen Objekte zugeordnet sind;
+  die Objektliste wächst bis fünf Zeilen mit und scrollt darüber.
+- **Menüs** (macOS): Symbolleiste mit Öffnen, Sichern, Vorschau, Export und
+  Senden; **Datei → Lasercutter** wählt das Gerät, **Datei → Einstellungen …**
+  (⌘,) verwaltet die Geräte. Der Projektname wird per Doppelklick im Kopf der
+  Arbeitsfläche geändert. Rasteroptionen haben erklärende Tooltips.
+
 ## 0.15.0 – 14.10.2026
 
 - **Profile folgen dem Lasercutter** (egui und macOS): Die Auswahl „Profile“

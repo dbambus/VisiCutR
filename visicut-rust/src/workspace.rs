@@ -27,18 +27,35 @@ pub fn fit_scale(available: [f32; 2], bed_mm: [f32; 2]) -> f32 {
         .max(0.01)
 }
 
-/// Rasterabstand in mm: 10 mm, gröber, sobald Linien näher als 12 px lägen
-/// (wie macOS).
-pub fn grid_step_mm(scale: f32) -> f32 {
-    ((12.0 / scale / 10.0).ceil() * 10.0).max(10.0)
+/// Kleinster Abstand der Reihe 1 – 2 – 5 in mm (0,1 … 1000), der mindestens
+/// `min_px` Bildpunkte beträgt.
+fn nice_step(scale: f32, min_px: f32) -> f32 {
+    (-1..=3)
+        .flat_map(|exponent| [1.0, 2.0, 5.0].map(|m| m * 10f32.powi(exponent)))
+        .take_while(|step| *step <= 1000.0)
+        .find(|step| step * scale >= min_px)
+        .unwrap_or(1000.0)
 }
 
-/// Abstand der Linealbeschriftung in mm, mindestens 40 px auseinander.
+/// Rasterabstand in mm: der feinste Wert der Reihe 1 – 2 – 5 mit Linien
+/// mindestens 6 px auseinander (wie macOS).
+pub fn grid_step_mm(scale: f32) -> f32 {
+    nice_step(scale, 6.0)
+}
+
+/// Abstand der Linealbeschriftung in mm: Reihe 1 – 2 – 5 mit mindestens
+/// 40 px Platz je Zahl. Die Rasterlinien dort sind kräftiger.
 pub fn ruler_step_mm(scale: f32) -> f32 {
-    [10.0, 20.0, 50.0, 100.0, 200.0, 500.0]
-        .into_iter()
-        .find(|step| step * scale >= 40.0)
-        .unwrap_or(1000.0)
+    nice_step(scale, 40.0)
+}
+
+/// Linealzahl mit so vielen Nachkommastellen, wie der Abstand braucht.
+pub fn ruler_label(value_mm: f32, step_mm: f32) -> String {
+    if step_mm >= 1.0 {
+        format!("{value_mm:.0}")
+    } else {
+        format!("{value_mm:.1}")
+    }
 }
 
 /// Positionen der Linealbeschriftung von 0 bis einschließlich `length`.
@@ -182,12 +199,23 @@ mod tests {
 
     #[test]
     fn grid_and_ruler_steps_stay_readable() {
-        assert_eq!(grid_step_mm(2.0), 10.0);
-        assert_eq!(grid_step_mm(0.5), 30.0);
-        assert!(grid_step_mm(0.5) * 0.5 >= 12.0);
-        assert_eq!(ruler_step_mm(4.0), 10.0);
-        assert_eq!(ruler_step_mm(0.6), 100.0);
+        // Raster und Lineal folgen dem Zoom in der Reihe 1 – 2 – 5.
+        assert_eq!(grid_step_mm(0.85), 10.0);
+        assert_eq!(grid_step_mm(1.7), 5.0);
+        assert_eq!(grid_step_mm(3.4), 2.0);
+        assert_eq!(grid_step_mm(6.8), 1.0);
+        assert_eq!(grid_step_mm(100.0), 0.1);
+        assert_eq!(ruler_step_mm(0.85), 50.0);
+        assert_eq!(ruler_step_mm(3.4), 20.0);
+        assert_eq!(ruler_step_mm(6.8), 10.0);
         assert_eq!(ruler_step_mm(0.01), 1000.0);
+        // Beschriftung liegt immer auf einer Rasterlinie.
+        for scale in [0.3, 0.85, 1.7, 3.4, 6.8, 13.0, 40.0] {
+            let ratio = ruler_step_mm(scale) / grid_step_mm(scale);
+            assert!((ratio - ratio.round()).abs() < 1e-4, "{scale}: {ratio}");
+        }
+        assert_eq!(ruler_label(250.0, 10.0), "250");
+        assert_eq!(ruler_label(12.5, 0.1), "12.5");
         assert_eq!(ruler_marks(600.0, 200.0), vec![0.0, 200.0, 400.0, 600.0]);
         assert_eq!(ruler_marks(650.0, 100.0).len(), 7);
     }

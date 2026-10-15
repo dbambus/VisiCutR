@@ -163,12 +163,19 @@ impl MachineSettings {
 /// Order of the vector paths of a step.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CutOrder {
-    /// VisiCut's "inner first", byte for byte like Java (tests/java_parity).
-    #[default]
+    /// VisiCut's "inner first", byte for byte like Java (tests/java_parity);
+    /// shown as "Klassisch".
     VisiCut,
-    /// Experimental: still inner first, but always on to the nearest allowed
-    /// path; closed contours may start at any vertex.
+    /// Default: still inner first, but always on to the nearest allowed path
+    /// from the home position; closed contours may start at any vertex.
+    #[default]
     ShortestTravel,
+}
+
+/// Project files without the field predate "Kürzeste Leerfahrten" and keep
+/// the order they were sent with.
+fn legacy_cut_order() -> CutOrder {
+    CutOrder::VisiCut
 }
 
 /// Further power/speed settings applied to the same objects afterwards
@@ -287,7 +294,7 @@ struct ProjectFile {
     raster: RasterSettings,
     #[serde(default)]
     ignore_filters: Vec<Vec<Filter>>,
-    #[serde(default)]
+    #[serde(default = "legacy_cut_order")]
     cut_order: CutOrder,
     #[serde(default)]
     remove_duplicate_lines: bool,
@@ -421,7 +428,7 @@ impl Default for Project {
             rotary_diameter_mm: default_rotary_diameter(),
             raster: RasterSettings::default(),
             ignore_filters: Vec::new(),
-            cut_order: CutOrder::VisiCut,
+            cut_order: CutOrder::default(),
             remove_duplicate_lines: false,
             machine: MachineSettings::default(),
             part_name: String::new(),

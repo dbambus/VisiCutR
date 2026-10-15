@@ -144,7 +144,9 @@ lokal nach einem Build für die jeweilige Host-Architektur.
 4. Unter **Objektzuordnung** zwischen **Gesamt**, **Einzeln** und **Regeln**
    wählen. **Einzeln**: jedem SVG-Objekt **Schneiden** (rot), **Gravieren**
    (blau), **3D-Gravur** (orange), **Markieren** (violett) oder **Ignorieren**
-   zuweisen. **Regeln**: Schritte wählen Objekte nach Farbe, Linien- oder
+   zuweisen. Die Arbeitsfläche zeigt die Zuordnung sofort in diesen Farben:
+   Schnitt- und Markierkonturen als Linien, Gravuren so, wie sie graviert
+   werden („Bearbeitung anzeigen“ schaltet zurück auf das Original). **Regeln**: Schritte wählen Objekte nach Farbe, Linien- oder
    Füllfarbe, Linienstärke, Gruppe/Ebene, Typ oder ID; ein Restschritt nimmt
    alles Übrige, Ignorierregeln schließen Objekte aus. Vorlagen enthalten die
    FAU-Zuordnungen („rot schneiden, grün markieren, blau ignorieren, Rest
@@ -161,11 +163,11 @@ lokal nach einem Build für die jeweilige Host-Architektur.
    bei 0 % und muss vor der Vorbereitung eingestellt werden.
    **Schneiden** bearbeitet Pfadkonturen als Tangentialkurven und Kreisbefehle
    wie der Java-Treiber, innere Konturen vor den äußeren.
-   **Schnittreihenfolge** „Wie VisiCut“ (Standard, byte-gleich mit Java) oder
-   „Kürzeste Leerfahrten (experimentell)“: weiterhin innen zuerst, dann
-   jeweils der nächstgelegene Pfad, beginnend am Referenzpunkt oben rechts;
-   deutlich weniger Leerfahrt, aber am Gerät
-   noch nicht erprobt, daher mit Hinweis. **Doppelte Linien entfernen**
+   **Schnittreihenfolge** im Menü **Job**: „Kürzeste Leerfahrten“ (Standard):
+   innen zuerst, dann jeweils der nächstgelegene Pfad, beginnend am
+   Referenzpunkt oben rechts; deutlich weniger Leerfahrt. „Klassisch“ ist
+   VisiCuts Reihenfolge, byte-gleich mit Java; ältere Projekte ohne gespeicherte
+   Reihenfolge öffnen damit. **Doppelte Linien entfernen**
    schneidet Abschnitte, die genau auf einer schon geschnittenen Linie
    desselben Schritts liegen (gemeinsame Kanten, doppelt platzierte Objekte),
    nur einmal; die Schrittbeschreibung nennt, wie viel entfernt wurde. **Gravieren**
@@ -198,6 +200,9 @@ lokal nach einem Build für die jeweilige Host-Architektur.
    Bei einem Fehler wird gestoppt und die App nennt bereits übertragene
    Aufträge; es gibt keine automatische Wiederholung. Beim Export mehrerer
    Aufträge wird ein Zielordner für die einzelnen `.ltt`-Dateien gewählt.
+   Mit **Alles in eine Datei** in der Auftragsvorschau entsteht stattdessen ein
+   einziger Auftrag **Job_…** mit allen Verfahren wie in Java-VisiCut:
+   Gravuren zuerst, dann Markieren und Schneiden. Die Wahl bleibt gespeichert.
 8. Mit ⌘S das `.vcr`-Projekt inklusive SVG, Objektzuordnungen und aller
    Parametersätze speichern.
 
@@ -269,7 +274,11 @@ Das Menü **Objekt** ergänzt das Motiv ohne Umweg über Inkscape:
   einer Inkscape-Ebene) werden in der gewünschten Anzahl nach ihren
   Umrissrechtecken auf eine Fläche verteilt (größte zuerst, freie Rechtecke,
   optional um 90° gedreht). Teile, die nicht passen, werden gemeldet. Echte
-  Konturverschachtelung ist nicht enthalten.
+  Konturverschachtelung ist nicht enthalten. Eine importierte PDF- oder
+  EPS-Zeichnung ist eine Gruppe und bleibt dabei zusammen. Gemessen wird ohne Strichbreite,
+  also an der Schnittlinie: Bei 0 mm Abstand liegen benachbarte Kanten genau
+  aufeinander, und **Doppelte Linien entfernen** wird eingeschaltet, damit sie
+  nur einmal geschnitten werden.
 
 **Position und Größe** arbeiten wie in Grafikprogrammen: Der Bezugspunkt
 (3 × 3 Kästchen) legt fest, auf welchen Punkt des Motivs sich X/Y beziehen
@@ -288,7 +297,9 @@ Objektnummern und Regeln bleiben gültig. Ein SVG mit DTD-Entitäten
 
 ## Lasercutter, Rotationseinheit und Kamera
 
-**VisiCutRust → Lasercutter …** (⌘,) verwaltet mehrere LTT iLaser 4000:
+**Datei → Lasercutter** wählt den aktiven Lasercutter, **Datei →
+Einstellungen …** (⌘, bzw. Strg+,; unter macOS auch im App-Menü) verwaltet
+mehrere LTT iLaser 4000:
 Name, Hostname, Port, Rotationseinheit, Kamera-URL, Kamerakalibrierung,
 Nullpunkt unten links und den Hinweis nach dem Senden. Andere
 Lasercutter-Typen werden nicht unterstützt. **Nullpunkt unten links** (VisiCut

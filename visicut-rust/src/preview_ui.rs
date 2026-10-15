@@ -56,6 +56,9 @@ enum State {
     Computing {
         fingerprint: u64,
         receiver: Receiver<Result<Computed, String>>,
+        /// Bisherige Vorschau, sichtbar bis zum neuen Ergebnis (kein leerer
+        /// Dialog beim Umschalten von „Alles in eine Datei“).
+        previous: Option<Box<Ready>>,
     },
     Ready {
         fingerprint: u64,
@@ -69,6 +72,9 @@ enum State {
 
 pub struct PreviewUi {
     pub open: bool,
+    /// Alle Verfahren in einen LTT-Auftrag (eine Datei) statt einen je
+    /// Verfahren; die App speichert die Wahl in den Einstellungen.
+    pub single_job: bool,
     /// Show the processing preview on the bed instead of the plain motif.
     pub show_processing: bool,
     state: State,
@@ -80,6 +86,7 @@ impl Default for PreviewUi {
     fn default() -> Self {
         Self {
             open: false,
+            single_job: false,
             show_processing: true,
             state: State::Idle,
             playback: Playback::default(),
@@ -89,6 +96,11 @@ impl Default for PreviewUi {
 }
 
 impl PreviewUi {
+    /// Stand, für den eine Vorschau gilt: Projekt und Dateiwahl.
+    fn key(&self, project: &Project) -> u64 {
+        fingerprint(project) ^ u64::from(self.single_job).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+    }
+
     fn ready(&self) -> Option<&Ready> {
         match &self.state {
             State::Ready { ready, .. } => Some(ready),
@@ -99,7 +111,7 @@ impl PreviewUi {
     /// Opens the dialog and prepares the job unless a current result exists.
     pub fn request(&mut self, ctx: &egui::Context, project: &Project, status: &mut String) {
         self.open = true;
-        let current = fingerprint(project);
+        let current = self.key(project);
         match &self.state {
             State::Ready { fingerprint, .. } | State::Computing { fingerprint, .. }
                 if *fingerprint == current =>
@@ -110,15 +122,22 @@ impl PreviewUi {
         }
         self.playback.seek(0.0, 0.0);
         let snapshot = project.clone();
+        let single_job = self.single_job;
         let (sender, receiver) = std::sync::mpsc::channel();
         let repaint = ctx.clone();
         std::thread::spawn(move || {
-            let _ = sender.send(compute(&snapshot));
+            let _ = sender.send(compute(&snapshot, single_job));
             repaint.request_repaint();
         });
+        let previous = match std::mem::replace(&mut self.state, State::Idle) {
+            State::Ready { ready, .. } => Some(ready),
+            State::Computing { previous, .. } => previous,
+            _ => None,
+        };
         self.state = State::Computing {
             fingerprint: current,
             receiver,
+            previous,
         };
         *status = tr("Auftragsvorschau und Bearbeitungszeit werden berechnet …").into();
     }
@@ -223,20 +242,41 @@ impl PreviewUi {
                         });
                         recompute = ui.button(tr("Vorschau & Zeit berechnen")).clicked();
                     }
-                    State::Computing { .. } => {
+                    State::Computing { previous, .. } => {
                         ui.horizontal(|ui| {
                             ui.spinner();
                             ui.label(tr(
                                 "Auftragsvorschau und Bearbeitungszeit werden berechnet …",
                             ));
                         });
+                        if let Some(ready) = previous {
+                            let before = self.single_job;
+                            action = dialog(
+                                ui,
+                                ready,
+                                project,
+                                &mut self.playback,
+                                &mut self.single_job,
+                                false,
+                            );
+                            recompute |= self.single_job != before;
+                        }
                     }
                     State::Failed { error, .. } => {
                         ui.colored_label(WARNING, format!("⚠ {error}"));
                         recompute = ui.button(tr("Erneut versuchen")).clicked();
                     }
                     State::Ready { ready, .. } => {
-                        action = dialog(ui, ready, project, &mut self.playback, send_enabled);
+                        let before = self.single_job;
+                        action = dialog(
+                            ui,
+                            ready,
+                            project,
+                            &mut self.playback,
+                            &mut self.single_job,
+                            send_enabled,
+                        );
+                        recompute |= self.single_job != before;
                     }
                 });
             });
@@ -260,6 +300,7 @@ impl PreviewUi {
         let State::Computing {
             fingerprint,
             receiver,
+            ..
         } = &self.state
         else {
             return;
@@ -309,7 +350,7 @@ impl PreviewUi {
             return;
         }
         self.last_check = now;
-        if fingerprint(project) == previous {
+        if self.key(project) == previous {
             return;
         }
         if matches!(self.state, State::Failed { .. }) {
@@ -341,8 +382,9 @@ pub fn fingerprint(project: &Project) -> u64 {
     writer.0.finish()
 }
 
-fn compute(project: &Project) -> Result<Computed, String> {
-    let job = ltt::prepare(project)?;
+fn compute(project: &Project, single_job: bool) -> Result<Computed, String> {
+    ltt::require_material(project)?;
+    let job = ltt::prepare_with(project, single_job)?;
     let preview = decode_png(&job.preview_png);
     let rasters = job
         .timeline
@@ -722,6 +764,7 @@ fn dialog(
     ready: &Ready,
     project: &Project,
     playback: &mut Playback,
+    single_job: &mut bool,
     send_enabled: bool,
 ) -> Option<Action> {
     let job = &ready.job;
@@ -743,6 +786,23 @@ fn dialog(
         host = project.hostname,
         port = project.port
     ));
+    // Alle Verfahren in einen Auftrag oder einen je Verfahren.
+    ui.checkbox(single_job, tr("Alles in eine Datei"))
+        .on_hover_text(tr(
+            "Alle Verfahren in einem LTT-Auftrag statt einem je Verfahren",
+        ));
+    crate::form::caption(
+        ui,
+        if *single_job {
+            tr("Ein Auftrag mit allen Verfahren: Gravuren zuerst, dann Markieren und Schneiden.")
+                .to_string()
+        } else {
+            tr!(
+                "{count} Einzelaufträge · Engrav → Eng3D → Mark → Cut; jeder wird am Gerät einzeln gestartet.",
+                count = job.jobs.len()
+            )
+        },
+    );
     for warning in &job.warnings {
         egui::Frame::group(ui.style())
             .stroke(Stroke::new(1.0, WARNING))
@@ -1205,7 +1265,7 @@ mod tests {
             ..Project::default()
         };
         project.name = "Demo".into();
-        let computed = compute(&project).unwrap();
+        let computed = compute(&project, false).unwrap();
         assert!(computed.preview.is_some());
         let timeline = &computed.job.timeline;
         let end = frame_at(timeline, computed.job.estimated_seconds).unwrap();

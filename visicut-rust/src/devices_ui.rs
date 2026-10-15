@@ -198,46 +198,14 @@ impl DeviceUi {
         self.camera_loading = Some(spawn(move || camera::background_image(&device, w, h)));
     }
 
-    pub fn sidebar(
-        &mut self,
-        ui: &mut egui::Ui,
-        project: &mut Project,
-        dirty: &mut bool,
-        status: &mut String,
-    ) {
-        let mut selected = self.store.selected;
-        crate::form::row(ui, tr("Lasercutter"), |ui| {
-            egui::ComboBox::from_id_salt("device")
-                .width(190.0)
-                .selected_text(&self.device().name)
-                .show_ui(ui, |ui| {
-                    for (i, device) in self.store.devices.iter().enumerate() {
-                        ui.selectable_value(&mut selected, i, &device.name);
-                    }
-                });
-        });
-        if selected != self.store.selected {
-            let mut store = self.store.clone();
-            store.selected = selected;
-            if self.save(store, project, status) {
-                *dirty = true;
-            }
+    /// Macht einen eingerichteten Lasercutter aktiv (Menü Datei → Lasercutter).
+    pub fn select(&mut self, index: usize, project: &mut Project, status: &mut String) -> bool {
+        if index == self.store.selected || index >= self.store.devices.len() {
+            return false;
         }
-        let address = format!("{}:{}", self.device().hostname, self.device().port);
-        let manage = crate::form::row(
-            ui,
-            egui::RichText::new(address)
-                .size(11.5)
-                .color(egui::Color32::from_gray(95)),
-            |ui| {
-                ui.small_button(tr("Verwalten …"))
-                    .on_hover_text(tr("Lasercutter verwalten"))
-                    .clicked()
-            },
-        );
-        if manage {
-            self.open_manager();
-        }
+        let mut store = self.store.clone();
+        store.selected = index;
+        self.save(store, project, status)
     }
 
     /// Rotationseinheit (nur bei Geräten, die eine haben). Das Kamerabild

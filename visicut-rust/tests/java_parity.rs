@@ -8,7 +8,7 @@
 use std::{collections::HashMap, fs, path::Path};
 use visicut_core::{
     ltt,
-    project::{JobStep, Operation, ParameterSet, Project},
+    project::{CutOrder, JobStep, Operation, ParameterSet, Project},
     raster::{Dithering, RasterSettings},
 };
 
@@ -47,6 +47,8 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Project {
         passes: case.get("passes").map_or(1, |p| p.parse().unwrap()),
         thickness_mm: case.get("thickness_mm").map_or(0.0, |t| t.parse().unwrap()),
         raster: raster(dir, case),
+        // Byte-gleich mit Java nur in VisiCuts Reihenfolge.
+        cut_order: CutOrder::VisiCut,
         ..Project::default()
     };
     // Further parameter sets need a step; filters `[]` select every object.

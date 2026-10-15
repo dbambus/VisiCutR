@@ -18,7 +18,7 @@ use visicut_core::{
 use visicut_core::{
     import,
     ltt::{self, OutputJob, PreparedJob},
-    project::{Operation, Project},
+    project::{CutOrder, Operation, Project},
     session, svg,
 };
 
@@ -71,6 +71,10 @@ enum Command {
     ClearCache,
     /// Sprache der Oberfläche; `None` folgt dem System.
     Language(Option<i18n::Language>),
+    /// Reihenfolge der Schnitt- und Markierpfade (Menü Job).
+    CutOrder(CutOrder),
+    /// Aktiver Lasercutter (Menü Datei → Lasercutter), Index in der Geräteliste.
+    Device(usize),
 }
 
 const COMMAND_SHIFT: Modifiers = Modifiers::COMMAND.plus(Modifiers::SHIFT);
@@ -109,13 +113,14 @@ impl Command {
             Self::Export => tr("LTT-Job exportieren …"),
             Self::Quit => tr("Beenden"),
             Self::Center => tr("Motiv auf dem Arbeitsbett zentrieren"),
-            Self::Devices => tr("Lasercutter verwalten …"),
+            Self::Devices => tr("Einstellungen …"),
+            Self::Device(_) => tr("Lasercutter"),
             Self::ToggleGrid => tr("Raster anzeigen"),
             Self::ToggleCamera => tr("Kamerabild anzeigen"),
             Self::RefreshCamera => tr("Kamerabild aktualisieren"),
             Self::ZoomIn => tr("Vergrößern"),
             Self::ZoomOut => tr("Verkleinern"),
-            Self::ZoomFit => tr("Ansicht einpassen"),
+            Self::ZoomFit => tr("Zoom zurücksetzen"),
             Self::Materials => tr("Materialbibliothek …"),
             Self::Preview => tr("Vorschau & Zeit …"),
             Self::Send => tr("An Lasercutter senden …"),
@@ -137,6 +142,7 @@ impl Command {
             Self::ClearRecent => tr("Liste leeren"),
             Self::ClearCache => tr("Zwischenspeicher leeren …"),
             Self::Language(_) => tr("Sprache"),
+            Self::CutOrder(order) => jobs_ui::cut_order_title(order),
         }
     }
 
@@ -180,7 +186,9 @@ impl Command {
             | Self::OpenRecent(_)
             | Self::ClearRecent
             | Self::ClearCache
-            | Self::Language(_) => return None,
+            | Self::Language(_)
+            | Self::CutOrder(_)
+            | Self::Device(_) => return None,
         };
         Some(KeyboardShortcut::new(modifiers, key))
     }
@@ -237,6 +245,14 @@ struct VisiCutRust {
     texture: Option<egui::TextureHandle>,
     /// Texturen der übrigen Teile, parallel zu `project.parts`.
     part_textures: Vec<Option<egui::TextureHandle>>,
+    /// Objekte in den Farben ihrer Bearbeitung (`ltt::processing_preview`)
+    /// und der Stand, für den sie gilt.
+    live: Option<(u64, Option<egui::TextureHandle>)>,
+    /// Umriss des Objekts unter der Maus in der Objektliste (mm relativ zur
+    /// Motivecke) mit dem Stand und Objekt, für das er gilt.
+    hover_outline: Option<(u64, usize, Vec<visicut_core::geometry::Contour>)>,
+    /// Umrisse aller Objekte für den Treffertest auf der Arbeitsfläche.
+    all_outlines: Option<(u64, Vec<Vec<visicut_core::geometry::Contour>>)>,
     /// Nullpunkt des Geräts beim letzten Bild (unten links?); ein Wechsel
     /// setzt den Standard-Bezugspunkt.
     origin_bottom_left: Option<bool>,
@@ -244,6 +260,8 @@ struct VisiCutRust {
     /// Deutlich sichtbarer Hinweis (Fehler, Importwarnungen) in einem Dialog.
     alert: Option<String>,
     project_path: Option<PathBuf>,
+    /// Projektname während des Umbenennens im Kopf der Arbeitsfläche.
+    name_draft: Option<String>,
     /// Zwischenstand, aus dem das Projekt geöffnet wurde (`session`);
     /// Sichern löscht ihn.
     cached: Option<PathBuf>,
@@ -293,11 +311,15 @@ impl VisiCutRust {
         let mut app = Self {
             project: Project::default(),
             texture: None,
+            live: None,
+            hover_outline: None,
+            all_outlines: None,
             part_textures: Vec::new(),
             origin_bottom_left: None,
             status: tr("Datei öffnen, hierher ziehen oder das Beispiel öffnen").into(),
             alert: None,
             project_path: None,
+            name_draft: None,
             cached: None,
             dirty: false,
             proportional: true,
@@ -324,6 +346,7 @@ impl VisiCutRust {
             capture: None,
         };
         app.reset_project();
+        app.preview.single_job = app.settings.single_job;
         if let Some(error) = device_error {
             app.report(tr!(
                 "Geräteliste nicht lesbar, FAU-Standard wird verwendet: {error}",
@@ -961,7 +984,10 @@ impl VisiCutRust {
         if !self.sendable {
             return;
         }
-        let prepared = match ltt::prepare(&self.project) {
+        let single_job = self.preview.single_job;
+        let prepared = match ltt::require_material(&self.project)
+            .and_then(|()| ltt::prepare_with(&self.project, single_job))
+        {
             Ok(prepared) => prepared,
             Err(e) => return self.report(e),
         };
@@ -1025,7 +1051,10 @@ impl VisiCutRust {
         if !self.sendable {
             return;
         }
-        match ltt::prepare(&self.project) {
+        let single_job = self.preview.single_job;
+        match ltt::require_material(&self.project)
+            .and_then(|()| ltt::prepare_with(&self.project, single_job))
+        {
             Ok(prepared) => self.confirm_send = Some(prepared),
             Err(e) => self.report(e),
         }
@@ -1072,6 +1101,7 @@ impl VisiCutRust {
             Command::ClearRecent => !self.settings.recent.is_empty(),
             Command::ClearCache => !session::states(&session::dir()).is_empty(),
             Command::Language(_) => true,
+            Command::CutOrder(_) | Command::Device(_) => !self.busy(),
             Command::Undo => self.undo.is_some() && !self.busy(),
             Command::Center => self.texture.is_some() && !self.busy(),
             Command::ToggleCamera => self.devices.has_camera(),
@@ -1149,6 +1179,20 @@ impl VisiCutRust {
             }
             Command::ClearCache => {
                 self.confirm_clear_cache = Some(session::states(&session::dir()).len());
+            }
+            Command::Device(index) => {
+                if self
+                    .devices
+                    .select(index, &mut self.project, &mut self.status)
+                {
+                    self.dirty = true;
+                }
+            }
+            Command::CutOrder(order) => {
+                if self.project.cut_order != order {
+                    self.project.cut_order = order;
+                    self.dirty = true;
+                }
             }
             Command::Language(language) => {
                 self.settings.language = language.map(|l| l.code().to_owned());
@@ -1283,6 +1327,28 @@ impl VisiCutRust {
                 });
                 self.menu_item(ui, Command::ClearCache, &mut clicked);
                 ui.separator();
+                // Aktiver Lasercutter und Einstellungen statt einer Auswahl in
+                // der Seitenleiste.
+                ui.menu_button(tr("Lasercutter"), |ui| {
+                    for (index, device) in self.devices.store.devices.iter().enumerate() {
+                        let command = Command::Device(index);
+                        if ui
+                            .add_enabled(
+                                self.enabled(command),
+                                egui::Button::selectable(
+                                    index == self.devices.store.selected,
+                                    &device.name,
+                                ),
+                            )
+                            .on_hover_text(format!("{}:{}", device.hostname, device.port))
+                            .clicked()
+                        {
+                            clicked = Some(command);
+                        }
+                    }
+                });
+                self.menu_item(ui, Command::Devices, &mut clicked);
+                ui.separator();
                 for command in [Command::Save, Command::SaveAs, Command::Export] {
                     self.menu_item(ui, command, &mut clicked);
                 }
@@ -1311,8 +1377,6 @@ impl VisiCutRust {
                     egui::Button::new(tr("Motiv verschieben")).shortcut_text(tr("Pfeiltasten")),
                 )
                 .on_disabled_hover_text(tr("1 mm je Tastendruck, mit Umschalt 10 mm"));
-                ui.separator();
-                self.menu_item(ui, Command::Devices, &mut clicked);
             });
             ui.menu_button(tr("Objekt"), |ui| {
                 for command in [Command::Text, Command::Shape, Command::Sign] {
@@ -1358,6 +1422,26 @@ impl VisiCutRust {
                 for command in [Command::Materials, Command::Preview] {
                     self.menu_item(ui, command, &mut clicked);
                 }
+                ui.separator();
+                // Reihenfolge der Schnitt- und Markierpfade.
+                ui.menu_button(tr("Schnittreihenfolge"), |ui| {
+                    for order in [CutOrder::ShortestTravel, CutOrder::VisiCut] {
+                        let command = Command::CutOrder(order);
+                        if ui
+                            .add_enabled(
+                                self.enabled(command),
+                                egui::Button::selectable(
+                                    self.project.cut_order == order,
+                                    command.title(),
+                                ),
+                            )
+                            .on_hover_text(jobs_ui::cut_order_help(order))
+                            .clicked()
+                        {
+                            clicked = Some(command);
+                        }
+                    }
+                });
                 ui.separator();
                 self.menu_item(ui, Command::Send, &mut clicked);
             });
@@ -1410,15 +1494,6 @@ impl VisiCutRust {
     /// Auftragsbefehle stehen in der Werkzeugleiste.
     fn sidebar(&mut self, ui: &mut egui::Ui) -> Option<Command> {
         let mut clicked = None;
-        form::section(ui, tr("Projekt"), |ui| {
-            form::row(ui, tr("Name"), |ui| {
-                self.dirty |= ui
-                    .add(egui::TextEdit::singleline(&mut self.project.name).desired_width(190.0))
-                    .changed();
-            });
-            self.devices
-                .sidebar(ui, &mut self.project, &mut self.dirty, &mut self.status);
-        });
         if self.project.has_artwork() {
             form::section(ui, tr("Teile"), |ui| self.parts_panel(ui, &mut clicked));
         }
@@ -1625,8 +1700,47 @@ impl VisiCutRust {
         });
     }
 
+    /// Rechnet die farbige Bearbeitung neu, wenn sich Motiv, Teile oder
+    /// Zuordnung geändert haben; reines Verschieben verschiebt das Bild.
+    fn refresh_live(&mut self, ctx: &egui::Context) {
+        use std::hash::{Hash, Hasher};
+        let p = &self.project;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        p.svg.hash(&mut hasher);
+        let position = (!p.parts.is_empty()).then_some((p.x_mm, p.y_mm));
+        serde_json::to_string(&(
+            &p.steps,
+            p.operation,
+            &p.ignore_filters,
+            &p.parts,
+            p.active_part,
+            p.width_mm,
+            p.height_mm,
+            position,
+        ))
+        .unwrap_or_default()
+        .hash(&mut hasher);
+        let key = hasher.finish();
+        if self.live.as_ref().is_some_and(|(k, _)| *k == key) {
+            return;
+        }
+        let texture = (self.texture.is_some())
+            .then(|| ltt::processing_preview(&self.project).ok())
+            .flatten()
+            .and_then(|png| resvg::tiny_skia::Pixmap::decode_png(&png).ok())
+            .map(|pixmap| {
+                let image = egui::ColorImage::from_rgba_premultiplied(
+                    [pixmap.width() as usize, pixmap.height() as usize],
+                    pixmap.data(),
+                );
+                ctx.load_texture("processing", image, egui::TextureOptions::LINEAR)
+            });
+        self.live = Some((key, texture));
+    }
+
     fn canvas(&mut self, ui: &mut egui::Ui) -> Option<Command> {
         let mut clicked = None;
+        self.refresh_live(ui.ctx());
         let panel = ui.max_rect();
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(20, 14))
@@ -1687,15 +1801,46 @@ impl VisiCutRust {
     fn canvas_header(&mut self, ui: &mut egui::Ui, clicked: &mut Option<Command>) {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.label(
-                    egui::RichText::new(if self.texture.is_some() {
-                        self.project.name.as_str()
-                    } else {
-                        tr("Arbeitsbereich")
-                    })
-                    .size(20.0)
-                    .strong(),
-                );
+                // Projektname: Doppelklick zum Umbenennen, ⏎ oder Klick
+                // daneben übernimmt, Esc bricht ab.
+                if let Some(draft) = &mut self.name_draft {
+                    let field = ui.add(
+                        egui::TextEdit::singleline(draft)
+                            .font(egui::FontId::proportional(20.0))
+                            .desired_width(320.0),
+                    );
+                    field.request_focus();
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        self.name_draft = None;
+                    } else if field.lost_focus() {
+                        let name = draft.trim().to_owned();
+                        if !name.is_empty() && name != self.project.name {
+                            self.project.name = name;
+                            self.dirty = true;
+                        }
+                        self.name_draft = None;
+                    }
+                } else if self.texture.is_some() {
+                    let title = ui
+                        .add(
+                            egui::Label::new(
+                                egui::RichText::new(self.project.name.as_str())
+                                    .size(20.0)
+                                    .strong(),
+                            )
+                            .sense(egui::Sense::click()),
+                        )
+                        .on_hover_text(tr("Doppelklick zum Umbenennen"));
+                    if title.double_clicked() {
+                        self.name_draft = Some(self.project.name.clone());
+                    }
+                } else {
+                    ui.label(
+                        egui::RichText::new(tr("Arbeitsbereich"))
+                            .size(20.0)
+                            .strong(),
+                    );
+                }
                 ui.weak(format!(
                     "{} · {} × {} mm{}",
                     self.devices.device().name,
@@ -1720,7 +1865,7 @@ impl VisiCutRust {
                         .then_some(command)
                 };
                 let mut chosen = Vec::new();
-                chosen.extend(tool(ui, Command::ZoomFit, tr("Einpassen")));
+                chosen.extend(tool(ui, Command::ZoomFit, tr("Zurücksetzen")));
                 chosen.extend(tool(ui, Command::ZoomIn, "+"));
                 ui.label(format!("{:.0} %", self.zoom * 100.0));
                 chosen.extend(tool(ui, Command::ZoomOut, "−"));
@@ -1825,16 +1970,25 @@ impl VisiCutRust {
             let camera = self.devices.paint_camera(&painter, bed);
             if self.show_grid && !camera {
                 let step = workspace::grid_step_mm(scale);
-                let grid = Stroke::new(0.5, Color32::from_gray(222));
+                // Linien an den Linealzahlen kräftiger.
+                let labels = workspace::ruler_step_mm(scale);
+                let line = |mm: f32| {
+                    let major = ((mm / labels).round() * labels - mm).abs() < step * 0.01;
+                    Stroke::new(0.5, Color32::from_gray(if major { 200 } else { 228 }))
+                };
                 for x in workspace::ruler_marks(bed_mm.x, step) {
-                    let x = bed.left() + x * scale;
-                    painter
-                        .line_segment([Pos2::new(x, bed.top()), Pos2::new(x, bed.bottom())], grid);
+                    let px = bed.left() + x * scale;
+                    painter.line_segment(
+                        [Pos2::new(px, bed.top()), Pos2::new(px, bed.bottom())],
+                        line(x),
+                    );
                 }
                 for y in workspace::ruler_marks(bed_mm.y, step) {
-                    let y = self.ruler_y(bed, scale, y);
-                    painter
-                        .line_segment([Pos2::new(bed.left(), y), Pos2::new(bed.right(), y)], grid);
+                    let py = self.ruler_y(bed, scale, y);
+                    painter.line_segment(
+                        [Pos2::new(bed.left(), py), Pos2::new(bed.right(), py)],
+                        line(y),
+                    );
                 }
             }
             painter.rect_stroke(
@@ -1848,6 +2002,9 @@ impl VisiCutRust {
                     Rect::from_min_size(bed.min + Vec2::new(x, y) * scale, Vec2::new(w, h) * scale)
                 };
                 let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+                // Bearbeitung in Farbe statt der Originalbilder, schon vor der
+                // Auftragsvorschau.
+                let live = self.live.as_ref().and_then(|(_, t)| t.as_ref());
                 // Die übrigen Teile unter dem gewählten, mit dünnem grauem Rahmen.
                 let others: Vec<(usize, Rect)> = self
                     .project
@@ -1858,6 +2015,7 @@ impl VisiCutRust {
                         let index = k + usize::from(k >= self.project.active_part);
                         let rect = to_screen([part.x_mm, part.y_mm, part.width_mm, part.height_mm]);
                         match self.part_textures.get(k).and_then(Option::as_ref) {
+                            _ if live.is_some() => {}
                             Some(texture) => {
                                 painter.image(texture.id(), rect, uv, Color32::WHITE);
                             }
@@ -1874,7 +2032,15 @@ impl VisiCutRust {
                     self.project.width_mm,
                     self.project.height_mm,
                 ]);
-                painter.image(texture.id(), motif, uv, Color32::WHITE);
+                match live {
+                    Some(live) => painter.image(
+                        live.id(),
+                        to_screen(self.project.bounds()),
+                        uv,
+                        Color32::WHITE,
+                    ),
+                    None => painter.image(texture.id(), motif, uv, Color32::WHITE),
+                };
                 // Die Auftragsvorschau umfasst alle Teile.
                 self.preview
                     .overlay(&painter, to_screen(self.project.bounds()));
@@ -1903,12 +2069,87 @@ impl VisiCutRust {
                     self.select_part(index);
                     return;
                 }
-                painter.rect_stroke(
-                    motif,
-                    0.0,
-                    Stroke::new(1.5, Color32::from_rgb(52, 116, 170)),
-                    egui::StrokeKind::Inside,
-                );
+                // Auswahl schwarz gestrichelt: Blau, Rot, Orange und Violett
+                // stehen für Bearbeitungen und dürfen nicht verwechselt werden.
+                let frame = motif.shrink(0.5);
+                painter.extend(egui::Shape::dashed_line(
+                    &[
+                        frame.left_top(),
+                        frame.right_top(),
+                        frame.right_bottom(),
+                        frame.left_bottom(),
+                        frame.left_top(),
+                    ],
+                    Stroke::new(1.0, Color32::from_black_alpha(190)),
+                    5.0,
+                    3.0,
+                ));
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                self.project.svg.hash(&mut hasher);
+                self.project.width_mm.to_bits().hash(&mut hasher);
+                self.project.height_mm.to_bits().hash(&mut hasher);
+                let key = hasher.finish();
+                // In „Einzeln“: Objekt unter der Maus auf der Arbeitsfläche;
+                // seine Zeile in der Liste gilt als ausgewählt.
+                let objects_mode =
+                    jobs_ui::assignment_mode(&self.project) == jobs_ui::AssignmentMode::Objects;
+                let pointer = ui
+                    .input(|i| i.pointer.hover_pos())
+                    .filter(|p| bed.contains(*p) && ui.rect_contains_pointer(bed));
+                self.jobs.canvas_hover = match pointer {
+                    Some(pos) if objects_mode => {
+                        if self.all_outlines.as_ref().is_none_or(|(k, _)| *k != key) {
+                            let outlines = visicut_core::geometry::object_outlines(&self.project)
+                                .unwrap_or_default();
+                            self.all_outlines = Some((key, outlines));
+                        }
+                        let mm = [
+                            f64::from((pos.x - bed.min.x) / scale - self.project.x_mm),
+                            f64::from((pos.y - bed.min.y) / scale - self.project.y_mm),
+                        ];
+                        self.all_outlines.as_ref().and_then(|(_, outlines)| {
+                            visicut_core::geometry::object_at(outlines, mm, f64::from(4.0 / scale))
+                        })
+                    }
+                    _ => None,
+                };
+                // Objekt unter der Maus (Liste oder Arbeitsfläche): gelb
+                // (keine Bearbeitungsfarbe).
+                if let Some(index) = self.jobs.hovered_object.take().or(self.jobs.canvas_hover) {
+                    if !self
+                        .hover_outline
+                        .as_ref()
+                        .is_some_and(|(k, i, _)| *k == key && *i == index)
+                    {
+                        let outline = visicut_core::geometry::object_outline(&self.project, index)
+                            .unwrap_or_default();
+                        self.hover_outline = Some((key, index, outline));
+                    }
+                    if let Some((_, _, outline)) = &self.hover_outline {
+                        let origin = [self.project.x_mm as f64, self.project.y_mm as f64];
+                        for contour in outline {
+                            let points: Vec<Pos2> = contour
+                                .iter()
+                                .map(|p| {
+                                    bed.min
+                                        + Vec2::new(
+                                            (origin[0] + p[0]) as f32,
+                                            (origin[1] + p[1]) as f32,
+                                        ) * scale
+                                })
+                                .collect();
+                            painter.add(egui::Shape::line(
+                                points.clone(),
+                                Stroke::new(4.0, Color32::from_rgb(255, 204, 0)),
+                            ));
+                            painter.add(egui::Shape::line(
+                                points,
+                                Stroke::new(1.0, Color32::from_black_alpha(180)),
+                            ));
+                        }
+                    }
+                }
                 let response = ui
                     .interact(
                         motif.intersect(bed),
@@ -1994,7 +2235,7 @@ impl VisiCutRust {
             painter.text(
                 Pos2::new(px, bed.top() - 7.0),
                 egui::Align2::CENTER_BOTTOM,
-                format!("{x:.0}"),
+                workspace::ruler_label(x, step),
                 font.clone(),
                 color,
             );
@@ -2008,7 +2249,7 @@ impl VisiCutRust {
             painter.text(
                 Pos2::new(bed.left() - 8.0, py),
                 egui::Align2::RIGHT_CENTER,
-                format!("{y:.0}"),
+                workspace::ruler_label(y, step),
                 font.clone(),
                 color,
             );
@@ -2154,7 +2395,7 @@ impl VisiCutRust {
             self.project.port
         ));
         ui.label(tr!(
-            "Aufträge: {jobs} (je Verfahren ein separater Auftrag) · ca. {time}",
+            "Aufträge: {jobs} · ca. {time}",
             jobs = prepared
                 .jobs
                 .iter()
@@ -2412,6 +2653,10 @@ impl eframe::App for VisiCutRust {
             Some(preview_ui::Action::Send) => commands.push(Command::Send),
             Some(preview_ui::Action::Export) => commands.push(Command::Export),
             None => {}
+        }
+        if self.preview.single_job != self.settings.single_job {
+            self.settings.single_job = self.preview.single_job;
+            self.save_settings();
         }
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             commands.extend(self.menu_bar(ui));

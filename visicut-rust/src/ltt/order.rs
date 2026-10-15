@@ -346,7 +346,7 @@ fn join_contiguous(group: Vec<Element>) -> Vec<Element> {
 const NEAREST_MAX_PATHS: usize = 5_000;
 const NEAREST_MAX_POINTS: usize = 400_000;
 
-/// Experimental order with less travel: starting at `start` (the head
+/// Order with less travel: starting at `start` (the head
 /// position in pixels, the home corner at the beginning of a job), always the
 /// nearest path whose bounding box strictly contains no path still to cut, so
 /// inner contours still come first. Closed paths may start at any vertex,

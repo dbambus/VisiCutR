@@ -43,7 +43,10 @@ pub fn read_postscript(path: &Path) -> Result<Imported, String> {
         )
     })?;
     match eps::interpret(&data) {
-        Ok(imported) => Ok(imported),
+        Ok(imported) => Ok(Imported {
+            svg: group_drawing(imported.svg),
+            ..imported
+        }),
         Err(reason) => {
             if ghostscript::find().is_none() {
                 return Err(format!("{reason}. {}", ghostscript::missing()));
@@ -91,6 +94,7 @@ fn convert_unchecked(data: Vec<u8>) -> Result<Imported, String> {
 
     let (width_pt, height_pt) = page.render_dimensions();
     let svg = postprocess(&svg, width_pt, height_pt)?;
+    let svg = group_drawing(crop_to_content(svg, width_pt, height_pt));
     if svg.len() > crate::svg_import::MAX_SVG_BYTES {
         return Err(tr("PDF-Seite ist zu komplex (SVG größer als 20 MB)").into());
     }
@@ -134,6 +138,69 @@ fn convert_unchecked(data: Vec<u8>) -> Result<Imported, String> {
     })
 }
 
+/// Puts the whole drawing into one group: a PDF page or EPS file is one
+/// drawing, so nesting places it as one part instead of scattering its
+/// paths. Objects for assignments and rules stay the individual paths.
+fn group_drawing(svg: String) -> String {
+    let Ok(document) = roxmltree::Document::parse(&svg) else {
+        return svg;
+    };
+    let root = document.root_element();
+    let range = root.range();
+    let (Some(start), Some(end)) = (
+        svg[range.clone()].find('>').map(|i| range.start + i + 1),
+        svg[range.clone()].rfind("</svg>").map(|i| range.start + i),
+    ) else {
+        return svg;
+    };
+    if start > end {
+        return svg;
+    }
+    format!(
+        "{}<g>{}</g>{}",
+        &svg[..start],
+        &svg[start..end],
+        &svg[end..]
+    )
+}
+
+/// Start tag of the root element as written by `postprocess`.
+fn root_tag(x_pt: f32, y_pt: f32, width_pt: f32, height_pt: f32) -> String {
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" \
+         width=\"{}mm\" height=\"{}mm\" viewBox=\"{x_pt} {y_pt} {width_pt} {height_pt}\">",
+        width_pt * MM_PER_PT,
+        height_pt * MM_PER_PT,
+    )
+}
+
+/// Trims the page to the visible content (with stroke width) at unchanged
+/// scale. A PDF page is the whole artboard, e.g. A4 from Illustrator; as
+/// motif frame it would put the drawing somewhere on a large empty sheet.
+/// Content outside the page is invisible in the PDF and stays cut off.
+fn crop_to_content(svg: String, width_pt: f32, height_pt: f32) -> String {
+    let Ok(tree) = resvg::usvg::Tree::from_str(&svg, &crate::svg::options()) else {
+        return svg;
+    };
+    if !tree.root().has_children() {
+        return svg;
+    }
+    let bounds = tree.root().abs_stroke_bounding_box();
+    let size = tree.size();
+    // Canvas pixels to points; the viewBox maps the page uniformly.
+    let (sx, sy) = (width_pt / size.width(), height_pt / size.height());
+    let left = (bounds.left() * sx).clamp(0.0, width_pt);
+    let top = (bounds.top() * sy).clamp(0.0, height_pt);
+    let right = (bounds.right() * sx).clamp(0.0, width_pt);
+    let bottom = (bounds.bottom() * sy).clamp(0.0, height_pt);
+    if right - left <= 0.0 || bottom - top <= 0.0 {
+        return svg;
+    }
+    let page = root_tag(0.0, 0.0, width_pt, height_pt);
+    let content = root_tag(left, top, right - left, bottom - top);
+    svg.replacen(&page, &content, 1)
+}
+
 /// Gives the SVG its physical size and makes zero-width strokes visible.
 ///
 /// hayro-svg writes the page size in points as unitless width/height, which
@@ -148,12 +215,7 @@ fn postprocess(svg: &str, width_pt: f32, height_pt: f32) -> Result<String, Strin
         .map(|i| root.range().start + i + 1)
         .ok_or(tr("PDF konnte nicht umgewandelt werden"))?;
     let mut out = String::with_capacity(svg.len() + 128);
-    out.push_str(&format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" \
-         width=\"{}mm\" height=\"{}mm\" viewBox=\"0 0 {width_pt} {height_pt}\">",
-        width_pt * MM_PER_PT,
-        height_pt * MM_PER_PT,
-    ));
+    out.push_str(&root_tag(0.0, 0.0, width_pt, height_pt));
 
     let mut copied = body_start;
     for node in document.descendants().filter(|n| n.is_element()) {

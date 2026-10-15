@@ -913,5 +913,9 @@
   "Gefunden": "Trovate",
   "Suche VisiCam-Kameras im lokalen Netz …": "Ricerca di telecamere VisiCam nella rete locale …",
   "Keine VisiCam im Netz gefunden": "Nessuna VisiCam trovata nella rete",
-  "Kamera gefunden: {url}": "Telecamera trovata: {url}"
+  "Kamera gefunden: {url}": "Telecamera trovata: {url}",
+  "Zeichnung größer als die Zeichenfläche": "Disegno più grande dell'area di lavoro",
+  "Ein Teil der Zeichnung liegt außerhalb der Zeichenfläche der Datei. Was soll importiert werden?": "Una parte del disegno si trova fuori dall'area di lavoro del file. Cosa importare?",
+  "Alles importieren": "Importa tutto",
+  "Nur Zeichenfläche": "Solo area di lavoro"
 }

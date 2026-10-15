@@ -209,6 +209,14 @@ enum Replace {
     Quit,
 }
 
+/// Eine Datei, deren Zeichnung über die Zeichenfläche hinausreicht.
+struct PendingImport {
+    path: PathBuf,
+    imported: visicut_core::svg_import::Imported,
+    /// Dieselbe Grafik mit auf die ganze Zeichnung vergrößerter Fläche.
+    whole: String,
+}
+
 /// Mehrere LTT-Aufträge warten auf die Bestätigung zum Ersetzen.
 struct PendingExport {
     targets: Vec<PathBuf>,
@@ -263,6 +271,8 @@ struct VisiCutRust {
     status: String,
     /// Deutlich sichtbarer Hinweis (Fehler, Importwarnungen) in einem Dialog.
     alert: Option<String>,
+    /// Zeichnung ragt über die Zeichenfläche: Auswahl steht aus.
+    pending_import: Option<PendingImport>,
     project_path: Option<PathBuf>,
     /// Projektname während des Umbenennens im Kopf der Arbeitsfläche.
     name_draft: Option<String>,
@@ -273,6 +283,8 @@ struct VisiCutRust {
     proportional: bool,
     allow_close: bool,
     zoom: f32,
+    /// Bildpunkte je mm auf dem Bildschirm, zuletzt in `bed` berechnet.
+    view_scale: f32,
     show_grid: bool,
     /// Projekt ist vollständig und passt aufs Bett (pro Bild neu bestimmt).
     sendable: bool,
@@ -308,6 +320,13 @@ impl VisiCutRust {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let settings = settings::AppSettings::load();
         i18n::set_language(settings.language());
+        // Die Oberfläche ist hell: auch die Titelleiste hell, nicht schwarz auf
+        // dunklem Hintergrund.
+        cc.egui_ctx.set_theme(egui::ThemePreference::Light);
+        // Die Titelleiste richtet winit nach dem Windows-Theme; egui gibt die
+        // Vorgabe nicht von selbst weiter.
+        cc.egui_ctx
+            .send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Light));
         cc.egui_ctx.set_visuals(egui::Visuals::light());
         form::apply_style(&cc.egui_ctx);
         // Strg+Plus/Minus/0 zoomen die Arbeitsfläche, nicht die Oberfläche.
@@ -324,6 +343,7 @@ impl VisiCutRust {
             origin_bottom_left: None,
             status: tr("Datei öffnen, hierher ziehen oder das Beispiel öffnen").into(),
             alert: None,
+            pending_import: None,
             project_path: None,
             name_draft: None,
             cached: None,
@@ -331,6 +351,7 @@ impl VisiCutRust {
             proportional: true,
             allow_close: false,
             zoom: 1.0,
+            view_scale: 1.0,
             show_grid: true,
             sendable: false,
             replace: None,
@@ -585,6 +606,25 @@ impl VisiCutRust {
         Ok(())
     }
 
+    fn finish_import(
+        &mut self,
+        ctx: &egui::Context,
+        path: &Path,
+        imported: visicut_core::svg_import::Imported,
+    ) -> Result<(), String> {
+        let name = path.file_stem().unwrap_or_default().to_string_lossy();
+        self.import(ctx, imported.svg, name.into(), imported.steps)?;
+        self.status = tr!(
+            "{file} importiert · Originalmaße übernommen",
+            file = path.file_name().unwrap_or_default().to_string_lossy()
+        );
+        self.remember(path);
+        if !imported.warnings.is_empty() {
+            self.alert = Some(imported.warnings.join("\n"));
+        }
+        Ok(())
+    }
+
     fn open_path(&mut self, ctx: &egui::Context, path: &Path) -> Result<(), String> {
         let meta = std::fs::metadata(path).map_err(|e| {
             tr!(
@@ -598,17 +638,15 @@ impl VisiCutRust {
         }
         if import::is_importable(path) {
             let imported = import::read_file(path)?;
-            let name = path.file_stem().unwrap_or_default().to_string_lossy();
-            self.import(ctx, imported.svg, name.into(), imported.steps)?;
-            self.status = tr!(
-                "{file} importiert · Originalmaße übernommen",
-                file = path.file_name().unwrap_or_default().to_string_lossy()
-            );
-            self.remember(path);
-            if !imported.warnings.is_empty() {
-                self.alert = Some(imported.warnings.join("\n"));
+            if let Some(whole) = visicut_core::svg_import::fit_to_content(&imported.svg) {
+                self.pending_import = Some(PendingImport {
+                    path: path.to_owned(),
+                    imported,
+                    whole,
+                });
+                return Ok(());
             }
-            Ok(())
+            self.finish_import(ctx, path, imported)
         } else {
             let source = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
             let project: Project = serde_json::from_str(&source)
@@ -669,6 +707,10 @@ impl VisiCutRust {
                 return self.report(notes.join("\n"));
             }
             rest = &rest[1..];
+            if self.pending_import.is_some() {
+                // Die Auswahl zur Zeichenfläche steht noch aus.
+                return;
+            }
             if let Some(warnings) = self.alert.take() {
                 notes.insert(0, warnings);
             }
@@ -1615,7 +1657,10 @@ impl VisiCutRust {
         // Wie das Transformieren-Feld in Grafikprogrammen: Bezugspunkt, X/Y,
         // B/H und rechts die Kette, die das Seitenverhältnis hält.
         let (mut new_x, mut new_y, mut new_w, mut new_h) = (None, None, None, None);
+        // Feste Breite wie die Karten darüber: Felder teilen den Rest unter sich auf.
+        let total = ui.available_width();
         ui.horizontal(|ui| {
+            ui.set_max_width(total);
             reference_picker(ui, &mut reference);
             let [fx, fy] = reference;
             let mut x = p.x_mm + p.width_mm * fx;
@@ -1629,25 +1674,32 @@ impl VisiCutRust {
                     .max_decimals(2)
                     .suffix(" mm")
             }
+            let spacing = ui.spacing().item_spacing.x;
+            let lock = 32.0;
+            let labels = 14.0;
+            let field_w = ((total - 40.0 - lock - 2.0 * labels - 7.0 * spacing) / 2.0)
+                .clamp(50.0, 120.0);
             egui::Grid::new("position_size")
                 .num_columns(4)
+                // Sonst sind die Beschriftungsspalten 40 px breit.
+                .min_col_width(0.0)
                 .spacing([4.0, 4.0])
                 .show(ui, |ui| {
                     ui.label("X");
-                    if ui.add(field(&mut x, -10000.0)).changed() {
+                    if ui.add_sized([field_w, 20.0], field(&mut x, -10000.0)).changed() {
                         new_x = Some(x);
                     }
                     ui.label("B").on_hover_text(tr("Breite"));
-                    if ui.add(field(&mut w, 0.1)).changed() {
+                    if ui.add_sized([field_w, 20.0], field(&mut w, 0.1)).changed() {
                         new_w = Some(w);
                     }
                     ui.end_row();
                     ui.label("Y");
-                    if ui.add(field(&mut y, -10000.0)).changed() {
+                    if ui.add_sized([field_w, 20.0], field(&mut y, -10000.0)).changed() {
                         new_y = Some(y);
                     }
                     ui.label("H").on_hover_text(tr("Höhe"));
-                    if ui.add(field(&mut h, 0.1)).changed() {
+                    if ui.add_sized([field_w, 20.0], field(&mut h, 0.1)).changed() {
                         new_h = Some(h);
                     }
                     ui.end_row();
@@ -1658,7 +1710,7 @@ impl VisiCutRust {
                 tr("Seitenverhältnis frei")
             };
             if ui
-                .selectable_label(proportional, "🔗")
+                .add_sized([lock, 20.0], egui::Button::selectable(proportional, "🔗"))
                 .on_hover_text(tip)
                 .clicked()
             {
@@ -1749,6 +1801,16 @@ impl VisiCutRust {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         p.svg.hash(&mut hasher);
         let position = (!p.parts.is_empty()).then_some((p.x_mm, p.y_mm));
+        // Texturgröße folgt der Anzeige (in groben Stufen, damit nicht jeder
+        // Mausradschritt neu rechnet).
+        let [_, _, bw, bh] = p.bounds();
+        let shown = (bw.max(bh) * self.view_scale * ctx.pixels_per_point()).max(1.0);
+        let shown = 2f32.powf((shown.log2() * 2.0).ceil() / 2.0);
+        let max_px = (shown * 1.5).clamp(800.0, 4096.0);
+        // Linien mindestens 1,5 Bildschirmpunkte breit, sonst verschwinden sie
+        // beim Verkleinern der Textur.
+        let min_line_px = 1.5 * max_px / shown;
+        max_px.to_bits().hash(&mut hasher);
         serde_json::to_string(&(
             &p.steps,
             p.operation,
@@ -1766,7 +1828,7 @@ impl VisiCutRust {
             return;
         }
         let texture = (self.texture.is_some())
-            .then(|| ltt::processing_preview(&self.project).ok())
+            .then(|| ltt::processing_preview_sized(&self.project, max_px, min_line_px).ok())
             .flatten()
             .and_then(|png| resvg::tiny_skia::Pixmap::decode_png(&png).ok())
             .map(|pixmap| {
@@ -1994,8 +2056,21 @@ impl VisiCutRust {
         const MARGIN: f32 = 14.0;
         let bed_mm = Vec2::new(self.project.bed_width_mm, self.project.bed_height_mm);
         let available = ui.available_size() - Vec2::splat(RULER + MARGIN);
+        // Mausrad zoomt die Arbeitsfläche (nicht scrollen), solange der Zeiger darüber steht.
+        if ui.rect_contains_pointer(ui.max_rect()) {
+            let wheel = ui.input(|i| i.raw_scroll_delta.y);
+            if wheel != 0.0 {
+                self.zoom = (self.zoom * (wheel * 0.002).exp())
+                    .clamp(workspace::ZOOM_MIN, workspace::ZOOM_MAX);
+                ui.input_mut(|i| {
+                    i.raw_scroll_delta = Vec2::ZERO;
+                    i.smooth_scroll_delta = Vec2::ZERO;
+                });
+            }
+        }
         let scale =
             workspace::fit_scale([available.x, available.y], [bed_mm.x, bed_mm.y]) * self.zoom;
+        self.view_scale = scale;
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
             let size = bed_mm * scale + Vec2::splat(RULER + MARGIN);
             let (rect, response) = ui.allocate_exact_size(size, Sense::click());
@@ -2492,6 +2567,41 @@ impl VisiCutRust {
                 Some(false) => self.perform(ctx, action),
                 None if modal.should_close() => {}
                 None => self.replace = Some(action),
+            }
+        }
+        if let Some(mut pending) = self.pending_import.take() {
+            // Some(true): ganze Zeichnung, Some(false): nur die Fläche.
+            let mut choice = None;
+            let modal = egui::Modal::new(egui::Id::new("canvas_overflow")).show(ctx, |ui| {
+                ui.set_max_width(400.0);
+                ui.heading(tr("Zeichnung größer als die Zeichenfläche"));
+                ui.label(tr(
+                    "Ein Teil der Zeichnung liegt außerhalb der Zeichenfläche der Datei. Was soll importiert werden?",
+                ));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button(tr("Alles importieren")).clicked() {
+                        choice = Some(true);
+                    }
+                    if ui.button(tr("Nur Zeichenfläche")).clicked() {
+                        choice = Some(false);
+                    }
+                    if ui.button(tr("Abbrechen")).clicked() {
+                        ui.close();
+                    }
+                });
+            });
+            match choice {
+                Some(whole) => {
+                    if whole {
+                        pending.imported.svg = std::mem::take(&mut pending.whole);
+                    }
+                    if let Err(e) = self.finish_import(ctx, &pending.path, pending.imported) {
+                        self.report(e);
+                    }
+                }
+                None if modal.should_close() => {}
+                None => self.pending_import = Some(pending),
             }
         }
         if let Some(pending) = self.overwrite.take() {

@@ -913,5 +913,9 @@
   "Gefunden": "Trouvées",
   "Suche VisiCam-Kameras im lokalen Netz …": "Recherche de caméras VisiCam dans le réseau local …",
   "Keine VisiCam im Netz gefunden": "Aucune VisiCam trouvée sur le réseau",
-  "Kamera gefunden: {url}": "Caméra trouvée : {url}"
+  "Kamera gefunden: {url}": "Caméra trouvée : {url}",
+  "Zeichnung größer als die Zeichenfläche": "Dessin plus grand que le plan de travail",
+  "Ein Teil der Zeichnung liegt außerhalb der Zeichenfläche der Datei. Was soll importiert werden?": "Une partie du dessin se trouve en dehors du plan de travail du fichier. Que faut-il importer ?",
+  "Alles importieren": "Tout importer",
+  "Nur Zeichenfläche": "Plan de travail uniquement"
 }

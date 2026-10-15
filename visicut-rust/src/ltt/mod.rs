@@ -265,6 +265,17 @@ fn collect_parts(project: &Project) -> Result<(Vec<Project>, Vec<Part>), String>
 /// burns). Shown on the canvas while assigning; covers `Project::bounds`
 /// like `preview_png`.
 pub fn processing_preview(project: &Project) -> Result<Vec<u8>, String> {
+    processing_preview_sized(project, 1600.0, 2.0)
+}
+
+/// Wie `processing_preview`, aber mit der längeren Bildseite `max_px`. Bei
+/// Anzeige nahe der Bildpunktgröße bleiben auch dünne Linien sichtbar, statt
+/// beim starken Verkleinern der Textur zu Punkten zu zerfallen.
+pub fn processing_preview_sized(
+    project: &Project,
+    max_px: f32,
+    min_line_px: f32,
+) -> Result<Vec<u8>, String> {
     let (views, parts) = collect_parts(project)?;
     let [x, y, width, height] = project.bounds();
     let frame = Frame {
@@ -273,7 +284,7 @@ pub fn processing_preview(project: &Project) -> Result<Vec<u8>, String> {
         width,
         height,
     };
-    let scale = 1600.0 / frame.width.max(frame.height);
+    let scale = max_px / frame.width.max(frame.height);
     let mut preview = tiny_skia::Pixmap::new(
         (frame.width * scale).ceil().max(1.0) as u32,
         (frame.height * scale).ceil().max(1.0) as u32,
@@ -302,7 +313,7 @@ pub fn processing_preview(project: &Project) -> Result<Vec<u8>, String> {
                 frame,
                 &part.vector_paths(&source)?,
                 part.operation,
-                (0.35 * scale).max(2.0),
+                (0.35 * scale).max(min_line_px),
             );
         }
     }

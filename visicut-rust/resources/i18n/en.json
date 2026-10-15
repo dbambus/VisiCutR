@@ -913,5 +913,9 @@
   "Gefunden": "Found",
   "Suche VisiCam-Kameras im lokalen Netz …": "Searching for VisiCam cameras in the local network …",
   "Keine VisiCam im Netz gefunden": "No VisiCam found in the network",
-  "Kamera gefunden: {url}": "Camera found: {url}"
+  "Kamera gefunden: {url}": "Camera found: {url}",
+  "Zeichnung größer als die Zeichenfläche": "Drawing larger than the canvas",
+  "Ein Teil der Zeichnung liegt außerhalb der Zeichenfläche der Datei. Was soll importiert werden?": "Part of the drawing lies outside the canvas of the file. What should be imported?",
+  "Alles importieren": "Import everything",
+  "Nur Zeichenfläche": "Canvas only"
 }

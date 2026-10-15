@@ -41,6 +41,97 @@ pub fn read_svg_file(path: &Path) -> Result<Imported, String> {
     ))
 }
 
+/// If the drawing reaches beyond the canvas (viewBox / width and height), the
+/// same SVG with the canvas grown to the whole drawing; `None` when
+/// everything lies inside. Scale and position of the drawing are unchanged.
+pub fn fit_to_content(source: &str) -> Option<String> {
+    use resvg::usvg;
+    let tree = usvg::Tree::from_str(source, &crate::svg::options()).ok()?;
+    let bbox = tree.root().abs_stroke_bounding_box();
+    let canvas = tree.size();
+    let tolerance = 0.5;
+    if !(bbox.width() > 0.0 || bbox.height() > 0.0)
+        || (bbox.left() >= -tolerance
+            && bbox.top() >= -tolerance
+            && bbox.right() <= canvas.width() + tolerance
+            && bbox.bottom() <= canvas.height() + tolerance)
+    {
+        return None;
+    }
+    let doc = roxmltree::Document::parse_with_options(
+        source,
+        roxmltree::ParsingOptions {
+            allow_dtd: true,
+            ..Default::default()
+        },
+    )
+    .ok()?;
+    let root = doc.root_element();
+    let view_box: Option<Vec<f32>> = root.attribute("viewBox").map(|v| {
+        v.split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|t| !t.is_empty())
+            .filter_map(|t| t.parse().ok())
+            .collect()
+    });
+    // Canvas pixels → user units of the document (default `xMidYMid meet`).
+    let (scale, origin, offset) = match view_box.as_deref() {
+        Some(&[x, y, w, h]) if w > 0.0 && h > 0.0 => {
+            let scale = (canvas.width() / w).min(canvas.height() / h);
+            (
+                scale,
+                [x, y],
+                [
+                    (canvas.width() - w * scale) / 2.0,
+                    (canvas.height() - h * scale) / 2.0,
+                ],
+            )
+        }
+        _ => (1.0, [0.0, 0.0], [0.0, 0.0]),
+    };
+    let x = origin[0] + (bbox.left() - offset[0]) / scale;
+    let y = origin[1] + (bbox.top() - offset[1]) / scale;
+    let (w, h) = (bbox.width() / scale, bbox.height() / scale);
+    // Cut the old size attributes out of the start tag, back to front.
+    let range = root.range();
+    let mut tag_end = range.start;
+    let mut quote = None;
+    for (i, c) in source[range.start..].char_indices() {
+        match (quote, c) {
+            (None, '"') | (None, '\'') => quote = Some(c),
+            (Some(q), c) if c == q => quote = None,
+            (None, '>') => {
+                tag_end = range.start + i;
+                break;
+            }
+            _ => {}
+        }
+    }
+    let mut cuts: Vec<std::ops::Range<usize>> = root
+        .attributes()
+        .filter(|a| {
+            a.namespace().is_none() && matches!(a.name(), "width" | "height" | "viewBox")
+        })
+        .map(|a| a.range())
+        .collect();
+    cuts.sort_by_key(|r| std::cmp::Reverse(r.start));
+    let mut tag = source[range.start..tag_end].to_owned();
+    for cut in cuts {
+        tag.replace_range(cut.start - range.start..cut.end - range.start, "");
+    }
+    let name_end = tag
+        .find(|c: char| c.is_whitespace() || c == '/')
+        .unwrap_or(tag.len());
+    tag.insert_str(
+        name_end,
+        &format!(
+            " width=\"{}\" height=\"{}\" viewBox=\"{x} {y} {w} {h}\"",
+            w * scale,
+            h * scale
+        ),
+    );
+    Some(format!("{}{}{}", &source[..range.start], tag, &source[tag_end..]))
+}
+
 /// Replaces `href`/`xlink:href` of `<image>` elements that point to local files
 /// with `data:` URIs. Paths are resolved relative to `base_dir`. A document
 /// that cannot be parsed is returned unchanged; rendering reports the error.
@@ -316,6 +407,19 @@ fn shorten(href: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fit_to_content_grows_the_canvas_around_the_drawing() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><rect x="-20" y="10" width="40" height="20"/></svg>"#;
+        let fitted = fit_to_content(svg).expect("drawing leaves the canvas");
+        let tree =
+            resvg::usvg::Tree::from_str(&fitted, &crate::svg::options()).expect("valid svg");
+        assert!((tree.size().width() - 40.0).abs() < 0.01, "{fitted}");
+        assert!((tree.size().height() - 20.0).abs() < 0.01, "{fitted}");
+        assert!(fit_to_content(&fitted).is_none());
+        let inside = r#"<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>"#;
+        assert!(fit_to_content(inside).is_none());
+    }
+
     use super::*;
     use resvg::tiny_skia;
 

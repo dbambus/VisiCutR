@@ -913,5 +913,9 @@
   "Gefunden": "Gevonden",
   "Suche VisiCam-Kameras im lokalen Netz …": "Zoeken naar VisiCam-camera’s in het lokale netwerk …",
   "Keine VisiCam im Netz gefunden": "Geen VisiCam in het netwerk gevonden",
-  "Kamera gefunden: {url}": "Camera gevonden: {url}"
+  "Kamera gefunden: {url}": "Camera gevonden: {url}",
+  "Zeichnung größer als die Zeichenfläche": "Tekening groter dan het tekenvlak",
+  "Ein Teil der Zeichnung liegt außerhalb der Zeichenfläche der Datei. Was soll importiert werden?": "Een deel van de tekening ligt buiten het tekenvlak van het bestand. Wat moet worden geïmporteerd?",
+  "Alles importieren": "Alles importeren",
+  "Nur Zeichenfläche": "Alleen tekenvlak"
 }

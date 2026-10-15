@@ -209,12 +209,15 @@ enum Replace {
     Quit,
 }
 
-/// Eine Datei, deren Zeichnung über die Zeichenfläche hinausreicht.
+/// Dateien, deren Zeichnung über die Zeichenfläche hinausreicht; die Wahl
+/// gilt für alle gemeinsam.
 struct PendingImport {
-    path: PathBuf,
-    imported: visicut_core::svg_import::Imported,
-    /// Dieselbe Grafik mit auf die ganze Zeichnung vergrößerter Fläche.
-    whole: String,
+    /// Alle abgelegten Dateien, auch solche ohne Überstand.
+    paths: Vec<PathBuf>,
+    /// Die erste Grafik ersetzt das Projekt (Öffnen) statt Teil zu werden.
+    replace: bool,
+    /// Dateinamen mit Überstand.
+    names: Vec<String>,
 }
 
 /// Mehrere LTT-Aufträge warten auf die Bestätigung zum Ersetzen.
@@ -273,6 +276,8 @@ struct VisiCutRust {
     alert: Option<String>,
     /// Zeichnung ragt über die Zeichenfläche: Auswahl steht aus.
     pending_import: Option<PendingImport>,
+    /// Gewählte Behandlung beim laufenden Import: `Some(true)` ganze Zeichnung.
+    fit_policy: Option<bool>,
     project_path: Option<PathBuf>,
     /// Projektname während des Umbenennens im Kopf der Arbeitsfläche.
     name_draft: Option<String>,
@@ -344,6 +349,7 @@ impl VisiCutRust {
             status: tr("Datei öffnen, hierher ziehen oder das Beispiel öffnen").into(),
             alert: None,
             pending_import: None,
+            fit_policy: None,
             project_path: None,
             name_draft: None,
             cached: None,
@@ -637,14 +643,20 @@ impl VisiCutRust {
             return Err(tr("Datei ist größer als 25 MB").into());
         }
         if import::is_importable(path) {
-            let imported = import::read_file(path)?;
+            let mut imported = import::read_file(path)?;
             if let Some(whole) = visicut_core::svg_import::fit_to_content(&imported.svg) {
-                self.pending_import = Some(PendingImport {
-                    path: path.to_owned(),
-                    imported,
-                    whole,
-                });
-                return Ok(());
+                match self.fit_policy {
+                    Some(true) => imported.svg = whole,
+                    Some(false) => {}
+                    None => {
+                        self.pending_import = Some(PendingImport {
+                            paths: vec![path.to_owned()],
+                            replace: true,
+                            names: vec![file_name(path)],
+                        });
+                        return Ok(());
+                    }
+                }
             }
             self.finish_import(ctx, path, imported)
         } else {
@@ -691,6 +703,25 @@ impl VisiCutRust {
             }
             return;
         }
+        if self.fit_policy.is_none() {
+            let overflowing: Vec<String> = graphics
+                .iter()
+                .filter(|p| {
+                    import::read_file(p)
+                        .is_ok_and(|i| visicut_core::svg_import::fit_to_content(&i.svg).is_some())
+                })
+                .map(|p| file_name(p))
+                .collect();
+            if !overflowing.is_empty() {
+                // Eine Frage für alle Dateien; danach läuft der Import weiter.
+                self.pending_import = Some(PendingImport {
+                    replace: self.project.svg.is_empty(),
+                    paths: graphics.iter().chain(&projects).cloned().collect(),
+                    names: overflowing,
+                });
+                return;
+            }
+        }
         let mut notes: Vec<String> = projects
             .iter()
             .map(|p| {
@@ -707,10 +738,6 @@ impl VisiCutRust {
                 return self.report(notes.join("\n"));
             }
             rest = &rest[1..];
-            if self.pending_import.is_some() {
-                // Die Auswahl zur Zeichenfläche steht noch aus.
-                return;
-            }
             if let Some(warnings) = self.alert.take() {
                 notes.insert(0, warnings);
             }
@@ -718,7 +745,11 @@ impl VisiCutRust {
         if !rest.is_empty() {
             // Jede Datei wird ein eigenes Teil mit eigener Lage und Zuordnung.
             let before = self.project.part_count();
-            match visicut_core::compose::add_files_as_parts(&self.project, rest) {
+            match visicut_core::compose::add_files_as_parts(
+                &self.project,
+                rest,
+                self.fit_policy == Some(true),
+            ) {
                 Ok((project, more)) => {
                     notes.extend(more);
                     self.apply_composed(ctx, project, Vec::new());
@@ -2569,7 +2600,7 @@ impl VisiCutRust {
                 None => self.replace = Some(action),
             }
         }
-        if let Some(mut pending) = self.pending_import.take() {
+        if let Some(pending) = self.pending_import.take() {
             // Some(true): ganze Zeichnung, Some(false): nur die Fläche.
             let mut choice = None;
             let modal = egui::Modal::new(egui::Id::new("canvas_overflow")).show(ctx, |ui| {
@@ -2578,6 +2609,13 @@ impl VisiCutRust {
                 ui.label(tr(
                     "Ein Teil der Zeichnung liegt außerhalb der Zeichenfläche der Datei. Was soll importiert werden?",
                 ));
+                if pending.paths.len() > 1 {
+                    ui.add_space(4.0);
+                    for name in &pending.names {
+                        ui.monospace(name);
+                    }
+                    ui.label(tr("Die Wahl gilt für alle genannten Dateien."));
+                }
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if ui.button(tr("Alles importieren")).clicked() {
@@ -2593,12 +2631,15 @@ impl VisiCutRust {
             });
             match choice {
                 Some(whole) => {
-                    if whole {
-                        pending.imported.svg = std::mem::take(&mut pending.whole);
+                    self.fit_policy = Some(whole);
+                    if pending.replace {
+                        if let Err(e) = self.open_path(ctx, &pending.paths[0]) {
+                            self.report(e);
+                        }
+                    } else {
+                        self.drop_files(ctx, pending.paths);
                     }
-                    if let Err(e) = self.finish_import(ctx, &pending.path, pending.imported) {
-                        self.report(e);
-                    }
+                    self.fit_policy = None;
                 }
                 None if modal.should_close() => {}
                 None => self.pending_import = Some(pending),
@@ -2820,6 +2861,10 @@ impl VisiCutRust {
 
 /// Bezugspunkt wie in Grafikprogrammen: acht Quadrate an Ecken und
 /// Seitenmitten, über den Rahmen verbunden, und ein freies in der Mitte.
+fn file_name(path: &Path) -> String {
+    path.file_name().unwrap_or_default().to_string_lossy().into_owned()
+}
+
 fn reference_picker(ui: &mut egui::Ui, reference: &mut [f32; 2]) {
     const SIZE: f32 = 40.0;
     const BOX: f32 = 8.0;

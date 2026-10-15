@@ -917,5 +917,6 @@
   "Zeichnung größer als die Zeichenfläche": "Dessin plus grand que le plan de travail",
   "Ein Teil der Zeichnung liegt außerhalb der Zeichenfläche der Datei. Was soll importiert werden?": "Une partie du dessin se trouve en dehors du plan de travail du fichier. Que faut-il importer ?",
   "Alles importieren": "Tout importer",
-  "Nur Zeichenfläche": "Plan de travail uniquement"
+  "Nur Zeichenfläche": "Plan de travail uniquement",
+  "Die Wahl gilt für alle genannten Dateien.": "Le choix s'applique à tous les fichiers indiqués."
 }

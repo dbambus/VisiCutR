@@ -367,7 +367,7 @@ pub(crate) fn execute(request: &Value) -> Result<Value, String> {
         "append" => {
             let paths: Vec<std::path::PathBuf> = get(request, "paths")?;
             let (project, notes) =
-                crate::compose::add_files_as_parts(&get_project(request)?, &paths)?;
+                crate::compose::add_files_as_parts(&get_project(request)?, &paths, false)?;
             composed(project, notes)
         }
         // Parts (one per imported file): choose, remove, duplicate, and

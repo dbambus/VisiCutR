@@ -756,6 +756,7 @@ pub fn add_part(
 pub fn add_files_as_parts(
     project: &Project,
     paths: &[std::path::PathBuf],
+    whole_drawing: bool,
 ) -> Result<(Project, Vec<String>), String> {
     let mut result = project.clone();
     let mut notes = Vec::new();
@@ -764,7 +765,12 @@ pub fn add_files_as_parts(
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         let stem = path.file_stem().unwrap_or_default().to_string_lossy();
         let appended = crate::import::read_file(path).and_then(|imported| {
-            let (next, more) = add_part(&result, &stem, &imported.svg, imported.steps)?;
+            // Ragt die Zeichnung über die Zeichenfläche, wächst diese mit.
+            let svg = whole_drawing
+                .then(|| crate::svg_import::fit_to_content(&imported.svg))
+                .flatten()
+                .unwrap_or(imported.svg);
+            let (next, more) = add_part(&result, &stem, &svg, imported.steps)?;
             Ok((next, imported.warnings, more))
         });
         match appended {
@@ -1779,6 +1785,25 @@ fn transform_path(d: &str, dx: f64, dy: f64, out: &mut String) {
 mod tests {
     use super::*;
     use crate::ltt;
+
+    #[test]
+    fn files_as_parts_can_keep_the_whole_drawing() {
+        let dir = std::env::temp_dir().join(format!("visicut-fit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("wide.svg");
+        std::fs::write(
+            &file,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><rect x="-50" y="0" width="150" height="50"/></svg>"#,
+        )
+        .unwrap();
+        let width = |whole| {
+            let (project, _) = add_files_as_parts(&demo(), &[file.clone()], whole).unwrap();
+            project.width_mm
+        };
+        let (clipped, whole) = (width(false), width(true));
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(whole > clipped * 1.4, "{clipped} / {whole}");
+    }
 
     fn demo() -> Project {
         Project {

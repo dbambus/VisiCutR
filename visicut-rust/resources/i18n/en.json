@@ -917,5 +917,6 @@
   "Zeichnung größer als die Zeichenfläche": "Drawing larger than the canvas",
   "Ein Teil der Zeichnung liegt außerhalb der Zeichenfläche der Datei. Was soll importiert werden?": "Part of the drawing lies outside the canvas of the file. What should be imported?",
   "Alles importieren": "Import everything",
-  "Nur Zeichenfläche": "Canvas only"
+  "Nur Zeichenfläche": "Canvas only",
+  "Die Wahl gilt für alle genannten Dateien.": "The choice applies to all listed files."
 }

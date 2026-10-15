@@ -917,5 +917,6 @@
   "Zeichnung größer als die Zeichenfläche": "Tekening groter dan het tekenvlak",
   "Ein Teil der Zeichnung liegt außerhalb der Zeichenfläche der Datei. Was soll importiert werden?": "Een deel van de tekening ligt buiten het tekenvlak van het bestand. Wat moet worden geïmporteerd?",
   "Alles importieren": "Alles importeren",
-  "Nur Zeichenfläche": "Alleen tekenvlak"
+  "Nur Zeichenfläche": "Alleen tekenvlak",
+  "Die Wahl gilt für alle genannten Dateien.": "De keuze geldt voor alle genoemde bestanden."
 }

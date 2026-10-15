@@ -108,9 +108,7 @@ pub fn fit_to_content(source: &str) -> Option<String> {
     }
     let mut cuts: Vec<std::ops::Range<usize>> = root
         .attributes()
-        .filter(|a| {
-            a.namespace().is_none() && matches!(a.name(), "width" | "height" | "viewBox")
-        })
+        .filter(|a| a.namespace().is_none() && matches!(a.name(), "width" | "height" | "viewBox"))
         .map(|a| a.range())
         .collect();
     cuts.sort_by_key(|r| std::cmp::Reverse(r.start));
@@ -129,7 +127,12 @@ pub fn fit_to_content(source: &str) -> Option<String> {
             h * scale
         ),
     );
-    Some(format!("{}{}{}", &source[..range.start], tag, &source[tag_end..]))
+    Some(format!(
+        "{}{}{}",
+        &source[..range.start],
+        tag,
+        &source[tag_end..]
+    ))
 }
 
 /// Replaces `href`/`xlink:href` of `<image>` elements that point to local files
@@ -411,8 +414,7 @@ mod tests {
     fn fit_to_content_grows_the_canvas_around_the_drawing() {
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><rect x="-20" y="10" width="40" height="20"/></svg>"#;
         let fitted = fit_to_content(svg).expect("drawing leaves the canvas");
-        let tree =
-            resvg::usvg::Tree::from_str(&fitted, &crate::svg::options()).expect("valid svg");
+        let tree = resvg::usvg::Tree::from_str(&fitted, &crate::svg::options()).expect("valid svg");
         assert!((tree.size().width() - 40.0).abs() < 0.01, "{fitted}");
         assert!((tree.size().height() - 20.0).abs() < 0.01, "{fitted}");
         assert!(fit_to_content(&fitted).is_none());

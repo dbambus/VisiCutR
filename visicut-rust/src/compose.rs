@@ -1797,7 +1797,8 @@ mod tests {
         )
         .unwrap();
         let width = |whole| {
-            let (project, _) = add_files_as_parts(&demo(), &[file.clone()], whole).unwrap();
+            let (project, _) =
+                add_files_as_parts(&demo(), std::slice::from_ref(&file), whole).unwrap();
             project.width_mm
         };
         let (clipped, whole) = (width(false), width(true));

@@ -1708,8 +1708,8 @@ impl VisiCutRust {
             let spacing = ui.spacing().item_spacing.x;
             let lock = 32.0;
             let labels = 14.0;
-            let field_w = ((total - 40.0 - lock - 2.0 * labels - 7.0 * spacing) / 2.0)
-                .clamp(50.0, 120.0);
+            let field_w =
+                ((total - 40.0 - lock - 2.0 * labels - 7.0 * spacing) / 2.0).clamp(50.0, 120.0);
             egui::Grid::new("position_size")
                 .num_columns(4)
                 // Sonst sind die Beschriftungsspalten 40 px breit.
@@ -1717,7 +1717,10 @@ impl VisiCutRust {
                 .spacing([4.0, 4.0])
                 .show(ui, |ui| {
                     ui.label("X");
-                    if ui.add_sized([field_w, 20.0], field(&mut x, -10000.0)).changed() {
+                    if ui
+                        .add_sized([field_w, 20.0], field(&mut x, -10000.0))
+                        .changed()
+                    {
                         new_x = Some(x);
                     }
                     ui.label("B").on_hover_text(tr("Breite"));
@@ -1726,7 +1729,10 @@ impl VisiCutRust {
                     }
                     ui.end_row();
                     ui.label("Y");
-                    if ui.add_sized([field_w, 20.0], field(&mut y, -10000.0)).changed() {
+                    if ui
+                        .add_sized([field_w, 20.0], field(&mut y, -10000.0))
+                        .changed()
+                    {
                         new_y = Some(y);
                     }
                     ui.label("H").on_hover_text(tr("Höhe"));
@@ -2862,7 +2868,10 @@ impl VisiCutRust {
 /// Bezugspunkt wie in Grafikprogrammen: acht Quadrate an Ecken und
 /// Seitenmitten, über den Rahmen verbunden, und ein freies in der Mitte.
 fn file_name(path: &Path) -> String {
-    path.file_name().unwrap_or_default().to_string_lossy().into_owned()
+    path.file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn reference_picker(ui: &mut egui::Ui, reference: &mut [f32; 2]) {

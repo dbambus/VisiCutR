@@ -20,6 +20,20 @@ wird für Bewegungen vom oberen zum unteren linken Rand umgerechnet.
 Bounding-Box-Werte folgen der separaten Längen-Konvertierung des
 Java-Treibers und werden dort nicht gespiegelt.
 
+Gravurauflösung (neu gegenüber Java, dessen LTT-Treiber fest 500 DPI
+sendet): `ESC D` im Kopf ist ein Teiler der 4000-DPI-Maschinenauflösung und
+gilt nur für Rasterzeilen; Vektoren bleiben bei 500 DPI. Wählbar sind die
+Werte des Windows-Treibers iLASER-4000 6.4 (`ResoList`): 166, 200, 250, 333,
+500 und 1000 DPI, also Teiler 24, 20, 16, 12, 8 und 4; mehr als 1000 DPI ist
+für Gravuren nicht zulässig. Die Rasterzeilen werden mit 4000 / Teiler DPI
+gerendert, ihre Start-X/Y in Maschinenschritten (Pixel × Teiler) gesendet;
+Zeilenabstand, Overscan, Zeilenversatz und Zeitschätzung rechnen in derselben
+Auflösung. Teiler und Bitmuster der Zeilen müssen zusammenpassen, sonst fährt
+der Kopf falsch. Weil es nur ein `ESC D` je Datei gibt, lehnt die App
+Aufträge mit Gravuren unterschiedlicher Auflösung ab. Bei 500 DPI sind die
+Bytes unverändert (Java-Vergleich). Andere Auflösungen sind am Gerät noch
+nicht erprobt; die App weist darauf hin.
+
 Das veröffentlichte FAU-Profil verwendet `lasercutter2:9100`,
 1000 × 600 mm, 4000 Maschinen-DPI, 500 Job-DPI und 338,677 mm/s
 nominale Schnittgeschwindigkeit. Für die Zeitschätzung ist Gravieren 6-mal so
@@ -89,6 +103,15 @@ Wiederholung nach Fehlern.
   nicht unterschieden. Ein Teil wird mit einem Encoder erzeugt; Leistung und
   Geschwindigkeit gehen wie im Treiber nur bei Änderung hinaus.
   Nicht nachgebildet: Baum-Buckets der `HashMap` ab acht gleichen Buckets.
+- Weitere Reihenfolgen wie VisiCuts `OrderStrategy` (Menü Job, gilt für das
+  ganze Projekt): „Wie in der Datei“ (`FILE`) lässt die Pfade unsortiert;
+  „Nächster Pfad“ (`NEAREST`) verbindet offene Pfade wie oben und geht vom
+  ersten Pfad aus gierig zum nächsten Start- oder (bei offenen Pfaden)
+  Endpunkt, euklidisch und ohne Vorrang für innere Konturen; „Kleinste
+  zuerst“ (`SMALLEST_FIRST`) sortiert stabil nach der Fläche des
+  Begrenzungsrahmens, ohne Pfade zu verbinden. Wörtliche Portierungen von
+  `FileVectorOptimizer`, `NearestVectorOptimizer` und
+  `SmallestFirstVectorOptimizer`; Java-Referenzbytes gibt es dafür nicht.
 - Doppelte Linien entfernen (Option, Standard aus; ohne Option bleibt die
   Ausgabe byte-gleich mit VisiCut): Je Schritt werden die Konturen in
   Reihenfolge der SVG geprüft. Teile eines Segments, die ein früheres Segment

@@ -3,6 +3,33 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## 0.17.0 – 15.10.2026
+
+- **Weitere Schnittreihenfolgen aus VisiCut** (Menü **Job →
+  Schnittreihenfolge**, egui und macOS): „Wie in der Datei“, „Nächster Pfad“
+  und „Kleinste zuerst“, portiert aus LibLaserCut. „Kürzeste Leerfahrten“
+  bleibt Standard, „Klassisch“ unverändert byte-gleich mit Java.
+- **Anfasser auf der Arbeitsfläche** wie in VisiCut: Ecken und Kantenmitten
+  ändern die Größe (Kette hält das Seitenverhältnis, Umschalt kehrt das um),
+  der Kreis über dem Motiv dreht es um seine Mitte mit Vorschau und Gradzahl
+  (Umschalt: 15°-Schritte, ⌘Z widerruft).
+- **Gravurauflösung je Schritt**: 166, 200, 250, 333, 500 oder 1000 DPI wie im
+  Windows-Treiber des iLaser 4000 (`ESC D` als Teiler von 4000 DPI, nur für
+  Gravurzeilen). Standard bleibt 500 DPI, byte-gleich mit Java; andere
+  Auflösungen sind am Gerät noch nicht erprobt und werden mit Hinweis
+  gesendet. Gravuren eines Auftrags brauchen dieselbe Auflösung.
+- **Nur Umriss** (VisiCut „useOutline“) für Schneid- und Markierschritte:
+  geschnitten wird nur der Rand der gemeinsamen Fläche aller Objekte;
+  Flächenvereinigung mit `i_overlay` (MIT/Apache-2.0).
+- **Als VisiCut-Projekt (PLF) exportieren** (Menü Datei): SVG je Teil in mm,
+  Position und Zuordnung (Gesamt, Einzeln über IDs, Regeln, Rest, Ignorieren)
+  mit den FAU-Profilnamen, damit Java-VisiCut seine Laserwerte findet.
+- **PLF-Import**: übernimmt Gravurauflösungen und „Kontur“ (Nur Umriss);
+  Zuordnungen ohne Bedingung gelten jetzt auch für Bilder, DXF und PDF.
+- **Oberfläche**: In „Einzeln“ erscheinen nur Verfahren mit zugeordneten
+  Objekten, die Objektliste wächst bis fünf Zeilen mit; Tooltips für
+  Helligkeit, Invertieren, Bidirektional und Von unten nach oben.
+
 ## 0.16.0 – 15.10.2026
 
 - **Kürzeste Leerfahrten ist Standard**: Die Schnittreihenfolge steht im Menü

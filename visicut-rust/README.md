@@ -167,11 +167,22 @@ lokal nach einem Build für die jeweilige Host-Architektur.
    innen zuerst, dann jeweils der nächstgelegene Pfad, beginnend am
    Referenzpunkt oben rechts; deutlich weniger Leerfahrt. „Klassisch“ ist
    VisiCuts Reihenfolge, byte-gleich mit Java; ältere Projekte ohne gespeicherte
-   Reihenfolge öffnen damit. **Doppelte Linien entfernen**
+   Reihenfolge öffnen damit. Dazu kommen VisiCuts weitere Sortierungen:
+   „Wie in der Datei“ (unsortiert), „Nächster Pfad“ (ab dem ersten Pfad
+   jeweils der nächste, ohne Vorrang für Löcher) und „Kleinste zuerst“ (nach
+   Fläche des Umrissrechtecks). **Doppelte Linien entfernen**
    schneidet Abschnitte, die genau auf einer schon geschnittenen Linie
    desselben Schritts liegen (gemeinsame Kanten, doppelt platzierte Objekte),
-   nur einmal; die Schrittbeschreibung nennt, wie viel entfernt wurde. **Gravieren**
-   rastert mit 500 DPI und wählbarem Verfahren (Standard „Halbton
+   nur einmal; die Schrittbeschreibung nennt, wie viel entfernt wurde.
+   **Nur Umriss** (je Schneid- oder Markierschritt, VisiCut „useOutline“)
+   schneidet nur den Rand der Fläche, die alle Objekte des Schritts zusammen
+   bedecken: Überlappungen und innere Linien entfallen, Löcher der
+   Gesamtfläche bleiben, Bilder zählen als Rechteck, reine Linien tragen
+   nichts bei. Die Flächen vereinigt die Bibliothek `i_overlay` (reines Rust,
+   MIT/Apache-2.0). **Gravieren**
+   rastert mit wählbarer Auflösung (166, 200, 250, 333, 500 oder 1000 DPI wie
+   im Windows-Treiber, Standard 500; nur 500 DPI ist am Gerät erprobt, alle
+   Gravuren eines Auftrags brauchen dieselbe Auflösung) und wählbarem Verfahren (Standard „Halbton
    aufgehellt“ wie im FAU-Profil, außerdem
    Floyd-Steinberg, Halbton, Geordnet, Mittelwert, Raster, Zufall, Schwellwert),
    Helligkeit, Invertierung, bidirektional oder einseitig und von oben oder
@@ -242,10 +253,21 @@ Helligkeitsverschiebung) und 3D-Gravieren. Laser-Einstellungen stehen nicht in
 der PLF-Datei, sondern lokal in VisiCut pro Gerät, Material und Stärke. Die
 übernommenen Schritte verwenden deshalb 20 % Leistung, 100 % Geschwindigkeit
 und einen Durchgang und sind vor dem Senden anzupassen. Nicht übernommen
-werden Konturversatz, Sortierungen außer nach Verschachtelung, Auflösungen
-außer 500 DPI sowie Zuordnungen von Teilen, die nicht SVG sind (PNG, JPG,
-DXF, G-Code, PDF); ihre Objekte werden dann nicht bearbeitet. Der Hinweis beim
+werden Sortierungen je Teil (die Schnittreihenfolge gilt für
+das ganze Projekt), Vektor-Auflösungen außer 500 DPI, Gravurauflösungen, die
+der iLaser 4000 nicht kennt (dann 500 DPI), sowie Bedingungen bei Teilen, die
+nicht SVG sind (PNG, JPG, DXF, G-Code, PDF); Zuordnungen ohne Bedingung (alle
+Objekte, Rest) gelten auch dort, etwa „Bild gravieren“. Der Hinweis beim
 Öffnen nennt jeden dieser Fälle und jeden Filter, der unbekannt ist.
+**Datei → Als VisiCut-Projekt (PLF) exportieren …** schreibt das Projekt so,
+dass Java-VisiCut es öffnet: je Teil eine SVG in Millimetern, ihre Position
+und die Zuordnung (Gesamt, Einzeln über Objekt-IDs, Regeln, Rest, Ignorieren;
+Profile `cut` und `mark` samt „Nur Umriss“, `engrave` mit Rasterverfahren und Auflösung,
+`engrave 3d`). Objekte ohne ID erhalten dafür eine. Leistung, Geschwindigkeit
+und Durchgänge enthält das Format nicht; Java-VisiCut nimmt sie aus seinen
+Profilen für Material und Stärke. Weitere Parametersätze, „Doppelte Linien
+entfernen“ und „Kürzeste Leerfahrten“ (gespeichert als „innen zuerst“) gehen
+dabei verloren; der Hinweis nach dem Export nennt das.
 Parametrische SVG (`.parametric.svg`, `.psvg`) werden mit den Standardwerten
 ihrer Parameter bzw. den in der PLF gespeicherten Werten erzeugt; der Hinweis
 nennt die verwendeten Werte. LaserScript-Dateien (`.ls`) laufen in einer
@@ -285,6 +307,12 @@ Das Menü **Objekt** ergänzt das Motiv ohne Umweg über Inkscape:
 und welcher Punkt bei Größenänderungen stehen bleibt. Darunter lässt sich das
 Motiv um einen Winkel (positiv im Uhrzeigersinn) oder in 90°-Schritten drehen
 und horizontal oder vertikal spiegeln; Verzerren gibt es bewusst nicht.
+Auf der Arbeitsfläche hat das gewählte Teil Anfasser wie in VisiCut: Ecken
+und Kantenmitten ändern die Größe, die gegenüberliegende Seite bleibt stehen
+(die Kette bei B/H hält das Seitenverhältnis, Umschalt kehrt das beim Ziehen
+um). Der Kreis über der Mitte (bei wenig Platz darunter) dreht das Motiv um
+seine Mitte; beim Ziehen zeigt eine Vorschau den Winkel, Umschalt rastet in
+15°-Schritten ein, ⌘Z widerruft die Drehung.
 Der **Rechtsklick auf das Motiv** bietet Duplizieren, Kopien im Raster,
 Nesting, Drehen, Spiegeln, Zentrieren und Löschen. **Entf/⌫** (macOS auch
 ⌘⌫) löscht das Motiv, sobald das Arbeitsbett aktiv ist; einzelne Objekte

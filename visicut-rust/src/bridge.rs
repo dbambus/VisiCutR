@@ -462,6 +462,13 @@ pub(crate) fn execute(request: &Value) -> Result<Value, String> {
             let best: [usize; 10] = get(request, "best")?;
             Ok(json!({"machine": crate::shift_calibration::apply(&machine, &best)?}))
         }
+        "export_plf" => {
+            let warnings = crate::import::write_plf(
+                &get_project(request)?,
+                std::path::Path::new(path(request)?),
+            )?;
+            Ok(json!({ "warnings": warnings }))
+        }
         "validate_document" => {
             get_project(request)?.validate_document()?;
             Ok(json!({}))
@@ -755,6 +762,9 @@ mod tests {
         project.cut_order = crate::project::CutOrder::ShortestTravel;
         let result = execute(&json!({"action": "demo", "project": project})).unwrap();
         assert_eq!(result["project"]["cut_order"], "ShortestTravel");
+        project.cut_order = crate::project::CutOrder::SmallestFirst;
+        let result = execute(&json!({"action": "demo", "project": project})).unwrap();
+        assert_eq!(result["project"]["cut_order"], "SmallestFirst");
         let mut old = serde_json::to_value(Project::default()).unwrap();
         old.as_object_mut().unwrap().remove("cut_order");
         let path =

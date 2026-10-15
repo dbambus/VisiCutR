@@ -27,8 +27,9 @@
 //! Java-Geschwindigkeit in Prozent ist ohne Quelldaten nicht möglich und
 //! unterbleibt. Der Hinweis nennt die Standardwerte.
 //!
-//! Abweichungen von Java, die als Warnung gemeldet werden: Konturversatz
-//! (`useOutline`), Sortierung außer `INNER_FIRST`, Auflösung außer 500 DPI,
+//! Abweichungen von Java, die als Warnung gemeldet werden: Sortierung außer `INNER_FIRST` (die Schnittreihenfolge gilt
+//! für das ganze Projekt), Vektor-Auflösung außer 500 DPI, Gravurauflösungen,
+//! die der iLaser 4000 nicht kennt,
 //! unbekannte Rasterverfahren und unbekannte Filter. Ein Filter, der nicht
 //! übersetzt werden kann, verwirft nur seinen Eintrag. Ein Eintrag mit
 //! unbekanntem Filter im Rest macht den Rest ungültig, damit kein Objekt
@@ -36,7 +37,7 @@
 
 use crate::mapping::{Attribute, Filter, ObjectAttributes};
 use crate::project::{JobStep, Operation};
-use crate::raster::{Dithering, RasterSettings};
+use crate::raster::{Dithering, RASTER_DPIS, RasterSettings};
 use crate::{i18n::tr, tr};
 use roxmltree::Node;
 
@@ -317,10 +318,15 @@ pub fn translate(parts: &[Placed], composed: Result<Vec<ObjectAttributes>, Strin
             }
             Some(Ok(entries)) => entries,
         };
-        if !part.svg {
+        // Bedingungen kennt VisiCutRust nur für SVG-Teile so wie VisiCut.
+        // Zuordnungen ohne Bedingung (alle Objekte oder Rest) gelten für jedes Teil.
+        let unconditional = entries
+            .iter()
+            .all(|e| e.filters.as_ref().is_none_or(Vec::is_empty));
+        if !part.svg && !unconditional {
             out.warnings.push(tr!(
-                "Zuordnung von Teil „{name}“ nicht übernommen: Nur SVG-Teile lassen sich \
-                 zuordnen; seine Objekte werden nicht bearbeitet",
+                "Zuordnung von Teil „{name}“ nicht übernommen: Bedingungen lassen sich nur \
+                 bei SVG-Teilen übernehmen; seine Objekte werden nicht bearbeitet",
                 name = part.name
             ));
             continue;
@@ -450,10 +456,20 @@ fn translate_part(
         let expected: Vec<usize> = selected.iter().map(|i| i + offset).collect();
         let mut step = JobStep::new(operation);
         step.raster = raster;
+        // „Kontur“ (useOutline): nur der Rand der gemeinsamen Fläche.
+        step.outline = matches!(
+            profile,
+            Profile::Vector {
+                use_outline: true,
+                ..
+            }
+        );
         match filters {
             // Die Bedingungen gelten im ganzen Motiv nur dann genauso, wenn sie
             // im ganzen Motiv dieselben Objekte treffen wie in diesem Teil.
             Some(list) if matching(&list, composed) == expected => step.filters = Some(list),
+            // Ohne Bedingung: alle Objekte dieses Teils.
+            Some(list) if list.is_empty() => step.objects = expected,
             Some(_) => {
                 out.warnings.push(tr!(
                     "Teil „{name}“: Die Bedingungen würden auch Objekte anderer Teile \
@@ -543,12 +559,29 @@ fn profile_settings(
     let dpi_check = |dpi: f64, warnings: &mut Vec<String>| {
         if (dpi - SUPPORTED_DPI).abs() > 1e-6 {
             warnings.push(tr!(
-                "Teil „{part}“: Auflösung {dpi} DPI wird nicht übernommen; \
-                 VisiCutRust rastert mit {supported} DPI",
+                "Teil „{part}“: Vektor-Auflösung {dpi} DPI wird nicht übernommen; \
+                 der LTT schneidet wie in VisiCut mit {supported} DPI",
                 part = part,
                 dpi = dpi,
                 supported = SUPPORTED_DPI
             ));
+        }
+    };
+    // Gravuren übernehmen die Auflösungen des iLaser 4000 (166 … 1000 DPI).
+    let raster_dpi = |dpi: f64, warnings: &mut Vec<String>| match RASTER_DPIS
+        .iter()
+        .find(|&&d| (f64::from(d) - dpi).abs() < 1.0)
+    {
+        Some(&d) => d,
+        None => {
+            warnings.push(tr!(
+                "Teil „{part}“: Gravurauflösung {dpi} DPI gibt es am iLaser 4000 nicht; \
+                 es wird mit {supported} DPI graviert",
+                part = part,
+                dpi = dpi,
+                supported = SUPPORTED_DPI
+            ));
+            SUPPORTED_DPI as u32
         }
     };
     let color_shift = |value: i32, warnings: &mut Vec<String>| {
@@ -565,21 +598,16 @@ fn profile_settings(
     match profile {
         Profile::Vector {
             is_cut,
-            use_outline,
+            use_outline: _,
             order,
             dpi,
         } => {
             dpi_check(*dpi, warnings);
-            if *use_outline {
-                warnings.push(tr!(
-                    "Teil „{part}“: Konturversatz (Außenkontur) wird nicht übernommen",
-                    part = part
-                ));
-            }
             if order != "INNER_FIRST" {
                 warnings.push(tr!(
                     "Teil „{part}“: Sortierung „{order}“ wird nicht übernommen; \
-                     VisiCutRust sortiert nach Verschachtelung",
+                     die Schnittreihenfolge gilt in VisiCutRust für das ganze Projekt \
+                     (Menü Job → Schnittreihenfolge)",
                     part = part,
                     order = order
                 ));
@@ -597,7 +625,7 @@ fn profile_settings(
             color_shift: shift,
             dithering,
         } => {
-            dpi_check(*dpi, warnings);
+            let dpi = raster_dpi(*dpi, warnings);
             let default = RasterSettings::default();
             let dithering = match dithering.as_deref() {
                 None => default.dithering,
@@ -617,6 +645,7 @@ fn profile_settings(
                     dithering,
                     invert: *invert,
                     color_shift: color_shift(*shift, warnings),
+                    dpi,
                     ..RasterSettings::default()
                 },
             )
@@ -626,12 +655,13 @@ fn profile_settings(
             invert,
             color_shift: shift,
         } => {
-            dpi_check(*dpi, warnings);
+            let dpi = raster_dpi(*dpi, warnings);
             (
                 Operation::Engrave3d,
                 RasterSettings {
                     invert: *invert,
                     color_shift: color_shift(*shift, warnings),
+                    dpi,
                     ..RasterSettings::default()
                 },
             )
@@ -698,6 +728,24 @@ mod tests {
             Value::Text("0.5".into())
         );
         assert!(parse(b"<mapping/>").is_err());
+    }
+
+    #[test]
+    fn engraving_profiles_keep_the_resolutions_of_the_ilaser() {
+        let raster = |dpi| Profile::Raster {
+            dpi,
+            invert: false,
+            color_shift: 0,
+            dithering: None,
+        };
+        let mut warnings = Vec::new();
+        let (_, settings) = profile_settings(&raster(1000.0), "t", &mut warnings);
+        assert_eq!(settings.dpi, 1000);
+        let (_, settings) = profile_settings(&raster(333.333), "t", &mut warnings);
+        assert_eq!(settings.dpi, 333);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let (_, settings) = profile_settings(&raster(300.0), "t", &mut warnings);
+        assert_eq!((settings.dpi, warnings.len()), (500, 1));
     }
 
     #[test]
@@ -769,9 +817,8 @@ mod tests {
         assert!(warnings.is_empty());
         let (op, _) = profile_settings(entries[1].profile.as_ref().unwrap(), "t", &mut warnings);
         assert_eq!(op, Operation::Mark);
-        assert_eq!(warnings.len(), 3, "{warnings:?}");
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
         assert!(warnings.iter().any(|w| w.contains("Auflösung 1000")));
-        assert!(warnings.iter().any(|w| w.contains("Konturversatz")));
         assert!(warnings.iter().any(|w| w.contains("NEAREST")));
     }
 }

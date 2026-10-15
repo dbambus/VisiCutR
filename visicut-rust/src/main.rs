@@ -37,6 +37,8 @@ enum Command {
     Save,
     SaveAs,
     Export,
+    /// Projekt für Java-VisiCut als PLF schreiben.
+    ExportPlf,
     Quit,
     Center,
     Devices,
@@ -111,6 +113,7 @@ impl Command {
             Self::Save => tr("Sichern"),
             Self::SaveAs => tr("Sichern unter …"),
             Self::Export => tr("LTT-Job exportieren …"),
+            Self::ExportPlf => tr("Als VisiCut-Projekt (PLF) exportieren …"),
             Self::Quit => tr("Beenden"),
             Self::Center => tr("Motiv auf dem Arbeitsbett zentrieren"),
             Self::Devices => tr("Einstellungen …"),
@@ -188,7 +191,8 @@ impl Command {
             | Self::ClearCache
             | Self::Language(_)
             | Self::CutOrder(_)
-            | Self::Device(_) => return None,
+            | Self::Device(_)
+            | Self::ExportPlf => return None,
         };
         Some(KeyboardShortcut::new(modifiers, key))
     }
@@ -292,6 +296,8 @@ struct VisiCutRust {
     /// Bezugspunkt für X/Y und Größenänderungen (0, ½ oder 1 je Achse).
     reference: [f32; 2],
     rotate_deg: f32,
+    /// Ziehen an einem Anfasser des gewählten Teils.
+    handle_drag: Option<HandleDrag>,
     /// Sprache und zuletzt geöffnete Dateien.
     settings: settings::AppSettings,
     #[cfg(feature = "screenshot")]
@@ -341,6 +347,7 @@ impl VisiCutRust {
             undo: None,
             reference: [0.0, 0.0],
             rotate_deg: 0.0,
+            handle_drag: None,
             settings,
             #[cfg(feature = "screenshot")]
             capture: None,
@@ -980,6 +987,26 @@ impl VisiCutRust {
         }
     }
 
+    /// Schreibt das Projekt als PLF für Java-VisiCut; die Hinweise nennen,
+    /// was das Format nicht enthält.
+    fn export_plf(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title(tr("Als VisiCut-Projekt (PLF) exportieren"))
+            .add_filter(tr("VisiCut-Projekt"), &["plf"])
+            .set_file_name(format!("{}.plf", self.project.name))
+            .save_file()
+        else {
+            return;
+        };
+        match visicut_core::import::write_plf(&self.project, &path) {
+            Ok(notes) => {
+                self.status = tr("Als VisiCut-Projekt exportiert").into();
+                self.alert = Some(notes.join("\n"));
+            }
+            Err(e) => self.report(e),
+        }
+    }
+
     fn export(&mut self) {
         if !self.sendable {
             return;
@@ -1103,7 +1130,7 @@ impl VisiCutRust {
             Command::Language(_) => true,
             Command::CutOrder(_) | Command::Device(_) => !self.busy(),
             Command::Undo => self.undo.is_some() && !self.busy(),
-            Command::Center => self.texture.is_some() && !self.busy(),
+            Command::Center | Command::ExportPlf => self.texture.is_some() && !self.busy(),
             Command::ToggleCamera => self.devices.has_camera(),
             Command::RefreshCamera => self.devices.camera_shown() && !self.devices.camera_loading(),
             Command::ZoomIn => self.zoom < workspace::ZOOM_MAX,
@@ -1133,6 +1160,7 @@ impl VisiCutRust {
                 }
             }
             Command::Export => self.export(),
+            Command::ExportPlf => self.export_plf(),
             Command::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Command::Center => {
                 workspace::center(&mut self.project);
@@ -1349,7 +1377,12 @@ impl VisiCutRust {
                 });
                 self.menu_item(ui, Command::Devices, &mut clicked);
                 ui.separator();
-                for command in [Command::Save, Command::SaveAs, Command::Export] {
+                for command in [
+                    Command::Save,
+                    Command::SaveAs,
+                    Command::Export,
+                    Command::ExportPlf,
+                ] {
                     self.menu_item(ui, command, &mut clicked);
                 }
                 ui.separator();
@@ -1425,7 +1458,11 @@ impl VisiCutRust {
                 ui.separator();
                 // Reihenfolge der Schnitt- und Markierpfade.
                 ui.menu_button(tr("Schnittreihenfolge"), |ui| {
-                    for order in [CutOrder::ShortestTravel, CutOrder::VisiCut] {
+                    for order in CutOrder::ALL {
+                        // Darunter VisiCuts weitere Reihenfolgen.
+                        if order == CutOrder::File {
+                            ui.separator();
+                        }
                         let command = Command::CutOrder(order);
                         if ui
                             .add_enabled(
@@ -1703,6 +1740,10 @@ impl VisiCutRust {
     /// Rechnet die farbige Bearbeitung neu, wenn sich Motiv, Teile oder
     /// Zuordnung geändert haben; reines Verschieben verschiebt das Bild.
     fn refresh_live(&mut self, ctx: &egui::Context) {
+        // Während des Ziehens an einem Anfasser wird das Bild nur gestreckt.
+        if self.handle_drag.is_some() {
+            return;
+        }
         use std::hash::{Hash, Hasher};
         let p = &self.project;
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -2098,7 +2139,7 @@ impl VisiCutRust {
                     .input(|i| i.pointer.hover_pos())
                     .filter(|p| bed.contains(*p) && ui.rect_contains_pointer(bed));
                 self.jobs.canvas_hover = match pointer {
-                    Some(pos) if objects_mode => {
+                    Some(pos) if objects_mode && self.handle_drag.is_none() => {
                         if self.all_outlines.as_ref().is_none_or(|(k, _)| *k != key) {
                             let outlines = visicut_core::geometry::object_outlines(&self.project)
                                 .unwrap_or_default();
@@ -2192,6 +2233,9 @@ impl VisiCutRust {
                         self.dirty = true;
                     }
                 }
+                if !self.busy() {
+                    self.handles(ui, motif, bed, scale, texture.id(), clicked);
+                }
             } else {
                 let open = ui
                     .ctx()
@@ -2208,6 +2252,158 @@ impl VisiCutRust {
                 );
             }
         });
+    }
+
+    /// Anfasser wie in VisiCut: Ecken und Kantenmitten skalieren (Kette im
+    /// Feld B/H hält das Seitenverhältnis, Umschalt kehrt das um), der Kreis
+    /// über der Mitte dreht (Umschalt rastet in 15°-Schritten ein).
+    fn handles(
+        &mut self,
+        ui: &mut egui::Ui,
+        motif: Rect,
+        bed: Rect,
+        scale: f32,
+        texture: egui::TextureId,
+        clicked: &mut Option<Command>,
+    ) {
+        use egui::CursorIcon;
+        let shift = ui.input(|i| i.modifiers.shift);
+        let painter = ui.painter();
+        let to_mm = |p: Pos2| {
+            let mm = (p - bed.min) / scale;
+            [mm.x, mm.y]
+        };
+        let p = &self.project;
+        let rect_mm = [p.x_mm, p.y_mm, p.width_mm, p.height_mm];
+        let handle_stroke = Stroke::new(1.0, Color32::from_black_alpha(200));
+        for (i, handle) in workspace::HANDLES.into_iter().enumerate() {
+            let pos = motif.min + Vec2::new(handle[0], handle[1]) * motif.size();
+            let cursor = match handle {
+                [0.5, _] => CursorIcon::ResizeVertical,
+                [_, 0.5] => CursorIcon::ResizeHorizontal,
+                [x, y] if x == y => CursorIcon::ResizeNwSe,
+                _ => CursorIcon::ResizeNeSw,
+            };
+            let response = ui
+                .interact(
+                    Rect::from_center_size(pos, Vec2::splat(14.0)),
+                    ui.id().with(("handle", i)),
+                    Sense::drag(),
+                )
+                .on_hover_cursor(cursor);
+            if response.drag_started() {
+                self.handle_drag = Some(HandleDrag::Resize(rect_mm));
+            }
+            if response.dragged()
+                && let (Some(HandleDrag::Resize(start)), Some(pointer)) =
+                    (self.handle_drag, response.interact_pointer_pos())
+            {
+                let proportional = self.proportional != shift;
+                let [x, y, w, h] =
+                    workspace::drag_handle(start, handle, to_mm(pointer), proportional);
+                let p = &mut self.project;
+                (p.x_mm, p.y_mm, p.width_mm, p.height_mm) = (x, y, w, h);
+                self.dirty = true;
+            }
+            if response.drag_stopped() {
+                self.handle_drag = None;
+            }
+            painter.rect(
+                Rect::from_center_size(pos, Vec2::splat(7.0)),
+                1.0,
+                Color32::WHITE,
+                handle_stroke,
+                egui::StrokeKind::Middle,
+            );
+        }
+        // Drehanfasser über der Mitte, bei wenig Platz darunter.
+        let above = motif.top() - 22.0 >= bed.top();
+        let (edge, knob) = if above {
+            (
+                motif.center_top(),
+                motif.center_top() - Vec2::new(0.0, 22.0),
+            )
+        } else {
+            (
+                motif.center_bottom(),
+                motif.center_bottom() + Vec2::new(0.0, 22.0),
+            )
+        };
+        let response = ui
+            .interact(
+                Rect::from_center_size(knob, Vec2::splat(16.0)),
+                ui.id().with("rotate"),
+                Sense::drag(),
+            )
+            .on_hover_cursor(CursorIcon::Alias)
+            .on_hover_text(tr("Ziehen dreht das Motiv; mit Umschalt in 15°-Schritten"));
+        if response.drag_started()
+            && let Some(start) = response.interact_pointer_pos()
+        {
+            self.handle_drag = Some(HandleDrag::Rotate {
+                start,
+                degrees: 0.0,
+            });
+        }
+        if response.dragged()
+            && let (Some(HandleDrag::Rotate { start, .. }), Some(pointer)) =
+                (self.handle_drag, response.interact_pointer_pos())
+        {
+            let center = motif.center();
+            let degrees = workspace::drag_rotation(
+                [center.x, center.y],
+                [start.x, start.y],
+                [pointer.x, pointer.y],
+                shift,
+            );
+            self.handle_drag = Some(HandleDrag::Rotate { start, degrees });
+        }
+        if response.drag_stopped() {
+            if let Some(HandleDrag::Rotate { degrees, .. }) = self.handle_drag
+                && degrees.abs() >= 0.1
+            {
+                // Dreht wie „Drehen“ im Inspektor um die Mitte.
+                self.rotate_deg = degrees;
+                *clicked = Some(Command::RotateBy);
+            }
+            self.handle_drag = None;
+        }
+        let painter = ui.painter();
+        painter.line_segment([edge, knob], handle_stroke);
+        painter.circle(knob, 4.5, Color32::WHITE, handle_stroke);
+        // Vorschau der Drehung: Motiv und Rahmen gedreht um die Mitte.
+        if let Some(HandleDrag::Rotate { degrees, .. }) = self.handle_drag {
+            let angle = degrees.to_radians();
+            egui::Image::new((texture, motif.size()))
+                .rotate(angle, Vec2::splat(0.5))
+                .tint(Color32::from_white_alpha(160))
+                .paint_at(ui, motif);
+            let rotation = egui::emath::Rot2::from_angle(angle);
+            let center = motif.center();
+            let corners: Vec<Pos2> = [
+                motif.left_top(),
+                motif.right_top(),
+                motif.right_bottom(),
+                motif.left_bottom(),
+                motif.left_top(),
+            ]
+            .into_iter()
+            .map(|c| center + rotation * (c - center))
+            .collect();
+            ui.painter().extend(egui::Shape::dashed_line(
+                &corners,
+                Stroke::new(1.0, Color32::from_black_alpha(190)),
+                5.0,
+                3.0,
+            ));
+            ui.painter().text(
+                knob + Vec2::new(12.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+                format!("{degrees:.0}°"),
+                egui::FontId::proportional(12.0),
+                Color32::from_gray(40),
+            );
+        }
     }
 
     /// Senkrechte Bildschirmposition einer Lineal- oder Rastermarke `y` mm;
@@ -2573,6 +2769,14 @@ fn number(
         )
         .changed()
     })
+}
+
+/// Ziehen an einem Anfasser: Lage und Größe (mm) beim Start bzw. Startpunkt
+/// und aktueller Winkel des Drehanfassers.
+#[derive(Clone, Copy)]
+enum HandleDrag {
+    Resize([f32; 4]),
+    Rotate { start: Pos2, degrees: f32 },
 }
 
 impl eframe::App for VisiCutRust {

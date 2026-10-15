@@ -126,6 +126,116 @@ pub fn object_at(outlines: &[Vec<Contour>], point: Point, tolerance: f64) -> Opt
     best.map(|(_, index)| index)
 }
 
+/// Boundary of everything the objects cover, like VisiCut's
+/// `VectorProfile.calculateOuterShape` for "useOutline": the union of the
+/// areas of all shapes (each with its fill rule; open subpaths count as
+/// closed, so plain lines add nothing) and of the rectangles of images. The
+/// result are closed rings in mm, holes of the union included. Clip paths,
+/// masks and dashes do not change the area.
+pub fn outline_contours(project: &Project) -> Result<Vec<Contour>, String> {
+    use i_overlay::core::fill_rule::FillRule;
+    use i_overlay::float::simplify::SimplifyShape;
+    let missing = Mutex::new(Vec::new());
+    let options = usvg::Options {
+        fontdb: crate::svg::fonts(),
+        font_resolver: outline_fonts(&missing),
+        ..crate::svg::options()
+    };
+    let mut tree = usvg::Tree::from_str(&project.svg, &options).map_err(|e| e.to_string())?;
+    if let Some(problem) = missing.lock().map_err(|e| e.to_string())?.first() {
+        return Err(problem.clone());
+    }
+    if contains_text(tree.root()) {
+        let flattened = tree.to_string(&usvg::WriteOptions::default());
+        tree = usvg::Tree::from_str(&flattened, &options).map_err(|e| e.to_string())?;
+    }
+    // Each object's own area, oriented consistently; together with the
+    // non-zero rule their rings then form the union.
+    let mut rings: Vec<Vec<[f64; 2]>> = Vec::new();
+    let mut add = |subpaths: Vec<(Contour, bool)>, rule: FillRule| {
+        let shape: Vec<Vec<[f64; 2]>> = subpaths
+            .into_iter()
+            .map(|(c, _)| c)
+            .filter(|c| c.len() >= 3)
+            .collect();
+        for area in shape.simplify_shape(rule) {
+            rings.extend(area);
+        }
+    };
+    collect_areas(tree.root(), project, tree.size(), &mut add);
+    let union = rings.simplify_shape(FillRule::NonZero);
+    let mut result: Vec<Contour> = union
+        .into_iter()
+        .flatten()
+        .filter(|ring| ring.len() >= 3)
+        .map(|mut ring| {
+            ring.push(ring[0]);
+            ring
+        })
+        .collect();
+    if result.is_empty() {
+        return Err(tr("Nur Umriss: Die Objekte umschließen keine Fläche").into());
+    }
+    // Outer rings first, from the top left, so the order does not depend on
+    // the overlay library.
+    result.sort_by(|a, b| {
+        let key = |c: &Contour| {
+            c.iter().fold([f64::MAX, f64::MAX], |m, p| {
+                [m[0].min(p[1]), m[1].min(p[0])]
+            })
+        };
+        key(a)
+            .partial_cmp(&key(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    Ok(result)
+}
+
+/// Calls `add` with the flattened subpaths and fill rule of every visible
+/// shape and with the rectangle of every image.
+fn collect_areas(
+    group: &usvg::Group,
+    project: &Project,
+    size: usvg::Size,
+    add: &mut impl FnMut(Vec<(Contour, bool)>, i_overlay::core::fill_rule::FillRule),
+) {
+    use i_overlay::core::fill_rule::FillRule;
+    if group.opacity().get() == 0.0 {
+        return;
+    }
+    for node in group.children() {
+        match node {
+            usvg::Node::Group(group) => collect_areas(group, project, size, add),
+            usvg::Node::Path(path) if path.is_visible() => {
+                let rule = match path.fill().map(|f| f.rule()) {
+                    Some(usvg::FillRule::EvenOdd) => FillRule::EvenOdd,
+                    _ => FillRule::NonZero,
+                };
+                add(
+                    flatten_path(path.data(), path.abs_transform(), project, size),
+                    rule,
+                );
+            }
+            usvg::Node::Image(image) => {
+                let rect = tiny_skia::Rect::from_xywh(
+                    0.0,
+                    0.0,
+                    image.size().width(),
+                    image.size().height(),
+                );
+                if let Some(rect) = rect {
+                    let data = tiny_skia::PathBuilder::from_rect(rect);
+                    add(
+                        flatten_path(&data, image.abs_transform(), project, size),
+                        FillRule::NonZero,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn contours_with_fonts(
     project: &Project,
     fonts: Arc<usvg::fontdb::Database>,
@@ -1279,6 +1389,70 @@ mod clip_tests {
                 "{image:?}"
             );
         }
+    }
+
+    fn outline_of(body: &str) -> Result<Vec<Contour>, String> {
+        let project = Project {
+            x_mm: 0.0,
+            y_mm: 0.0,
+            width_mm: 100.0,
+            height_mm: 100.0,
+            svg: format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="0 0 100 100">{body}</svg>"#
+            ),
+            ..Project::default()
+        };
+        outline_contours(&project)
+    }
+
+    fn area(ring: &Contour) -> f64 {
+        ring.windows(2)
+            .map(|s| s[0][0] * s[1][1] - s[1][0] * s[0][1])
+            .sum::<f64>()
+            .abs()
+            / 2.0
+    }
+
+    #[test]
+    fn outline_unites_overlapping_shapes_into_one_ring() {
+        // Two 20 × 20 squares overlapping by 10 mm, both only stroked: one
+        // L-free ring of 30 × 20 mm, the shared lines inside are gone.
+        let rings = outline_of(
+            r#"<rect x="10" y="10" width="20" height="20" fill="none" stroke="red"/><rect x="20" y="10" width="20" height="20" fill="none" stroke="red"/>"#,
+        )
+        .unwrap();
+        assert_eq!(rings.len(), 1, "{rings:?}");
+        // The overlay works on a fine integer grid: well below 0.001 mm.
+        assert!(
+            (area(&rings[0]) - 600.0).abs() < 1e-3,
+            "{} {rings:?}",
+            area(&rings[0])
+        );
+        assert_eq!(rings[0].first(), rings[0].last());
+        // A circle inside a frame disappears; a separate one stays.
+        let rings = outline_of(
+            r#"<rect x="10" y="10" width="40" height="40" fill="none" stroke="red"/><circle cx="30" cy="30" r="5" fill="none" stroke="red"/><circle cx="80" cy="80" r="5" fill="none" stroke="red"/>"#,
+        )
+        .unwrap();
+        assert_eq!(rings.len(), 2, "{rings:?}");
+    }
+
+    #[test]
+    fn outline_keeps_holes_lines_add_nothing_and_images_count_as_rectangles() {
+        // A frame with an even-odd hole keeps the hole as second ring.
+        let rings = outline_of(
+            r#"<path d="M 10 10 H 50 V 50 H 10 Z M 20 20 H 40 V 40 H 20 Z" fill-rule="evenodd" stroke="red"/>"#,
+        )
+        .unwrap();
+        assert_eq!(rings.len(), 2, "{rings:?}");
+        let mut areas: Vec<f64> = rings.iter().map(area).collect();
+        areas.sort_by(f64::total_cmp);
+        assert!((areas[0] - 400.0).abs() < 1e-3 && (areas[1] - 1600.0).abs() < 1e-3);
+        assert!(outline_of(r#"<path d="M 10 10 L 90 90" stroke="red"/>"#).is_err());
+        let image = r#"<image x="60" y="10" width="20" height="10" preserveAspectRatio="none" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="/>"#;
+        let rings = outline_of(image).unwrap();
+        assert_eq!(rings.len(), 1);
+        assert!((area(&rings[0]) - 200.0).abs() < 1e-3, "{rings:?}");
     }
 
     #[test]

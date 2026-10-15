@@ -1,5 +1,6 @@
-// Cut order port of LibLaserCut's InnerFirstVectorOptimizer, VectorOptimizer
-// and OptimizerUtils.joinContiguousLoopElements (LGPL-3.0-or-later).
+// Cut order port of LibLaserCut's InnerFirstVectorOptimizer,
+// NearestVectorOptimizer, SmallestFirstVectorOptimizer, VectorOptimizer and
+// OptimizerUtils.joinContiguousLoopElements (LGPL-3.0-or-later).
 //
 // The port is literal on purpose: output must match the Java driver byte for
 // byte (tests/java_parity), including its tie-breaking and join quirks.
@@ -118,6 +119,58 @@ pub fn inner_first(elements: Vec<Element>, keys: &[SetKey]) -> Vec<Element> {
         .into_iter()
         .map(|i| slots[i].take().unwrap())
         .collect()
+}
+
+/// Java `NearestVectorOptimizer.sort`: joins open paths like
+/// [`inner_first`], then starts with the first path and always continues
+/// with the path whose start (or, for open paths, end) is nearest to the
+/// current end. Inner contours get no priority.
+pub fn nearest(elements: Vec<Element>, keys: &[SetKey]) -> Vec<Element> {
+    let mut rest: Vec<Element> = java_groups(elements, keys)
+        .into_iter()
+        .flat_map(join_contiguous)
+        .collect();
+    if rest.is_empty() {
+        return rest;
+    }
+    let mut result = vec![rest.remove(0)];
+    let distance = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]);
+    while !rest.is_empty() {
+        let end = result.last().unwrap().end();
+        let (mut next, mut invert, mut best) = (0, false, f64::INFINITY);
+        for (i, e) in rest.iter().enumerate() {
+            let d = distance(e.start, end);
+            if d < best {
+                (next, invert, best) = (i, false, d);
+            }
+            if !same(e.start, e.end()) {
+                let d = distance(e.end(), end);
+                if d < best {
+                    (next, invert, best) = (i, true, d);
+                }
+            }
+            if best == 0.0 {
+                break;
+            }
+        }
+        let mut element = rest.remove(next);
+        if invert {
+            element.invert();
+        }
+        result.push(element);
+    }
+    result
+}
+
+/// Java `SmallestFirstVectorOptimizer.sort`: stable sort by the area of the
+/// bounding box, without joining paths.
+pub fn smallest_first(mut elements: Vec<Element>) -> Vec<Element> {
+    let area = |e: &Element| {
+        let b = e.bounds();
+        (b[2] - b[0]) * (b[3] - b[1])
+    };
+    elements.sort_by(|a, b| area(a).total_cmp(&area(b)));
+    elements
 }
 
 /// `Collectors.groupingBy(el -> el.prop)`: a `HashMap` whose values come out
@@ -583,6 +636,43 @@ mod tests {
         let groups = java_groups(vec![p(0), p(1), p(0)], &[a, b]);
         assert_eq!(groups.iter().map(Vec::len).sum::<usize>(), 3);
         assert!(groups.iter().all(|g| g.iter().all(|e| e.set == g[0].set)));
+    }
+
+    #[test]
+    fn nearest_follows_the_closest_end_and_ignores_holes() {
+        let outer = square(0.0, 0.0, 100.0);
+        let hole = square(40.0, 40.0, 10.0);
+        let far = square(500.0, 0.0, 10.0);
+        // An open line ending next to the far square: it is cut backwards.
+        let line = path(&[[600.0, 0.0], [500.0, 0.0]]);
+        let line_reversed = path(&[[500.0, 0.0], [600.0, 0.0]]);
+        let result = nearest(vec![outer.clone(), far.clone(), line, hole.clone()], &[KEY]);
+        // The outline (first path) comes before its hole, unlike inner first.
+        assert_eq!(result, vec![outer, hole, far, line_reversed]);
+    }
+
+    #[test]
+    fn nearest_joins_split_lines_like_inner_first() {
+        let left = path(&[[0.0, 0.0], [10.0, 0.0]]);
+        let right = path(&[[10.0, 0.0], [20.0, 0.0]]);
+        let result = nearest(vec![left, right], &[KEY]);
+        assert_eq!(result, vec![path(&[[0.0, 0.0], [10.0, 0.0], [20.0, 0.0]])]);
+    }
+
+    #[test]
+    fn smallest_first_sorts_by_box_area_and_keeps_ties() {
+        let big = square(0.0, 0.0, 100.0);
+        let small = square(200.0, 0.0, 10.0);
+        let also_small = square(300.0, 0.0, 10.0);
+        let line = path(&[[0.0, 500.0], [400.0, 500.0]]);
+        let result = smallest_first(vec![
+            big.clone(),
+            small.clone(),
+            line.clone(),
+            also_small.clone(),
+        ]);
+        // A straight line has no area and comes first; equal areas keep their order.
+        assert_eq!(result, vec![line, small, also_small, big]);
     }
 
     #[test]

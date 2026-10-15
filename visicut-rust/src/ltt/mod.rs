@@ -98,8 +98,14 @@ impl Axis {
             None => -(dy * 8.0).round() as i32,
         }
     }
-    fn absolute(self, y: i32) -> i32 {
-        self.absolute_scaled(y, 1.0)
+    /// Absolute position of raster row `y` in pixels of `pitch` machine
+    /// steps; with pitch 8 (500 DPI) the same as
+    /// `absolute_scaled(y, 1.0)`.
+    fn absolute_raster(self, y: i32, pitch: i32) -> i32 {
+        match self.rotary_radius_mm {
+            Some(r) => Self::rotary(r, y as f64 * 25.4 / (MACHINE_DPI / pitch as f64)),
+            None => (BED_HEIGHT * MACHINE_DPI / 25.4) as i32 - y * pitch,
+        }
     }
     #[cfg(test)]
     fn relative(self, dy: i32) -> i32 {
@@ -114,9 +120,15 @@ impl Axis {
     }
 }
 
+#[cfg(test)]
 fn pair(out: &mut Vec<u8>, axis: Axis, x: i32, y: i32) {
-    dword(out, (x * 8) as u32);
-    dword(out, axis.absolute(y) as u32);
+    raster_pair(out, axis, x, y, 8);
+}
+
+/// Start of a raster line given in pixels of `pitch` machine steps.
+fn raster_pair(out: &mut Vec<u8>, axis: Axis, x: i32, y: i32, pitch: i32) {
+    dword(out, (x * pitch) as u32);
+    dword(out, axis.absolute_raster(y, pitch) as u32);
 }
 
 #[derive(serde::Serialize)]
@@ -159,6 +171,20 @@ struct Part {
     shift_px: i32,
     /// Index of the project part (see `Project::part_view`) it comes from.
     source: usize,
+    /// Cut or mark only the boundary of the covered area (`useOutline`).
+    outline: bool,
+}
+
+impl Part {
+    /// Vector paths in mm: the contours, or with `outline` the boundary of
+    /// the area the objects cover.
+    fn vector_paths(&self, source: &Project) -> Result<Vec<geometry::Contour>, String> {
+        if self.outline {
+            geometry::outline_contours(source)
+        } else {
+            geometry::contours(source)
+        }
+    }
 }
 
 /// Area of the bed the preview image covers (all parts), in mm.
@@ -208,6 +234,7 @@ fn collect_parts(project: &Project) -> Result<(Vec<Project>, Vec<Part>), String>
                 }],
                 shift_px: 0,
                 source,
+                outline: false,
             });
         } else {
             let selections = crate::mapping::resolve(view)?;
@@ -222,6 +249,7 @@ fn collect_parts(project: &Project) -> Result<(Vec<Project>, Vec<Part>), String>
                     sets: step.parameters(),
                     shift_px: step.engrave_shift_px,
                     source,
+                    outline: step.outline && !step.operation.is_raster(),
                 });
             }
         }
@@ -272,7 +300,7 @@ pub fn processing_preview(project: &Project) -> Result<Vec<u8>, String> {
             draw_contours(
                 &mut preview,
                 frame,
-                &geometry::contours(&source)?,
+                &part.vector_paths(&source)?,
                 part.operation,
                 (0.35 * scale).max(2.0),
             );
@@ -426,6 +454,15 @@ pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, 
             acceleration = format!("{:.0}", project.machine.curve_acceleration_mm_s2)
         ));
     }
+    if let Some(part) = parts
+        .iter()
+        .find(|p| p.operation.is_raster() && p.raster.dpi != 500)
+    {
+        warnings.push(tr!(
+            "Gravur mit {dpi} DPI: Nur 500 DPI ist am Gerät erprobt; den ersten Auftrag beaufsichtigen",
+            dpi = part.raster.dpi
+        ));
+    }
     if parts.iter().any(|p| p.shift_px != 0) {
         warnings.push(
             tr("Zeilenversatz-Testmuster: einzelne Schritte haben einen zusätzlichen Versatz")
@@ -462,6 +499,19 @@ pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, 
         } else {
             device_job_name(operation.prefix(), &project.name)
         };
+        // One `ESC D` per file: all engravings of a job share the resolution.
+        let pitches: std::collections::BTreeSet<i32> = group
+            .iter()
+            .filter(|p| p.operation.is_raster())
+            .map(|p| p.raster.pitch())
+            .collect();
+        if pitches.len() > 1 {
+            return Err(tr(
+                "Gravuren in einem Auftrag brauchen dieselbe Auflösung; die DPI der Gravurschritte angleichen",
+            )
+            .into());
+        }
+        let pitch = pitches.first().copied().unwrap_or(8);
         let overscan = group
             .iter()
             .flat_map(|p| {
@@ -490,7 +540,7 @@ pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, 
             steps.push(step);
             bounds = Some(bounds.map_or(part_bounds, |b| b.union(part_bounds)));
         }
-        let mut out = header(project, overscan, &name, bounds.unwrap_or_default());
+        let mut out = header(project, overscan, &name, bounds.unwrap_or_default(), pitch);
         out.extend(body);
         finish(&mut out)?;
         total_bytes = total_bytes.saturating_add(out.len());
@@ -615,7 +665,7 @@ fn append_part(
     let bounds;
     match part.operation {
         Operation::Cut | Operation::Mark => {
-            let paths = geometry::contours(&source)?;
+            let paths = part.vector_paths(&source)?;
             // Optional: parts that run along an earlier line of this step are
             // cut once (passes and parameter sets still repeat everything).
             let (paths, duplicates) = if project.remove_duplicate_lines {
@@ -699,11 +749,13 @@ fn append_part(
                     .map(|p| [p[0] / RASTER_DPI * 25.4, p[1] / RASTER_DPI * 25.4]),
             )
             .ok_or(tr("Keine Vektorpfade zum Bearbeiten"))?;
-            let ordered = order::inner_first(elements, &keys);
             let ordered = match project.cut_order {
-                CutOrder::VisiCut => ordered,
+                CutOrder::VisiCut => order::inner_first(elements, &keys),
+                CutOrder::File => elements,
+                CutOrder::Nearest => order::nearest(elements, &keys),
+                CutOrder::SmallestFirst => order::smallest_first(elements),
                 CutOrder::ShortestTravel => order::shortest_travel(
-                    ordered,
+                    order::inner_first(elements, &keys),
                     timeline.position().map(|v| v / 25.4 * RASTER_DPI),
                 )
                 .unwrap_or_else(|o| {
@@ -756,6 +808,10 @@ fn append_part(
                 paths = paths.len(),
                 passes = part.sets[0].passes
             );
+            if part.outline {
+                text += " · ";
+                text += tr("Nur Umriss");
+            }
             if circles + curves > 0 {
                 text += " · ";
                 text += &tr!(
@@ -775,9 +831,9 @@ fn append_part(
             description = text;
         }
         Operation::Engrave | Operation::Engrave3d => {
-            let (pixmap, area) = render_raster(&source, part.operation)?;
+            let (pixmap, area) = render_raster(&source, part.operation, part.raster.pitch())?;
             // RasterizableJobPart: start point plus image size, px2mm.
-            let mm = |px: i32| px as f64 / RASTER_DPI * 25.4;
+            let mm = |px: i32| area.mm(px);
             bounds = Bounds {
                 min: [mm(area.x), mm(area.y)],
                 max: [
@@ -812,8 +868,8 @@ fn append_part(
                 program.raster_bounds_mm = Some([
                     mm(area.x),
                     mm(area.y),
-                    raster.width as f64 * 25.4 / RASTER_DPI,
-                    raster.height as f64 * 25.4 / RASTER_DPI,
+                    area.mm(raster.width as i32),
+                    area.mm(raster.height as i32),
                 ]);
                 estimated += timeline.append(program, set.passes);
             }
@@ -821,8 +877,9 @@ fn append_part(
                 return Err(tr("SVG enthält keine dunklen Gravurpixel").into());
             }
             description = tr!(
-                "{lines} Gravurzeilen · 500 DPI · {dithering} · {direction} · {passes} Durchgänge",
+                "{lines} Gravurzeilen · {dpi} DPI · {dithering} · {direction} · {passes} Durchgänge",
                 lines = lines,
+                dpi = part.raster.dpi,
                 dithering = if part.operation == Operation::Engrave3d {
                     tr("Graustufen (3D)")
                 } else {
@@ -935,15 +992,16 @@ fn draw_raster(
         return;
     };
     // Raster pixels → mm on the bed → preview pixels of the motif.
-    let scale_x = preview.width() as f64 / frame.width as f64 / geometry::PX_PER_MM;
-    let scale_y = preview.height() as f64 / frame.height as f64 / geometry::PX_PER_MM;
+    let px_per_mm = area.dpi() / 25.4;
+    let scale_x = preview.width() as f64 / frame.width as f64 / px_per_mm;
+    let scale_y = preview.height() as f64 / frame.height as f64 / px_per_mm;
     let transform = tiny_skia::Transform::from_row(
         scale_x as f32,
         0.0,
         0.0,
         scale_y as f32,
-        ((area.x as f64 - frame.x as f64 * geometry::PX_PER_MM) * scale_x) as f32,
-        ((area.y as f64 - frame.y as f64 * geometry::PX_PER_MM) * scale_y) as f32,
+        ((area.x as f64 - frame.x as f64 * px_per_mm) * scale_x) as f32,
+        ((area.y as f64 - frame.y as f64 * px_per_mm) * scale_y) as f32,
     );
     preview.draw_pixmap(
         0,
@@ -1026,7 +1084,7 @@ fn settings(out: &mut Vec<u8>, power: f32, speed: f32) {
     word(out, (power * 10.0).clamp(1.0, 1000.0) as u16);
 }
 
-fn header(project: &Project, overscan: f32, name: &str, bounds: Bounds) -> Vec<u8> {
+fn header(project: &Project, overscan: f32, name: &str, bounds: Bounds, pitch: i32) -> Vec<u8> {
     let mut out = b"LTT\x1bv\x01\x01\x02\x1bF".to_vec();
     // Prefix is part of the actual controller name, within its 15-byte limit.
     out.push(name.len() as u8);
@@ -1053,7 +1111,8 @@ fn header(project: &Project, overscan: f32, name: &str, bounds: Bounds) -> Vec<u
     out.extend([0x1b, 0x6e, 0, 0, 0x5d, 0xcf, 0, 0, 0x69, 0x56]);
     out.extend([0x1b, 0x4f, 0]); // no autorun
     out.extend([0x1b, 0x51, 0, 0]);
-    out.extend([0x1b, 0x44, 8]); // 4000 / 8 = 500 DPI
+    // Raster resolution as divisor of 4000 DPI (8: 500 DPI); raster lines only.
+    out.extend([0x1b, 0x44, pitch as u8]);
     // Material radius in 0.01 mm; LibLaserCut sends 42 mm for XY jobs.
     out.extend([0x1b, 0x52]);
     let radius = if project.rotary_axis {
@@ -1068,11 +1127,25 @@ fn header(project: &Project, overscan: f32, name: &str, bounds: Bounds) -> Vec<u
     out
 }
 
-/// Raster area of an engraving in 500-DPI pixels on the bed.
+/// Raster area of an engraving on the bed, in pixels of `pitch` machine
+/// steps (8: 500 DPI).
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct RasterArea {
     x: i32,
     y: i32,
+    pitch: i32,
+}
+
+impl RasterArea {
+    fn dpi(self) -> f64 {
+        MACHINE_DPI / self.pitch as f64
+    }
+    fn mm(self, px: i32) -> f64 {
+        px as f64 / self.dpi() * 25.4
+    }
+    fn px(self, mm: f64) -> i32 {
+        (mm * self.dpi() / 25.4) as i32
+    }
 }
 
 /// Renders the objects like VisiCut's RasterProfile/Raster3dProfile: only
@@ -1082,6 +1155,7 @@ struct RasterArea {
 fn render_raster(
     project: &Project,
     operation: Operation,
+    pitch: i32,
 ) -> Result<(tiny_skia::Pixmap, RasterArea), String> {
     let smooth = operation == Operation::Engrave3d;
     let options = usvg::Options {
@@ -1103,7 +1177,7 @@ fn render_raster(
     let size = tree.size();
     let sx = f64::from(project.width_mm) / f64::from(size.width());
     let sy = f64::from(project.height_mm) / f64::from(size.height());
-    let f = geometry::PX_PER_MM;
+    let f = MACHINE_DPI / pitch as f64 / 25.4;
     let to_px_x = |u: f32| (sx * f64::from(u) + f64::from(project.x_mm)) * f;
     let to_px_y = |u: f32| (sy * f64::from(u) + f64::from(project.y_mm)) * f;
     let bbox = content_bounds(tree.root()).ok_or(tr("SVG enthält keine dunklen Gravurpixel"))?;
@@ -1112,6 +1186,7 @@ fn render_raster(
     let area = RasterArea {
         x: x0 as i32,
         y: y0 as i32,
+        pitch,
     };
     let (width, height) = ((x1 - x0) as i32, (y1 - y0) as i32);
     if width <= 0 || height <= 0 {
@@ -1175,15 +1250,20 @@ fn content_bounds(group: &usvg::Group) -> Option<tiny_skia::Rect> {
 }
 
 /// getEngraveShiftPixels: line offset in raster pixels for the given speed.
-fn engrave_shift_pixels(machine: &MachineSettings, speed: f32) -> f64 {
-    machine.engrave_shift_at(speed) as f64 * RASTER_DPI / MACHINE_DPI + 0.5
+fn engrave_shift_pixels(machine: &MachineSettings, speed: f32, dpi: f64) -> f64 {
+    machine.engrave_shift_at(speed) as f64 * dpi / MACHINE_DPI + 0.5
 }
 
 /// Whole pixels every engrave line is moved against its travel direction:
 /// the Java driver's truncated offset plus the extra shift of a step.
 /// Negative values move the line in travel direction.
 pub fn engrave_shift_px(machine: &MachineSettings, speed: f32, extra: i32) -> i32 {
-    (-engrave_shift_pixels(machine, speed)).trunc() as i32 + extra
+    engrave_shift_px_at(machine, speed, extra, RASTER_DPI)
+}
+
+/// [`engrave_shift_px`] for pixels of `dpi`; the table is in 1/4000 inch.
+fn engrave_shift_px_at(machine: &MachineSettings, speed: f32, extra: i32, dpi: f64) -> i32 {
+    (-engrave_shift_pixels(machine, speed, dpi)).trunc() as i32 + extra
 }
 
 /// The raster lines of one RasterPart and their count.
@@ -1197,16 +1277,17 @@ fn raster_code(
 ) -> Result<(Vec<u8>, usize), String> {
     let (operation, options, extra_shift_px) = (part.operation, &part.raster, part.shift_px);
     let speed = set.speed_percent;
-    let offset = engrave_shift_pixels(&project.machine, speed);
+    let dpi = area.dpi();
+    let offset = engrave_shift_pixels(&project.machine, speed, dpi);
     let per_byte = (8 / raster.bits_per_pixel) as i32;
     // Shift by whole pixels for 3D rows so power values stay intact; for
     // 1-bit rows this equals the Java driver's bit shift.
-    let shift_px = engrave_shift_px(&project.machine, speed, extra_shift_px);
+    let shift_px = engrave_shift_px_at(&project.machine, speed, extra_shift_px, dpi);
     let shift = shift_px * raster.bits_per_pixel as i32;
     let spare = (offset.abs().ceil() as i32).max(shift_px.abs());
     let (origin_x, origin_y) = (area.x, area.y);
-    let max_x = px(BED_WIDTH);
-    let overscan_bytes = (px(overscan(operation, speed) as f64) + per_byte - 1) / per_byte;
+    let max_x = area.px(BED_WIDTH);
+    let overscan_bytes = (area.px(overscan(operation, speed) as f64) + per_byte - 1) / per_byte;
     let axis = Axis::of(project);
     let raster_speed = speed as f64 * ENGRAVE_SPEED_FACTOR;
     let mut count = 0;
@@ -1239,9 +1320,9 @@ fn raster_code(
             )
             .into());
         }
-        let row_mm = (origin_y + y as i32) as f64 * 25.4 / RASTER_DPI;
-        let left_mm = start_x as f64 * 25.4 / RASTER_DPI;
-        let right_mm = (start_x + pixels) as f64 * 25.4 / RASTER_DPI;
+        let row_mm = area.mm(origin_y + y as i32);
+        let left_mm = area.mm(start_x);
+        let right_mm = area.mm(start_x + pixels);
         let (from, to) = if right {
             (left_mm, right_mm)
         } else {
@@ -1269,11 +1350,12 @@ fn raster_code(
         let compressed = compress(&data);
         encoded.extend(if right { [0x1b, 0x30] } else { [0x1b, 0x31] });
         dword(&mut encoded, compressed.len() as u32 + 8);
-        pair(
+        raster_pair(
             &mut encoded,
             axis,
             start_x + if right { 0 } else { pixels },
             origin_y + y as i32,
+            area.pitch,
         );
         encoded.extend(compressed);
         count += 1;
@@ -1586,6 +1668,31 @@ mod tests {
     }
 
     #[test]
+    fn every_cut_order_prepares_a_framed_job_with_its_own_order() {
+        // A frame with a hole, listed outside first, and a small square.
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="300mm" height="100mm" viewBox="0 0 300 100"><rect x="10" y="10" width="80" height="80" fill="none" stroke="red"/><rect x="200" y="10" width="10" height="10" fill="none" stroke="red"/><circle cx="50" cy="50" r="10" fill="none" stroke="red"/></svg>"#;
+        let mut bytes = Vec::new();
+        for order in CutOrder::ALL {
+            let project = Project {
+                cut_order: order,
+                width_mm: 300.0,
+                height_mm: 100.0,
+                svg: svg.into(),
+                ..Default::default()
+            };
+            let job = prepare(&project).unwrap();
+            assert!(job.warnings.is_empty(), "{order:?}: {:?}", job.warnings);
+            assert_framing(&job.jobs[0].bytes);
+            bytes.push(job.jobs[0].bytes.clone());
+        }
+        // „Wie in der Datei“ and „Nächster Pfad“ cut the frame before its
+        // hole, so they differ from the inner-first orders.
+        assert_ne!(bytes[2], bytes[1]);
+        assert_ne!(bytes[3], bytes[1]);
+        assert_ne!(bytes[4], bytes[2]);
+    }
+
+    #[test]
     fn shortest_travel_is_the_default_and_reduces_time() {
         assert_eq!(Project::default().cut_order, CutOrder::ShortestTravel);
         // Parts at alternating heights: the inner-first sweep zigzags across.
@@ -1681,6 +1788,166 @@ mod tests {
             ..crate::project::JobStep::new(Operation::Mark)
         });
         p
+    }
+
+    /// Start points (X, Y in machine steps) of the raster lines of a job.
+    fn raster_starts(bytes: &[u8]) -> Vec<(i32, i32)> {
+        let int = |at: usize| i32::from_be_bytes(bytes[at..at + 4].try_into().unwrap());
+        let mut starts = Vec::new();
+        let mut i = bytes.windows(2).position(|w| w == [0x1b, 0x43]).unwrap();
+        while i + 14 <= bytes.len() {
+            if bytes[i] == 0x1b && (bytes[i + 1] == 0x30 || bytes[i + 1] == 0x31) {
+                starts.push((int(i + 6), int(i + 10)));
+                i += 6 + int(i + 2) as usize;
+            } else {
+                i += 1;
+            }
+        }
+        starts
+    }
+
+    #[test]
+    fn outline_cuts_only_the_border_of_the_covered_area() {
+        // Two overlapping squares: four sides each without outline, one ring with.
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="50mm" height="30mm" viewBox="0 0 50 30"><rect x="5" y="5" width="20" height="20" fill="none" stroke="red"/><rect x="15" y="5" width="20" height="20" fill="none" stroke="red"/></svg>"#;
+        let job = |outline| {
+            let project = Project {
+                svg: svg.into(),
+                x_mm: 100.0,
+                y_mm: 100.0,
+                width_mm: 50.0,
+                height_mm: 30.0,
+                steps: vec![crate::project::JobStep {
+                    objects: vec![0, 1],
+                    outline,
+                    ..crate::project::JobStep::new(Operation::Cut)
+                }],
+                ..Default::default()
+            };
+            prepare(&project).unwrap()
+        };
+        let (plain, outlined) = (job(false), job(true));
+        assert!(
+            plain.description.starts_with("2 Vektorpfade"),
+            "{}",
+            plain.description
+        );
+        assert!(
+            outlined.description.starts_with("1 Vektorpfade"),
+            "{}",
+            outlined.description
+        );
+        assert!(outlined.description.contains("Nur Umriss"));
+        assert!(outlined.estimated_seconds < plain.estimated_seconds);
+        assert_framing(&outlined.jobs[0].bytes);
+    }
+
+    #[test]
+    fn engrave_resolution_sets_the_pitch_and_the_line_spacing() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm" viewBox="0 0 20 10"><rect x="2" y="2" width="16" height="6" fill="black"/></svg>"#;
+        for (dpi, pitch) in [
+            (500, 8u8),
+            (1000, 4),
+            (333, 12),
+            (250, 16),
+            (200, 20),
+            (166, 24),
+        ] {
+            let project = Project {
+                svg: svg.into(),
+                x_mm: 100.0,
+                y_mm: 100.0,
+                width_mm: 20.0,
+                height_mm: 10.0,
+                operation: Operation::Engrave,
+                raster: RasterSettings {
+                    dpi,
+                    bidirectional: false,
+                    ..RasterSettings::default()
+                },
+                ..Default::default()
+            };
+            let job = prepare(&project).unwrap();
+            assert_eq!(
+                job.warnings.is_empty(),
+                dpi == 500,
+                "{dpi}: {:?}",
+                job.warnings
+            );
+            let bytes = &job.jobs[0].bytes;
+            assert_framing(bytes);
+            // ESC D right after the copy counter, then the material radius.
+            assert!(
+                bytes
+                    .windows(9)
+                    .any(|w| w == [0x1b, 0x51, 0, 0, 0x1b, 0x44, pitch, 0x1b, 0x52]),
+                "{dpi}"
+            );
+            let starts = raster_starts(bytes);
+            // 6 mm of rows, one row per pitch machine steps (1/4000 inch).
+            let expected = 6.0 / 25.4 * 4000.0 / f64::from(pitch);
+            assert!(
+                (starts.len() as f64 - expected).abs() <= 2.0,
+                "{dpi}: {}",
+                starts.len()
+            );
+            let pitch = i32::from(pitch);
+            for pair in starts.windows(2) {
+                assert_eq!(pair[0].1 - pair[1].1, pitch, "{dpi}");
+            }
+            assert!(starts.iter().all(|(x, _)| x % pitch == 0), "{dpi}");
+            // The first row lies at the top of the black rectangle (102 mm).
+            let top_mm = 600.0 - f64::from(starts[0].1) / 4000.0 * 25.4;
+            assert!(
+                (top_mm - 102.0).abs() < 25.4 / f64::from(dpi) + 1e-6,
+                "{dpi}: {top_mm}"
+            );
+            assert!(
+                job.description.contains(&format!("{dpi} DPI")),
+                "{}",
+                job.description
+            );
+        }
+    }
+
+    #[test]
+    fn engravings_of_one_job_need_the_same_resolution() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm" viewBox="0 0 20 10"><rect x="2" y="2" width="6" height="6" fill="black"/><rect x="12" y="2" width="6" height="6" fill="black"/></svg>"#;
+        let step = |operation, object, dpi| crate::project::JobStep {
+            objects: vec![object],
+            raster: RasterSettings {
+                dpi,
+                ..RasterSettings::default()
+            },
+            ..crate::project::JobStep::new(operation)
+        };
+        let project = |steps| Project {
+            svg: svg.into(),
+            x_mm: 100.0,
+            y_mm: 100.0,
+            width_mm: 20.0,
+            height_mm: 10.0,
+            steps,
+            ..Default::default()
+        };
+        let mixed = project(vec![
+            step(Operation::Engrave, 0, 500),
+            step(Operation::Engrave, 1, 1000),
+        ]);
+        assert!(prepare(&mixed).is_err());
+        // Engraving and 3D engraving are separate files unless sent as one.
+        let separate = project(vec![
+            step(Operation::Engrave, 0, 500),
+            step(Operation::Engrave3d, 1, 250),
+        ]);
+        let job = prepare(&separate).unwrap();
+        assert_eq!(job.jobs.len(), 2);
+        assert!(prepare_with(&separate, true).is_err());
+        let invalid = RasterSettings {
+            dpi: 300,
+            ..RasterSettings::default()
+        };
+        assert!(invalid.validate().is_err());
     }
 
     #[test]
@@ -2069,7 +2336,7 @@ mod tests {
         let step = |operation, raster| JobStep {
             objects: vec![0],
             raster,
-            ..JobStep::new(operation)
+            ..crate::project::JobStep::new(operation)
         };
         let one_way = RasterSettings {
             dithering: Dithering::FloydSteinberg,

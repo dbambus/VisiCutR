@@ -12,6 +12,7 @@ mod raster;
 
 use crate::i18n::tr;
 pub use crate::svg_import::Imported;
+pub use plf::{plf_bytes, write_plf};
 use std::path::Path;
 
 /// Largest file that is read for import.

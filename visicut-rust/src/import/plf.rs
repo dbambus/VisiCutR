@@ -21,7 +21,10 @@ mod laserscript;
 mod mappings;
 mod parametric;
 mod script;
+mod write;
 mod xml;
+
+pub use write::{plf_bytes, write_plf};
 
 use super::{Imported, MAX_FILE_BYTES};
 use crate::mapping::attributes;
@@ -954,6 +957,43 @@ mod tests {
         assert_eq!(imported.steps[1].operation, Operation::Mark);
         assert_eq!(imported.steps[1].objects, vec![2]);
         assert!(imported.steps[1].filters.is_none());
+    }
+
+    #[test]
+    fn image_parts_keep_mappings_without_conditions() {
+        // A 4 × 2 px PNG: engraved as a whole (empty filter set), as VisiCut
+        // does for images; a conditional entry is still reported.
+        let mut png = Vec::new();
+        image::RgbImage::from_pixel(4, 2, image::Rgb([0, 0, 0]))
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let engrave = r#"<com.t_oster.visicut.model.mapping.MappingSet><linked-list><default/><int>1</int><mapping><a class="filters"><linked-list><default/><int>0</int></linked-list></a><b class="rasterProfile"><DPI>250.0</DPI><invertColors>false</invertColors><colorShift>0</colorShift></b></mapping></linked-list></com.t_oster.visicut.model.mapping.MappingSet>"#;
+        let transform = transform_xml([1.0, 0.0, 0.0, 1.0, 10.0, 10.0]);
+        let (_dir, path) = write_plf(&[
+            ("bild.png", &png),
+            ("transform.xml", transform.as_bytes()),
+            ("mappings.xml", engrave.as_bytes()),
+        ]);
+        let imported = read_plf(&path).unwrap();
+        assert_eq!(imported.steps.len(), 1, "{:?}", imported.warnings);
+        assert_eq!(imported.steps[0].operation, Operation::Engrave);
+        assert_eq!(imported.steps[0].raster.dpi, 250);
+        assert!(!imported.steps[0].objects.is_empty() || imported.steps[0].filters.is_some());
+        let conditional = one_mapping(&stroke_filter([255, 0, 0]), r#"<isCut>true</isCut>"#);
+        let (_dir2, path) = write_plf(&[
+            ("bild.png", &png),
+            ("transform.xml", transform.as_bytes()),
+            ("mappings.xml", conditional.as_bytes()),
+        ]);
+        let imported = read_plf(&path).unwrap();
+        assert!(
+            imported
+                .warnings
+                .iter()
+                .any(|w| w.contains("nur bei SVG-Teilen")),
+            "{:?}",
+            imported.warnings
+        );
     }
 
     #[test]

@@ -236,14 +236,25 @@ enum SessionCache {
 enum CutOrder: String, Codable, CaseIterable, Identifiable {
     // Standard zuerst (Reihenfolge im Menü Job).
     case shortestTravel = "ShortestTravel", visiCut = "VisiCut"
+    // VisiCuts weitere Reihenfolgen (im Menü unter einem Trennstrich).
+    case file = "File", nearest = "Nearest", smallestFirst = "SmallestFirst"
     var id: String { rawValue }
     var title: String {
-        switch self { case .visiCut: return tr("Klassisch"); case .shortestTravel: return tr("Kürzeste Leerfahrten") }
+        switch self {
+        case .visiCut: return tr("Klassisch")
+        case .shortestTravel: return tr("Kürzeste Leerfahrten")
+        case .file: return tr("Wie in der Datei")
+        case .nearest: return tr("Nächster Pfad")
+        case .smallestFirst: return tr("Kleinste zuerst")
+        }
     }
     var help: String {
         switch self {
         case .visiCut: return tr("Innere Konturen zuerst, Reihenfolge wie VisiCut.")
         case .shortestTravel: return tr("Innere Konturen zuerst, dann jeweils der nächstgelegene Pfad ab dem Referenzpunkt oben rechts.")
+        case .file: return tr("Pfade in der Reihenfolge der Zeichnung, ohne Sortierung (VisiCut „Datei“).")
+        case .nearest: return tr("Ab dem ersten Pfad jeweils der nächstgelegene, ohne Rücksicht auf innere Konturen (VisiCut „Nächster“); Teile können vor ihren Löchern herausfallen.")
+        case .smallestFirst: return tr("Kleinste Pfade zuerst, gemessen an der Fläche des Umrissrechtecks (VisiCut „Kleinste zuerst“).")
         }
     }
 }
@@ -274,6 +285,8 @@ struct JobStep: Codable, Equatable {
     var additional: [ParameterSet]
     /// Zusätzlicher Zeilenversatz in Pixeln (nur im Zeilenversatz-Testmuster).
     var engrave_shift_px: Int? = nil
+    /// Schneiden/Markieren: nur der Rand der gemeinsamen Fläche (VisiCut „Kontur“).
+    var outline: Bool? = nil
 }
 struct PreparedStep: Decodable {
     let name: String
@@ -319,6 +332,7 @@ func objectAt(_ outlines: [[[CGPoint]]], _ point: CGPoint, tolerance: Double) ->
     return best?.index
 }
 struct PathsResponse: Decodable { let paths: [String] }
+struct WarningsResponse: Decodable { let warnings: [String] }
 struct Preview: Decodable { let png: [UInt8] }
 struct OutputJob: Decodable {
     let name: String
@@ -781,6 +795,22 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Schreibt das Projekt als PLF für Java-VisiCut; die Hinweise nennen,
+    /// was das Format nicht enthält.
+    func exportPlf() {
+        guard project.hasArtwork, !busy else { return }
+        let panel = NSSavePanel()
+        panel.title = tr("Als VisiCut-Projekt (PLF) exportieren")
+        panel.allowedContentTypes = [UTType(filenameExtension: "plf") ?? .zip]
+        panel.nameFieldStringValue = project.name + ".plf"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let result: WarningsResponse = try RustCore.decode("export_plf", project: project, path: url.path)
+            status = tr("Als VisiCut-Projekt exportiert")
+            if !result.warnings.isEmpty { error = result.warnings.joined(separator: "\n") }
+        } catch { self.error = error.localizedDescription }
+    }
+
     /// Löscht alle Zwischenstände und ihre Einträge unter „Zuletzt geöffnet“.
     /// Das geöffnete Projekt bleibt im Speicher, verliert aber die Bindung.
     func clearCache() {
@@ -1140,6 +1170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         file.addItem(menuItem(tr("Sichern"), action: #selector(saveProject), key: "s"))
         file.addItem(menuItem(tr("Sichern unter …"), action: #selector(saveAs), key: "s", modifiers: [.command, .shift]))
         file.addItem(menuItem(tr("LTT-Job exportieren …"), action: #selector(exportJob), key: "e", modifiers: [.command, .shift]))
+        file.addItem(menuItem(tr("Als VisiCut-Projekt (PLF) exportieren …"), action: #selector(exportPlf)))
         file.addItem(.separator())
         let close = menuItem(tr("Fenster schließen"), action: #selector(NSWindow.performClose(_:)), key: "w"); close.target = nil; file.addItem(close)
         let edit = submenu(tr("Bearbeiten"))
@@ -1196,6 +1227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         // Reihenfolge der Schnitt- und Markierpfade; das Häkchen setzt validateMenuItem.
         let order = NSMenu(title: tr("Schnittreihenfolge"))
         for cutOrder in CutOrder.allCases {
+            if cutOrder == .file { order.addItem(.separator()) }
             let item = menuItem(cutOrder.title, action: #selector(chooseCutOrder(_:)))
             item.representedObject = cutOrder.rawValue
             item.toolTip = cutOrder.help
@@ -1307,6 +1339,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
+        case #selector(exportPlf): return model.project.hasArtwork && !model.busy
         case #selector(exportJob), #selector(sendJob), #selector(previewJob): return model.sendEnabled
         case #selector(applyProfile): return !model.busy && (model.preset != nil || model.project.steps.contains { step in
             model.selectedMaterial?.profiles.contains {
@@ -1360,6 +1393,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
     @objc func saveProject() { model.save() }
     @objc func saveAs() { model.save(asCopy: true) }
     @objc func exportJob() { model.export() }
+    @objc func exportPlf() { model.exportPlf() }
     @objc func sendJob() { model.send() }
     @objc func previewJob() { model.previewJob() }
     @objc func applyProfile() { model.applyPreset() }
@@ -1918,6 +1952,10 @@ struct StepInspector: View {
                           first: ParameterSet(power_percent: step.power_percent, speed_percent: step.speed_percent, passes: step.passes))
             if step.operation.isRaster {
                 RasterOptions(settings: binding.raster, operation: step.operation)
+            } else {
+                Toggle(tr("Nur Umriss"), isOn: Binding(get: { binding.wrappedValue.outline ?? false },
+                                                      set: { binding.wrappedValue.outline = $0 ? true : nil }))
+                    .help(tr("Schneidet nur den Rand der Fläche, die alle Objekte dieses Schritts zusammen bedecken (VisiCut „Kontur“): Überlappungen und innere Linien entfallen, Bilder zählen als Rechteck."))
             }
         }
     }
@@ -2161,10 +2199,65 @@ struct BedCanvas: NSViewRepresentable {
     func updateNSView(_ view: BedView, context: Context) { view.model = model; view.needsDisplay = true }
 }
 
+/// Anfasser wie VisiCuts `EditRectangle`: Ecken und Kantenmitten als Anteil
+/// von Breite und Höhe (wie `workspace::HANDLES` der egui-Oberfläche).
+let resizeHandles: [CGPoint] = [CGPoint(x: 0, y: 0), CGPoint(x: 0.5, y: 0), CGPoint(x: 1, y: 0), CGPoint(x: 1, y: 0.5),
+                                CGPoint(x: 1, y: 1), CGPoint(x: 0.5, y: 1), CGPoint(x: 0, y: 1), CGPoint(x: 0, y: 0.5)]
+
+/// Rechteck in mm, wenn der Anfasser `handle` von `rect` auf `pointer` gezogen
+/// wird (wie `workspace::drag_handle`): die gegenüberliegende Seite bleibt
+/// stehen; Ecken skalieren `proportional` entlang der Diagonale, Kanten
+/// ändern eine Seite und `proportional` die andere um ihre Mitte.
+func dragHandle(_ rect: CGRect, _ handle: CGPoint, to pointer: CGPoint, proportional: Bool) -> CGRect {
+    let minimum = 0.1
+    let (w, h) = (Double(rect.width), Double(rect.height))
+    func side(_ t: CGFloat) -> Double { t > 0.5 ? 1 : (t < 0.5 ? -1 : 0) }
+    let (sx, sy) = (side(handle.x), side(handle.y))
+    let fixed = CGPoint(x: rect.minX + rect.width * (1 - handle.x), y: rect.minY + rect.height * (1 - handle.y))
+    let dx = Double(pointer.x - fixed.x) * sx, dy = Double(pointer.y - fixed.y) * sy
+    var (nw, nh) = (w, h)
+    switch (sx != 0, sy != 0) {
+    case (true, true) where proportional:
+        let t = max((dx * w + dy * h) / (w * w + h * h), minimum / min(w, h))
+        (nw, nh) = (w * t, h * t)
+    case (true, true): (nw, nh) = (max(dx, minimum), max(dy, minimum))
+    case (true, false):
+        nw = max(dx, minimum)
+        if proportional { nh = max(h * nw / w, minimum) }
+    case (false, true):
+        nh = max(dy, minimum)
+        if proportional { nw = max(w * nh / h, minimum) }
+    default: break
+    }
+    func place(_ fixed: CGFloat, _ side: Double, _ size: Double) -> Double {
+        side > 0 ? Double(fixed) : (side < 0 ? Double(fixed) - size : Double(fixed) - size / 2)
+    }
+    return CGRect(x: place(fixed.x, sx, nw), y: place(fixed.y, sy, nh), width: nw, height: nh)
+}
+
+/// Drehwinkel in Grad (Bildschirm mit y nach unten: positiv im
+/// Uhrzeigersinn wie „transform“) zwischen −180° und 180°; `snap` rastet in
+/// 15°-Schritten ein (wie `workspace::drag_rotation`).
+func dragRotation(center: CGPoint, start: CGPoint, pointer: CGPoint, snap: Bool) -> Double {
+    func angle(_ p: CGPoint) -> Double { atan2(Double(p.y - center.y), Double(p.x - center.x)) }
+    var degrees = (angle(pointer) - angle(start)) * 180 / .pi
+    degrees = (degrees + 180).truncatingRemainder(dividingBy: 360)
+    if degrees < 0 { degrees += 360 }
+    degrees -= 180
+    return snap ? (degrees / 15).rounded() * 15 : degrees
+}
+
 final class BedView: NSView {
     var model: AppModel
     private var dragStart: NSPoint?
     private var originalPosition = NSPoint.zero
+    /// Ziehen an einem Anfasser: Größe ändern (Anfasser, Lage beim Start in
+    /// mm) oder drehen (Startpunkt, aktueller Winkel).
+    private enum HandleDrag {
+        case resize(CGPoint, CGRect)
+        case rotate(NSPoint, Double)
+    }
+    private var handleDrag: HandleDrag?
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     override func updateTrackingAreas() {
@@ -2174,9 +2267,10 @@ final class BedView: NSView {
     }
     /// In „Einzeln“: Objekt unter der Maus in der Liste als ausgewählt zeigen.
     override func mouseMoved(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        updateCursor(at: p)
         guard model.assignmentMode == .objects, model.project.hasArtwork else { return }
         guard let outlines = model.objectOutlines else { model.ensureObjectOutlines(); return }
-        let p = convert(event.locationInWindow, from: nil)
         let mm = CGPoint(x: (p.x - bed.minX) / scale - model.project.x_mm, y: (p.y - bed.minY) / scale - model.project.y_mm)
         let hit = objectAt(outlines, mm, tolerance: 4 / scale)
         if hit != model.hoveredObject || (hit != nil && !model.hoverFromCanvas) { model.hoverObject(hit, fromCanvas: true) }
@@ -2251,6 +2345,53 @@ final class BedView: NSView {
     private var motif: NSRect {
         let p = model.project
         return viewRect(p.x_mm, p.y_mm, p.width_mm, p.height_mm)
+    }
+    private var showsHandles: Bool { model.project.hasArtwork && !model.busy }
+    /// Mittelpunkt eines Anfassers in Ansichtskoordinaten.
+    private func handlePoint(_ handle: CGPoint) -> NSPoint {
+        NSPoint(x: motif.minX + motif.width * handle.x, y: motif.minY + motif.height * handle.y)
+    }
+    /// Drehanfasser über der Mitte, bei wenig Platz (Lineal) darunter;
+    /// dazu der Punkt auf der Kante, an dem seine Linie ansetzt.
+    private var rotationKnob: (edge: NSPoint, knob: NSPoint) {
+        motif.minY - 22 >= max(bed.minY, 30)
+            ? (NSPoint(x: motif.midX, y: motif.minY), NSPoint(x: motif.midX, y: motif.minY - 22))
+            : (NSPoint(x: motif.midX, y: motif.maxY), NSPoint(x: motif.midX, y: motif.maxY + 22))
+    }
+    /// Anfasser unter dem Punkt: Größe (Anteil) oder `nil` mit `rotate`.
+    private func handle(at point: NSPoint) -> (resize: CGPoint?, rotate: Bool)? {
+        guard showsHandles else { return nil }
+        let knob = rotationKnob.knob
+        if hypot(point.x - knob.x, point.y - knob.y) <= 8 { return (nil, true) }
+        for handle in resizeHandles {
+            let center = handlePoint(handle)
+            if abs(point.x - center.x) <= 7 && abs(point.y - center.y) <= 7 { return (handle, false) }
+        }
+        return nil
+    }
+    private func updateCursor(at point: NSPoint) {
+        guard let hit = handle(at: point) else { NSCursor.arrow.set(); return }
+        guard let handle = hit.resize else { NSCursor.crosshair.set(); return }
+        if #available(macOS 15.0, *) {
+            let position: NSCursor.FrameResizePosition
+            switch (handle.x, handle.y) {
+            case (0, 0): position = .topLeft
+            case (0.5, 0): position = .top
+            case (1, 0): position = .topRight
+            case (1, 0.5): position = .right
+            case (1, 1): position = .bottomRight
+            case (0.5, 1): position = .bottom
+            case (0, 1): position = .bottomLeft
+            default: position = .left
+            }
+            NSCursor.frameResize(position: position, directions: .all).set()
+        } else if handle.y == 0.5 {
+            NSCursor.resizeLeftRight.set()
+        } else if handle.x == 0.5 {
+            NSCursor.resizeUpDown.set()
+        } else {
+            NSCursor.crosshair.set()
+        }
     }
     /// Index (in der Liste aller Teile) des obersten nicht aktiven Teils unter dem Punkt.
     private func inactivePart(at point: NSPoint) -> Int? {
@@ -2345,6 +2486,20 @@ final class BedView: NSView {
             path.lineWidth = 4; NSColor.systemYellow.withAlphaComponent(0.9).setStroke(); path.stroke()
             path.lineWidth = 1; NSColor(calibratedWhite: 0, alpha: 0.7).setStroke(); path.stroke()
         }
+        // Vorschau der Drehung: Motiv und Rahmen gedreht um die Mitte.
+        if case .rotate(_, let degrees) = handleDrag {
+            NSGraphicsContext.saveGraphicsState()
+            let turn = NSAffineTransform()
+            turn.translateX(by: motif.midX, yBy: motif.midY)
+            turn.rotate(byDegrees: degrees)
+            turn.translateX(by: -motif.midX, yBy: -motif.midY)
+            turn.concat()
+            model.image?.draw(in: motif, from: .zero, operation: .sourceOver, fraction: 0.6, respectFlipped: true, hints: hints)
+            let frame = NSBezierPath(rect: motif); frame.lineWidth = 1
+            frame.setLineDash([5, 3], count: 2, phase: 0)
+            NSColor(calibratedWhite: 0, alpha: 0.75).setStroke(); frame.stroke()
+            NSGraphicsContext.restoreGraphicsState()
+        }
         NSGraphicsContext.restoreGraphicsState()
         // Lineale in eigenen Randstreifen über der Fläche: auch vergrößert oder
         // verschoben (und im Dunkelmodus) bleiben die Zahlen lesbar.
@@ -2370,10 +2525,38 @@ final class BedView: NSView {
         }
         // Einheit in der Ecke, an der sich die Lineale treffen.
         ("mm" as NSString).draw(at: NSPoint(x: 2, y: 10), withAttributes: attributes)
+        drawHandles()
+    }
+    /// Weiße Anfasser mit dunklem Rand, darüber der Drehanfasser.
+    private func drawHandles() {
+        guard showsHandles else { return }
+        let stroke = NSColor(calibratedWhite: 0, alpha: 0.8)
+        let (edge, knob) = rotationKnob
+        let line = NSBezierPath(); line.move(to: edge); line.line(to: knob); line.lineWidth = 1
+        stroke.setStroke(); line.stroke()
+        let circle = NSBezierPath(ovalIn: NSRect(x: knob.x - 4.5, y: knob.y - 4.5, width: 9, height: 9))
+        NSColor.white.setFill(); circle.fill(); circle.lineWidth = 1; circle.stroke()
+        for handle in resizeHandles {
+            let center = handlePoint(handle)
+            let square = NSBezierPath(roundedRect: NSRect(x: center.x - 3.5, y: center.y - 3.5, width: 7, height: 7), xRadius: 1, yRadius: 1)
+            NSColor.white.setFill(); square.fill(); square.lineWidth = 1; square.stroke()
+        }
+        if case .rotate(_, let degrees) = handleDrag {
+            let text = String(format: "%.0f°", degrees) as NSString
+            text.draw(at: NSPoint(x: knob.x + 10, y: knob.y - 7),
+                      withAttributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.labelColor])
+        }
     }
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         guard !model.busy else { return }
+        if let hit = handle(at: point) {
+            window?.makeFirstResponder(self)
+            let p = model.project
+            handleDrag = hit.resize.map { .resize($0, CGRect(x: p.x_mm, y: p.y_mm, width: p.width_mm, height: p.height_mm)) }
+                ?? .rotate(point, 0)
+            return
+        }
         if !motif.contains(point) {
             // Klick auf ein anderes Teil wählt es aus; Ziehen verschiebt dann dieses Teil.
             guard let index = inactivePart(at: point) else { return }
@@ -2386,13 +2569,38 @@ final class BedView: NSView {
         NSCursor.closedHand.push()
     }
     override func mouseDragged(with event: NSEvent) {
-        guard let start = dragStart else { return }
         let point = convert(event.locationInWindow, from: nil)
+        let shift = event.modifierFlags.contains(.shift)
+        switch handleDrag {
+        case .resize(let handle, let start):
+            // Die Kette bei B/H hält das Seitenverhältnis, Umschalt kehrt das um.
+            let mm = CGPoint(x: (point.x - bed.minX) / scale, y: (point.y - bed.minY) / scale)
+            let rect = dragHandle(start, handle, to: mm, proportional: model.keepProportions != shift)
+            model.project.x_mm = rect.minX; model.project.y_mm = rect.minY
+            model.project.width_mm = rect.width; model.project.height_mm = rect.height
+            needsDisplay = true
+            return
+        case .rotate(let start, _):
+            handleDrag = .rotate(start, dragRotation(center: NSPoint(x: motif.midX, y: motif.midY), start: start, pointer: point, snap: shift))
+            needsDisplay = true
+            return
+        case nil: break
+        }
+        guard let start = dragStart else { return }
         model.project.x_mm = min(max(0, originalPosition.x + (point.x - start.x) / scale), max(0, model.project.bed_width_mm - model.project.width_mm))
         model.project.y_mm = min(max(0, originalPosition.y + (point.y - start.y) / scale), max(0, model.project.bed_height_mm - model.project.height_mm))
         needsDisplay = true
     }
     override func mouseUp(with event: NSEvent) {
+        if case .rotate(_, let degrees) = handleDrag, abs(degrees) >= 0.1 {
+            // Dreht wie „Drehen“ im Inspektor um die Mitte (⌘Z widerruft).
+            model.transformArtwork(rotate: degrees)
+        }
+        if handleDrag != nil {
+            handleDrag = nil
+            needsDisplay = true
+            updateCursor(at: convert(event.locationInWindow, from: nil))
+        }
         if dragStart != nil { NSCursor.pop() }
         dragStart = nil
     }
@@ -2658,6 +2866,21 @@ func runUITest(_ model: AppModel) {
         model.changeWidth(oldWidth * 2)
         guard abs(model.project.height_mm - oldHeight * 2) < 0.001 else { throw CoreError("Proportionale Skalierung fehlgeschlagen") }
         model.changeWidth(oldWidth)
+        // PLF für Java-VisiCut: Archiv mit Hinweisen, wieder lesbar.
+        let plf = FileManager.default.temporaryDirectory.appendingPathComponent("visicutrust-ui-test.plf")
+        let exported: WarningsResponse = try RustCore.decode("export_plf", project: model.project, path: plf.path)
+        let reopened: ProjectResponse = try RustCore.decode("import", project: model.project, path: plf.path)
+        try? FileManager.default.removeItem(at: plf)
+        guard !exported.warnings.isEmpty, reopened.project.hasArtwork else { throw CoreError("PLF-Export fehlgeschlagen") }
+        // Anfasser: Ecke proportional, Kante mit Kette um die Mitte, Drehung rastet ein.
+        let box = CGRect(x: 10, y: 20, width: 40, height: 20)
+        guard dragHandle(box, CGPoint(x: 1, y: 1), to: CGPoint(x: 90, y: 60), proportional: true) == CGRect(x: 10, y: 20, width: 80, height: 40),
+              dragHandle(box, CGPoint(x: 0, y: 0), to: CGPoint(x: 30, y: 30), proportional: true) == CGRect(x: 30, y: 30, width: 20, height: 10),
+              dragHandle(box, CGPoint(x: 1, y: 0.5), to: CGPoint(x: 90, y: 0), proportional: true) == CGRect(x: 10, y: 10, width: 80, height: 40),
+              dragHandle(box, CGPoint(x: 0, y: 0.5), to: CGPoint(x: 30, y: 0), proportional: false) == CGRect(x: 30, y: 20, width: 20, height: 20),
+              abs(dragRotation(center: .zero, start: CGPoint(x: 10, y: 0), pointer: CGPoint(x: 0, y: 10), snap: false) - 90) < 1e-6,
+              dragRotation(center: .zero, start: CGPoint(x: 10, y: 0), pointer: CGPoint(x: 10, y: 2), snap: true) == 15
+        else { throw CoreError("Anfasser rechnen falsch") }
         model.center()
         guard model.objects.count == 3 else { throw CoreError("SVG-Objektliste fehlt") }
         model.setIndividual(true)
@@ -2698,7 +2921,7 @@ func runUITest(_ model: AppModel) {
         model.jobImage = nil
         model.previewJob()
         model.dirty = false
-        print("Native UI state tests passed: material, thickness, operation, presets, proportional scaling, native save / Rust reload, cut order and legacy files, bitmap vectorization, Rust export, object assignments, mixed job preview and estimate, stale preview invalidation, devices, rotary axis, camera background and calibration, rule mapping, 3D engraving, dithering, parameter sets, material library, text, sign, copies, nesting")
+        print("Native UI state tests passed: material, thickness, operation, presets, proportional scaling, handles, PLF export, native save / Rust reload, cut order and legacy files, bitmap vectorization, Rust export, object assignments, mixed job preview and estimate, stale preview invalidation, devices, rotary axis, camera background and calibration, rule mapping, 3D engraving, dithering, parameter sets, material library, text, sign, copies, nesting")
     } catch {
         fputs("Native UI tests failed: \(error)\n", stderr)
         exit(1)

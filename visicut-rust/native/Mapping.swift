@@ -26,7 +26,10 @@ struct RasterSettings: Codable, Equatable {
     var color_shift: Int
     var bidirectional: Bool
     var bottom_up: Bool
-    static let fau = RasterSettings(dithering: .brightenedHalftone, invert: false, color_shift: 0, bidirectional: true, bottom_up: false)
+    /// Gravurauflösung (visicut_core::raster::RASTER_DPIS).
+    var dpi: Int
+    static let fau = RasterSettings(dithering: .brightenedHalftone, invert: false, color_shift: 0, bidirectional: true, bottom_up: false, dpi: 500)
+    static let resolutions = [166, 200, 250, 333, 500, 1000]
 }
 
 enum FilterAttribute: String, Codable, CaseIterable, Identifiable {
@@ -247,6 +250,15 @@ struct RasterOptions: View {
         } else {
             Text(tr("Graustufen: Die Laserleistung folgt der Helligkeit (dunkel = tief)."))
                 .font(.caption).foregroundStyle(.secondary)
+        }
+        LabeledContent(tr("Auflösung")) {
+            NativePopup(options: RasterSettings.resolutions.map { PopupOption(String($0), "\($0) DPI") },
+                selection: Binding(get: { String(settings.dpi) }, set: { if let dpi = Int($0) { settings.dpi = dpi } }),
+                identifier: "dpiPicker").frame(width: 170)
+        }
+        .help(tr("Punkte und Zeilen je Zoll beim Gravieren: höher ist feiner, braucht aber mehr Zeilen und Zeit (1000 DPI doppelt so viele wie 500). Alle Gravuren eines Auftrags brauchen dieselbe Auflösung."))
+        if settings.dpi != 500 {
+            Text(tr("Nur 500 DPI ist am Gerät erprobt; den ersten Auftrag beaufsichtigen.")).font(.caption).foregroundStyle(.orange)
         }
         NumberField(tr("Helligkeit"), value: Binding(get: { Double(settings.color_shift) },
                                                  set: { settings.color_shift = Int(max(-255, min(255, $0))) }), unit: "±255")

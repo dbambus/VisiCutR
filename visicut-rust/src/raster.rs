@@ -1,7 +1,7 @@
 //! Engraving rasters: greyscale conversion and dithering, ported from
 //! LibLaserCut (utils/BufferedImageAdapter.java, dithering/*.java),
 //! LGPL-3.0-or-later. Original authors: Thomas Oster, Max Gaukler.
-use crate::i18n::tr;
+use crate::{i18n::tr, tr};
 use resvg::tiny_skia;
 use serde::{Deserialize, Serialize};
 
@@ -54,7 +54,14 @@ pub struct RasterSettings {
     pub color_shift: i32,
     pub bidirectional: bool,
     pub bottom_up: bool,
+    /// Engraving resolution, one of [`RASTER_DPIS`]; older files use 500.
+    pub dpi: u32,
 }
+
+/// Engraving resolutions of the iLaser 4000 (the Windows driver's list). The
+/// header command `ESC D` sends 4000 / DPI as divisor of the 4000-DPI machine
+/// resolution and applies to raster lines only; 1000 DPI is the maximum.
+pub const RASTER_DPIS: [u32; 6] = [166, 200, 250, 333, 500, 1000];
 
 /// New steps follow the FAU "engrave" profile.
 impl Default for RasterSettings {
@@ -65,6 +72,7 @@ impl Default for RasterSettings {
             color_shift: 0,
             bidirectional: true,
             bottom_up: false,
+            dpi: 500,
         }
     }
 }
@@ -83,7 +91,18 @@ impl RasterSettings {
         if !(-255..=255).contains(&self.color_shift) {
             return Err(tr("Helligkeitsverschiebung muss zwischen −255 und 255 liegen").into());
         }
+        if !RASTER_DPIS.contains(&self.dpi) {
+            return Err(tr!(
+                "Gravurauflösung {dpi} DPI wird nicht unterstützt (166, 200, 250, 333, 500 oder 1000 DPI)",
+                dpi = self.dpi
+            ));
+        }
         Ok(())
+    }
+
+    /// `ESC D` divisor: 4000 / DPI (24, 20, 16, 12, 8 or 4).
+    pub fn pitch(&self) -> i32 {
+        (4000.0 / f64::from(self.dpi)).round() as i32
     }
 }
 
@@ -305,6 +324,20 @@ impl Raster {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn files_without_resolution_engrave_at_500_dpi() {
+        let mut value = serde_json::to_value(RasterSettings::legacy()).unwrap();
+        value.as_object_mut().unwrap().remove("dpi");
+        let settings: RasterSettings = serde_json::from_value(value).unwrap();
+        assert_eq!((settings.dpi, settings.pitch()), (500, 8));
+        assert!(settings.validate().is_ok());
+        let pitches: Vec<i32> = RASTER_DPIS
+            .iter()
+            .map(|&dpi| RasterSettings { dpi, ..settings }.pitch())
+            .collect();
+        assert_eq!(pitches, vec![24, 20, 16, 12, 8, 4]);
+    }
 
     fn gradient(width: usize) -> Vec<u8> {
         (0..width * 16)

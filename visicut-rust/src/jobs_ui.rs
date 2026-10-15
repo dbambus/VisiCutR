@@ -7,7 +7,7 @@ use visicut_core::{
     mapping::{self, Attribute, Filter, Predefined, ValueCounts},
     materials::{Library, Material, MaterialProfile},
     project::{CutOrder, JobStep, Operation, ParameterSet, Project},
-    raster::{Dithering, RasterSettings},
+    raster::{Dithering, RASTER_DPIS, RasterSettings},
     selection,
 };
 use visicut_core::{i18n::tr, tr};
@@ -32,6 +32,9 @@ pub fn cut_order_title(order: CutOrder) -> &'static str {
     match order {
         CutOrder::VisiCut => tr("Klassisch"),
         CutOrder::ShortestTravel => tr("Kürzeste Leerfahrten"),
+        CutOrder::File => tr("Wie in der Datei"),
+        CutOrder::Nearest => tr("Nächster Pfad"),
+        CutOrder::SmallestFirst => tr("Kleinste zuerst"),
     }
 }
 
@@ -41,6 +44,15 @@ pub fn cut_order_help(order: CutOrder) -> &'static str {
         CutOrder::VisiCut => tr("Innere Konturen zuerst, Reihenfolge wie VisiCut."),
         CutOrder::ShortestTravel => tr(
             "Innere Konturen zuerst, dann jeweils der nächstgelegene Pfad ab dem Referenzpunkt oben rechts.",
+        ),
+        CutOrder::File => {
+            tr("Pfade in der Reihenfolge der Zeichnung, ohne Sortierung (VisiCut „Datei“).")
+        }
+        CutOrder::Nearest => tr(
+            "Ab dem ersten Pfad jeweils der nächstgelegene, ohne Rücksicht auf innere Konturen (VisiCut „Nächster“); Teile können vor ihren Löchern herausfallen.",
+        ),
+        CutOrder::SmallestFirst => tr(
+            "Kleinste Pfade zuerst, gemessen an der Fläche des Umrissrechtecks (VisiCut „Kleinste zuerst“).",
         ),
     }
 }
@@ -470,6 +482,7 @@ fn raster_options(
     settings: &mut RasterSettings,
     operation: Operation,
 ) -> bool {
+    let id = egui::Id::new(id);
     let mut changed = false;
     if operation == Operation::Engrave {
         crate::form::row(ui, tr("Rasterung"), |ui| {
@@ -485,6 +498,24 @@ fn raster_options(
         });
     } else {
         ui.small(tr("Graustufen: Leistung folgt der Helligkeit."));
+    }
+    crate::form::row(ui, tr("Auflösung"), |ui| {
+        egui::ComboBox::from_id_salt(("dpi", id))
+            .selected_text(format!("{} DPI", settings.dpi))
+            .show_ui(ui, |ui| {
+                for dpi in RASTER_DPIS {
+                    changed |= ui
+                        .selectable_value(&mut settings.dpi, dpi, format!("{dpi} DPI"))
+                        .changed();
+                }
+            })
+            .response
+            .on_hover_text(tr("Punkte und Zeilen je Zoll beim Gravieren: höher ist feiner, braucht aber mehr Zeilen und Zeit (1000 DPI doppelt so viele wie 500). Alle Gravuren eines Auftrags brauchen dieselbe Auflösung."));
+    });
+    if settings.dpi != 500 {
+        ui.small(tr(
+            "Nur 500 DPI ist am Gerät erprobt; den ersten Auftrag beaufsichtigen.",
+        ));
     }
     crate::form::row(ui, tr("Helligkeit"), |ui| {
         changed |= ui
@@ -1245,6 +1276,11 @@ impl JobUi {
                 }
                 if step.operation.is_raster() {
                     *dirty |= raster_options(ui, ("step", i), &mut step.raster, step.operation);
+                } else {
+                    *dirty |= ui
+                        .checkbox(&mut step.outline, tr("Nur Umriss"))
+                        .on_hover_text(tr("Schneidet nur den Rand der Fläche, die alle Objekte dieses Schritts zusammen bedecken (VisiCut „Kontur“): Überlappungen und innere Linien entfallen, Bilder zählen als Rechteck."))
+                        .changed();
                 }
             });
         }

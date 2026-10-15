@@ -89,6 +89,92 @@ pub fn center(project: &mut Project) {
     project.y_mm = limit(project.bed_height_mm, project.height_mm) / 2.0;
 }
 
+/// Kleinste Seitenlänge beim Ziehen an einem Anfasser.
+const MIN_SIZE_MM: f32 = 0.1;
+
+/// Anfasser des gewählten Teils wie VisiCuts `EditRectangle`: Ecken und
+/// Kantenmitten als Anteil von Breite und Höhe (0, ½ oder 1).
+pub const HANDLES: [[f32; 2]; 8] = [
+    [0.0, 0.0],
+    [0.5, 0.0],
+    [1.0, 0.0],
+    [1.0, 0.5],
+    [1.0, 1.0],
+    [0.5, 1.0],
+    [0.0, 1.0],
+    [0.0, 0.5],
+];
+
+/// Rechteck `[x, y, Breite, Höhe]` in mm, wenn der Anfasser `handle` von
+/// `rect` auf `pointer` gezogen wird. Die gegenüberliegende Ecke bzw. Kante
+/// bleibt stehen. Ecken skalieren `proportional` entlang der Diagonale, sonst
+/// frei; Kanten ändern eine Seite, `proportional` wächst die andere um ihre
+/// Mitte mit. Über den festen Punkt hinaus bleibt die kleinste Größe.
+pub fn drag_handle(
+    rect: [f32; 4],
+    handle: [f32; 2],
+    pointer: [f32; 2],
+    proportional: bool,
+) -> [f32; 4] {
+    let [x, y, w, h] = rect;
+    let side = |t: f32| (t - 0.5).signum() * f32::from(u8::from(t != 0.5));
+    let (sx, sy) = (side(handle[0]), side(handle[1]));
+    let fixed = [x + w * (1.0 - handle[0]), y + h * (1.0 - handle[1])];
+    let dx = (pointer[0] - fixed[0]) * sx;
+    let dy = (pointer[1] - fixed[1]) * sy;
+    let (nw, nh) = match (sx != 0.0, sy != 0.0) {
+        (true, true) if proportional => {
+            // Projektion auf die Diagonale zur gezogenen Ecke.
+            let t = ((dx * w + dy * h) / (w * w + h * h)).max(MIN_SIZE_MM / w.min(h));
+            (w * t, h * t)
+        }
+        (true, true) => (dx.max(MIN_SIZE_MM), dy.max(MIN_SIZE_MM)),
+        (true, false) => {
+            let nw = dx.max(MIN_SIZE_MM);
+            (
+                nw,
+                if proportional {
+                    (h * nw / w).max(MIN_SIZE_MM)
+                } else {
+                    h
+                },
+            )
+        }
+        (false, true) => {
+            let nh = dy.max(MIN_SIZE_MM);
+            (
+                if proportional {
+                    (w * nh / h).max(MIN_SIZE_MM)
+                } else {
+                    w
+                },
+                nh,
+            )
+        }
+        (false, false) => (w, h),
+    };
+    let place = |fixed: f32, side: f32, size: f32| match side {
+        s if s > 0.0 => fixed,
+        s if s < 0.0 => fixed - size,
+        _ => fixed - size / 2.0,
+    };
+    [place(fixed[0], sx, nw), place(fixed[1], sy, nh), nw, nh]
+}
+
+/// Drehwinkel in Grad beim Ziehen des Drehanfassers von `start` nach
+/// `pointer` um `center` (Bildschirm, y nach unten: positiv im
+/// Uhrzeigersinn wie `compose::transform`), zwischen −180° und 180°; `snap`
+/// rastet in 15°-Schritten ein (Umschalt wie in VisiCut).
+pub fn drag_rotation(center: [f32; 2], start: [f32; 2], pointer: [f32; 2], snap: bool) -> f32 {
+    let angle = |p: [f32; 2]| (p[1] - center[1]).atan2(p[0] - center[0]);
+    let degrees = ((angle(pointer) - angle(start)).to_degrees() + 180.0).rem_euclid(360.0) - 180.0;
+    if snap {
+        (degrees / 15.0).round() * 15.0
+    } else {
+        degrees
+    }
+}
+
 /// Zieldateien eines Exports in einen Ordner.
 pub struct ExportPlan {
     pub targets: Vec<PathBuf>,
@@ -188,6 +274,57 @@ mod tests {
         assert_eq!(zoom_in(ZOOM_MAX), ZOOM_MAX);
         assert_eq!(zoom_out(ZOOM_MIN), ZOOM_MIN);
         assert_eq!(zoom_in(1.1), 1.25);
+    }
+
+    fn close(a: [f32; 4], b: [f32; 4]) -> bool {
+        a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-4)
+    }
+
+    #[test]
+    fn corner_handles_keep_the_opposite_corner_and_the_ratio() {
+        let rect = [10.0, 20.0, 40.0, 20.0];
+        // Unten rechts nach außen: oben links bleibt, Verhältnis 2 : 1.
+        let r = drag_handle(rect, [1.0, 1.0], [90.0, 60.0], true);
+        assert!(close(r, [10.0, 20.0, 80.0, 40.0]), "{r:?}");
+        // Oben links nach innen: unten rechts (50, 40) bleibt.
+        let r = drag_handle(rect, [0.0, 0.0], [30.0, 30.0], true);
+        assert!(close(r, [30.0, 30.0, 20.0, 10.0]), "{r:?}");
+        // Ohne Kette folgt die Ecke dem Zeiger.
+        let r = drag_handle(rect, [1.0, 0.0], [70.0, 0.0], false);
+        assert!(close(r, [10.0, 0.0, 60.0, 40.0]), "{r:?}");
+        // Über die feste Ecke hinaus bleibt die kleinste Größe.
+        let r = drag_handle(rect, [1.0, 1.0], [0.0, 0.0], true);
+        assert!(
+            r[2] >= 0.1 - 1e-6 && r[3] >= 0.1 - 1e-6 && r[0] == 10.0 && r[1] == 20.0,
+            "{r:?}"
+        );
+    }
+
+    #[test]
+    fn edge_handles_change_one_side_or_scale_around_the_middle() {
+        let rect = [10.0, 20.0, 40.0, 20.0];
+        let r = drag_handle(rect, [1.0, 0.5], [70.0, 0.0], false);
+        assert!(close(r, [10.0, 20.0, 60.0, 20.0]), "{r:?}");
+        let r = drag_handle(rect, [0.0, 0.5], [30.0, 0.0], false);
+        assert!(close(r, [30.0, 20.0, 20.0, 20.0]), "{r:?}");
+        // Mit Kette wächst die Höhe um die Mitte (y = 30) mit.
+        let r = drag_handle(rect, [1.0, 0.5], [90.0, 0.0], true);
+        assert!(close(r, [10.0, 10.0, 80.0, 40.0]), "{r:?}");
+        let r = drag_handle(rect, [0.5, 0.0], [0.0, 0.0], true);
+        assert!(close(r, [-10.0, 0.0, 80.0, 40.0]), "{r:?}");
+    }
+
+    #[test]
+    fn rotation_is_clockwise_on_screen_and_snaps() {
+        let c = [0.0, 0.0];
+        // Von rechts nach unten (y nach unten): 90° im Uhrzeigersinn.
+        assert!((drag_rotation(c, [10.0, 0.0], [0.0, 10.0], false) - 90.0).abs() < 1e-4);
+        assert!((drag_rotation(c, [10.0, 0.0], [0.0, -10.0], false) + 90.0).abs() < 1e-4);
+        // Über ±180° hinweg bleibt der Winkel klein.
+        let a = drag_rotation(c, [-10.0, 1.0], [-10.0, -1.0], false);
+        assert!(a.abs() < 15.0, "{a}");
+        assert_eq!(drag_rotation(c, [10.0, 0.0], [10.0, 2.0], true), 15.0);
+        assert_eq!(drag_rotation(c, [10.0, 0.0], [10.0, 1.0], true), 0.0);
     }
 
     #[test]

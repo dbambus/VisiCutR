@@ -95,6 +95,8 @@ fn raster(dir: &Path, case: &HashMap<String, String>) -> RasterSettings {
         color_shift: case.get("color_shift").map_or(0, |v| v.parse().unwrap()),
         bidirectional: !flag("unidirectional"),
         bottom_up: flag("bottom_up"),
+        // Java's LTT driver only offers 500 DPI.
+        dpi: 500,
     }
 }
 

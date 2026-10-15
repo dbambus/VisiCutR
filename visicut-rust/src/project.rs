@@ -170,6 +170,24 @@ pub enum CutOrder {
     /// from the home position; closed contours may start at any vertex.
     #[default]
     ShortestTravel,
+    /// VisiCut "FILE": the paths in the order of the drawing, unsorted.
+    File,
+    /// VisiCut "NEAREST": from the first path always on to the nearest one,
+    /// regardless of inner contours.
+    Nearest,
+    /// VisiCut "SMALLEST_FIRST": by bounding box area, smallest first.
+    SmallestFirst,
+}
+
+impl CutOrder {
+    /// Menu order: the two inner-first orders, then VisiCut's other ones.
+    pub const ALL: [CutOrder; 5] = [
+        CutOrder::ShortestTravel,
+        CutOrder::VisiCut,
+        CutOrder::File,
+        CutOrder::Nearest,
+        CutOrder::SmallestFirst,
+    ];
 }
 
 /// Project files without the field predate "Kürzeste Leerfahrten" and keep
@@ -211,6 +229,14 @@ pub struct JobStep {
     /// machine table; used by the engrave shift test pattern.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub engrave_shift_px: i32,
+    /// Cutting and marking: only the boundary of the area all objects cover
+    /// together (VisiCut's `useOutline`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub outline: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn is_zero(value: &i32) -> bool {
@@ -230,6 +256,7 @@ impl JobStep {
             raster: RasterSettings::default(),
             additional: Vec::new(),
             engrave_shift_px: 0,
+            outline: false,
         }
     }
 

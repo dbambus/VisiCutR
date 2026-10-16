@@ -3229,13 +3229,7 @@ fn number(
     suffix: &str,
 ) -> bool {
     form::row(ui, label, |ui| {
-        ui.add(
-            egui::DragValue::new(value)
-                .speed(0.1)
-                .range(range)
-                .suffix(suffix),
-        )
-        .changed()
+        form::unit_value(ui, value, range, suffix.trim(), 110.0).changed()
     })
 }
 
@@ -3388,11 +3382,8 @@ impl eframe::App for VisiCutRust {
                     )
                     .show(ctx, |ui| {
                         commands.extend(self.device_card(ui));
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            egui::Frame::new()
-                                .inner_margin(egui::Margin::symmetric(10, 0))
-                                .show(ui, |ui| commands.extend(self.sidebar(ui)));
-                        });
+                        egui::ScrollArea::vertical()
+                            .show(ui, |ui| commands.extend(self.sidebar(ui)));
                     });
                 egui::CentralPanel::default()
                     .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(0.0))

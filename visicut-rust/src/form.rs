@@ -8,8 +8,10 @@ use eframe::egui::{self, Color32, CornerRadius, RichText, Stroke, Vec2};
 pub const ACCENT: Color32 = Color32::from_rgb(0, 174, 66);
 /// Dunkle Reiterleiste oben.
 pub const TOPBAR: Color32 = Color32::from_rgb(38, 46, 48);
-/// Hintergrund der Seitenleiste; die Karten heben sich weiß davon ab.
-pub const SIDEBAR: Color32 = Color32::from_gray(236);
+/// Hintergrund der Seitenleiste (weiß wie in Bambu Studio).
+pub const SIDEBAR: Color32 = Color32::WHITE;
+/// Kopfleisten der Bereiche.
+const HEADER: Color32 = Color32::from_gray(245);
 /// Hintergrund hinter dem Arbeitsbett.
 pub const CANVAS: Color32 = Color32::from_gray(226);
 const CARD_STROKE: Color32 = Color32::from_gray(218);
@@ -47,14 +49,107 @@ pub fn apply_style(ctx: &egui::Context) {
     });
 }
 
-/// Abschnitt mit kleiner grauer Überschrift und Karte darunter.
+/// Bereich wie „Process“ in Bambu Studio: graue Kopfleiste über die volle
+/// Breite, darunter der Inhalt mit Rand.
 pub fn section<R>(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    ui.add_space(6.0);
+    panel_header(ui, title, |_| {});
+    egui::Frame::new()
+        .inner_margin(egui::Margin {
+            left: 14,
+            right: 14,
+            top: 8,
+            bottom: 10,
+        })
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add(ui)
+        })
+        .inner
+}
+
+/// Gruppentitel wie „Layer height ———“: fett, rechts eine dünne Linie.
+pub fn group(ui: &mut egui::Ui, title: &str) {
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
-        ui.add_space(4.0);
-        ui.label(RichText::new(title).strong().color(Color32::from_gray(90)));
+        ui.label(
+            RichText::new(title)
+                .strong()
+                .size(13.5)
+                .color(Color32::from_gray(30)),
+        );
+        let (rect, _) = ui.allocate_exact_size(
+            Vec2::new(ui.available_width(), ui.spacing().interact_size.y),
+            egui::Sense::hover(),
+        );
+        ui.painter()
+            .hline(rect.x_range(), rect.center().y, Stroke::new(1.0, DIVIDER));
     });
-    card(ui, add)
+}
+
+/// Zahlenfeld wie in Bambu Studio: feste Breite, Einheit grau rechts im Feld.
+pub fn unit_value<N: egui::emath::Numeric>(
+    ui: &mut egui::Ui,
+    value: &mut N,
+    range: std::ops::RangeInclusive<N>,
+    unit: &str,
+    width: f32,
+) -> egui::Response {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), egui::Sense::hover());
+    let unit_galley = ui.painter().layout_no_wrap(
+        unit.to_owned(),
+        egui::FontId::proportional(12.0),
+        Color32::from_gray(120),
+    );
+    let field = egui::Rect::from_min_max(
+        rect.min + Vec2::new(1.0, 1.0),
+        egui::pos2(
+            rect.right() - unit_galley.size().x - 10.0,
+            rect.bottom() - 1.0,
+        ),
+    );
+    let response = ui
+        .scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
+            // Den Rahmen zeichnet das Feld selbst.
+            let visuals = &mut ui.visuals_mut().widgets;
+            for widget in [
+                &mut visuals.inactive,
+                &mut visuals.hovered,
+                &mut visuals.active,
+            ] {
+                widget.bg_stroke = Stroke::NONE;
+                widget.weak_bg_fill = Color32::TRANSPARENT;
+                widget.bg_fill = Color32::TRANSPARENT;
+            }
+            ui.add_sized(
+                field.size(),
+                egui::DragValue::new(value)
+                    .speed(0.1)
+                    .range(range)
+                    .max_decimals(2),
+            )
+        })
+        .inner;
+    let active = response.hovered() || response.has_focus() || response.dragged();
+    ui.painter().rect_stroke(
+        rect,
+        3.0,
+        Stroke::new(
+            1.0,
+            if active {
+                ACCENT
+            } else {
+                Color32::from_gray(205)
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    let unit_pos = egui::pos2(
+        rect.right() - unit_galley.size().x - 7.0,
+        rect.center().y - unit_galley.size().y / 2.0,
+    );
+    ui.painter()
+        .galley(unit_pos, unit_galley, Color32::from_gray(120));
+    response
 }
 
 /// Weiße, abgerundete Karte über die volle Breite.
@@ -108,8 +203,8 @@ pub fn divider(ui: &mut egui::Ui) {
         .hline(rect.x_range(), rect.center().y, Stroke::new(1.0, DIVIDER));
 }
 
-/// Segmentierte Auswahl über die volle Breite; liefert die neu gewählte
-/// Option.
+/// Umschalter wie „Global / Objects“ in Bambu Studio: graue Pille, die
+/// gewählte Option grün; liefert die neu gewählte Option.
 pub fn segmented<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
     current: T,
@@ -117,33 +212,30 @@ pub fn segmented<T: PartialEq + Copy>(
 ) -> Option<T> {
     let mut chosen = None;
     egui::Frame::new()
-        .fill(Color32::from_gray(228))
-        .corner_radius(7.0)
+        .fill(Color32::from_gray(232))
+        .corner_radius(13.0)
         .inner_margin(2.0)
         .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
+            ui.spacing_mut().item_spacing.x = 0.0;
             let count = options.len().max(1) as f32;
-            let width = (ui.available_width() - 2.0 * (count - 1.0)) / count;
+            let width = ui.available_width() / count;
             ui.horizontal(|ui| {
                 for &(value, title) in options {
                     let selected = value == current;
-                    let button = egui::Button::new(RichText::new(title).color(if selected {
-                        Color32::from_gray(20)
-                    } else {
-                        Color32::from_gray(80)
-                    }))
-                    .fill(if selected {
+                    let text = RichText::new(title).color(if selected {
                         Color32::WHITE
                     } else {
-                        Color32::TRANSPARENT
-                    })
-                    .stroke(if selected {
-                        Stroke::new(1.0, Color32::from_gray(200))
-                    } else {
-                        Stroke::NONE
-                    })
-                    .corner_radius(5.0)
-                    .truncate();
+                        Color32::from_gray(90)
+                    });
+                    let button = egui::Button::new(if selected { text.strong() } else { text })
+                        .fill(if selected {
+                            ACCENT
+                        } else {
+                            Color32::TRANSPARENT
+                        })
+                        .stroke(Stroke::NONE)
+                        .corner_radius(11.0)
+                        .truncate();
                     if ui.add_sized([width, 22.0], button).clicked() && !selected {
                         chosen = Some(value);
                     }
@@ -153,7 +245,8 @@ pub fn segmented<T: PartialEq + Copy>(
     chosen
 }
 
-/// Farbige Auswahlfläche wie der Verfahrenswähler unter macOS.
+/// Reiter mit farbiger Unterstreichung wie „Quality · Strength · Speed“ in
+/// Bambu Studio; gewählt in der Farbe des Verfahrens.
 pub fn tinted_choice(
     ui: &mut egui::Ui,
     title: &str,
@@ -161,20 +254,31 @@ pub fn tinted_choice(
     selected: bool,
     width: f32,
 ) -> bool {
-    let alpha = |a: f32| {
-        Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (a * 255.0) as u8)
-    };
-    let text = RichText::new(title).size(12.0).color(color);
+    let text = RichText::new(title).size(13.0).color(if selected {
+        color
+    } else {
+        Color32::from_gray(110)
+    });
     // Feste Breite: längere Übersetzungen dürfen die Seitenleiste nicht verbreitern.
-    ui.add_sized(
+    ui.spacing_mut().button_padding.x = 1.0;
+    let response = ui.add_sized(
         [width, 30.0],
         egui::Button::new(if selected { text.strong() } else { text })
-            .fill(alpha(if selected { 0.18 } else { 0.04 }))
-            .stroke(Stroke::new(1.0, alpha(if selected { 0.8 } else { 0.2 })))
-            .corner_radius(6.0)
-            .wrap(),
-    )
-    .clicked()
+            .fill(Color32::TRANSPARENT)
+            .stroke(Stroke::NONE)
+            .truncate(),
+    );
+    let rect = response.rect;
+    let line = if selected {
+        Stroke::new(3.0, color)
+    } else if response.hovered() {
+        Stroke::new(1.0, color.gamma_multiply(0.5))
+    } else {
+        Stroke::NONE
+    };
+    ui.painter()
+        .hline(rect.x_range().shrink(6.0), rect.bottom() - 1.5, line);
+    response.clicked()
 }
 
 /// Hervorgehobene Schaltfläche (wie `.borderedProminent`).
@@ -232,21 +336,25 @@ pub fn top_button(ui: &mut egui::Ui, enabled: bool, title: &str) -> egui::Respon
 /// Kopfzeile eines Seitenleisten-Bereichs wie „Printer“ / „Process“ in
 /// Bambu Studio: graue Leiste über die volle Breite mit Titel.
 pub fn panel_header(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui)) {
-    egui::Frame::new()
-        .fill(Color32::from_gray(246))
-        .inner_margin(egui::Margin::symmetric(10, 6))
+    let response = egui::Frame::new()
+        .fill(HEADER)
+        .inner_margin(egui::Margin::symmetric(12, 7))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(title)
-                        .size(14.0)
-                        .strong()
-                        .color(Color32::from_gray(40)),
+                        .size(14.5)
+                        .color(Color32::from_gray(25)),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), add);
             });
-        });
+        })
+        .response;
+    let rect = response.rect;
+    let stroke = Stroke::new(1.0, DIVIDER);
+    ui.painter().hline(rect.x_range(), rect.top(), stroke);
+    ui.painter().hline(rect.x_range(), rect.bottom(), stroke);
 }
 
 /// Auswahlfeld wie in Bambu Studio: dünner heller Rahmen, Winkel links vor
@@ -291,7 +399,22 @@ impl Dropdown {
         add: impl FnOnce(&mut egui::Ui) -> R,
     ) -> egui::InnerResponse<Option<R>> {
         let id = ui.make_persistent_id(self.id);
-        let width = self.width.unwrap_or(ui.spacing().combo_width);
+        // Ohne feste Breite so breit wie der Text (mindestens `combo_width`).
+        let natural = self
+            .text
+            .clone()
+            .into_galley(
+                ui,
+                Some(egui::TextWrapMode::Extend),
+                f32::INFINITY,
+                egui::TextStyle::Button,
+            )
+            .size()
+            .x
+            + 35.0;
+        let width = self
+            .width
+            .unwrap_or_else(|| natural.max(ui.spacing().combo_width));
         let height = ui.spacing().interact_size.y.max(24.0);
         let (rect, response) =
             ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::click());

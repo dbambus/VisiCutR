@@ -943,5 +943,6 @@
   "Vorschau": "Voorbeeld",
   "heute": "vandaag",
   "vor {days} Tagen": "{days} dagen geleden",
-  "{added} LTT iLaser 4000 von „{name}“ importiert": "{added} LTT iLaser 4000 geïmporteerd van ‘{name}’"
+  "{added} LTT iLaser 4000 von „{name}“ importiert": "{added} LTT iLaser 4000 geïmporteerd van ‘{name}’",
+  "Leistung & Tempo": "Vermogen en snelheid"
 }

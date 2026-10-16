@@ -459,9 +459,8 @@ impl Document {
 fn operation_selector(ui: &mut egui::Ui, project: &mut Project) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 5.0;
-        let count = Operation::ALL.len() as f32;
-        let width = (ui.available_width() - 5.0 * (count - 1.0)) / count;
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let width = ui.available_width() / Operation::ALL.len() as f32;
         for candidate in Operation::ALL {
             let selected = project.operation == candidate;
             let color = crate::preview_ui::operation_color(candidate);
@@ -555,14 +554,7 @@ fn profiled(
         egui::RichText::new(label)
     };
     crate::form::row(ui, text, |ui| {
-        changed |= ui
-            .add(
-                egui::DragValue::new(value)
-                    .speed(0.1)
-                    .range(range)
-                    .suffix(" %"),
-            )
-            .changed();
+        changed |= crate::form::unit_value(ui, value, range, "%", 110.0).changed();
         if let Some(p) = profile.filter(|_| deviates)
             && ui
                 .add(egui::Button::new(egui::RichText::new("⟳").color(PROFILE)).frame(false))
@@ -586,6 +578,7 @@ fn parameters(
     passes: &mut u32,
     profile: Option<&MaterialProfile>,
 ) -> bool {
+    crate::form::group(ui, tr("Leistung & Tempo"));
     let mut changed = profiled(
         ui,
         tr("Leistung"),
@@ -601,9 +594,7 @@ fn parameters(
         profile.map(|p| p.speed_percent),
     );
     crate::form::row(ui, tr("Durchgänge"), |ui| {
-        changed |= ui
-            .add(egui::DragValue::new(passes).range(1..=100))
-            .changed();
+        changed |= crate::form::unit_value(ui, passes, 1..=100, "", 110.0).changed();
     });
     changed
 }

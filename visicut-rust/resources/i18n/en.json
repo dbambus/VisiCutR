@@ -943,5 +943,6 @@
   "Vorschau": "Preview",
   "heute": "today",
   "vor {days} Tagen": "{days} days ago",
-  "{added} LTT iLaser 4000 von „{name}“ importiert": "{added} LTT iLaser 4000 imported from “{name}”"
+  "{added} LTT iLaser 4000 von „{name}“ importiert": "{added} LTT iLaser 4000 imported from “{name}”",
+  "Leistung & Tempo": "Power & speed"
 }

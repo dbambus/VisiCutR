@@ -254,8 +254,26 @@ fn part_summary(project: &Project, index: usize) -> (&str, f32, f32) {
     (&part.name, part.width_mm, part.height_mm)
 }
 
+/// Reiter der Hauptleiste wie in Bambu Studio.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Page {
+    Prepare,
+    Preview,
+    Settings,
+}
+
+/// Bereich im Reiter „Einstellungen“.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SettingsPage {
+    Devices,
+    Materials,
+    General,
+}
+
 struct VisiCutRust {
     project: Project,
+    page: Page,
+    settings_page: SettingsPage,
     /// Textur des gewählten Teils.
     texture: Option<egui::TextureHandle>,
     /// Texturen der übrigen Teile, parallel zu `project.parts`.
@@ -300,8 +318,8 @@ struct VisiCutRust {
     confirm_clear_cache: Option<usize>,
     confirm_send: Option<PreparedJob>,
     preview: preview_ui::PreviewUi,
-    /// „Vorschau & Zeit“ (Menü, Werkzeugleiste, Strg+Umschalt+P) setzt dieses
-    /// Feld; das Fenster liest und schließt es.
+    /// „Vorschau & Zeit“ (Menü, Reiterleiste) setzt dieses Feld; `update`
+    /// berechnet die Vorschau und wechselt in den Reiter „Vorschau“.
     show_preview: bool,
     send_result: Option<std::sync::mpsc::Receiver<Result<Vec<String>, String>>>,
     devices: devices_ui::DeviceUi,
@@ -368,6 +386,8 @@ impl VisiCutRust {
             confirm_clear_cache: None,
             confirm_send: None,
             show_preview: false,
+            page: Page::Prepare,
+            settings_page: SettingsPage::Devices,
             preview: preview_ui::PreviewUi::default(),
             send_result: None,
             devices,
@@ -412,6 +432,17 @@ impl VisiCutRust {
             app.capture = arguments
                 .get(index + 1)
                 .map(|path| (PathBuf::from(path), 0));
+        }
+        // Reiter für die Aufnahme: `--page preview|materials|general|devices`.
+        #[cfg(feature = "screenshot")]
+        if let Some(index) = arguments.iter().position(|argument| argument == "--page") {
+            match arguments.get(index + 1).map(String::as_str) {
+                Some("preview") => app.show_preview = true,
+                Some("devices") => app.show_settings(SettingsPage::Devices),
+                Some("materials") => app.show_settings(SettingsPage::Materials),
+                Some("general") => app.show_settings(SettingsPage::General),
+                _ => {}
+            }
         }
         if arguments
             .first()
@@ -1274,10 +1305,222 @@ impl VisiCutRust {
         self.status = tr("Job wird an den Lasercutter übertragen …").into();
     }
 
-    /// Hook für die Materialbibliothek aus jobs_ui.rs: Dort fehlt noch eine
-    /// öffentliche Methode zum Öffnen des Editors (z. B. `open_library()`).
-    fn open_material_library(&mut self) {
-        self.jobs.open_library();
+    fn show_settings(&mut self, page: SettingsPage) {
+        self.page = Page::Settings;
+        self.settings_page = page;
+    }
+
+    /// Reiterwechsel; „Vorschau“ berechnet einen veralteten Auftrag neu.
+    fn switch_page(&mut self, ctx: &egui::Context, page: Page) {
+        self.page = page;
+        if page == Page::Preview && self.preview.outdated() && !self.project.svg.is_empty() {
+            self.preview.request(ctx, &self.project, &mut self.status);
+        }
+    }
+
+    /// Dunkle Leiste wie in Bambu Studio: Öffnen und Sichern, die Reiter
+    /// „Vorbereiten · Vorschau · Einstellungen“, rechts Berechnen und Senden.
+    fn top_bar(&mut self, ui: &mut egui::Ui) -> Option<Command> {
+        let mut clicked = None;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            for (command, icon) in [(Command::Open, "📂"), (Command::Save, "💾")] {
+                let hover = command.title().trim_end_matches(" …").to_owned();
+                if form::top_button(ui, self.enabled(command), icon)
+                    .on_hover_text(hover)
+                    .clicked()
+                {
+                    clicked = Some(command);
+                }
+            }
+            ui.add_space(12.0);
+            for (page, title) in [
+                (Page::Prepare, format!("✂  {}", tr("Vorbereiten"))),
+                (Page::Preview, format!("👁  {}", tr("Vorschau"))),
+                (Page::Settings, format!("⚙  {}", tr("Einstellungen"))),
+            ] {
+                if form::top_tab(ui, self.page == page, &title).clicked() {
+                    let ctx = ui.ctx().clone();
+                    self.switch_page(&ctx, page);
+                }
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                ui.add_space(4.0);
+                if ui
+                    .add_enabled(
+                        self.enabled(Command::Send),
+                        form::primary_button(&format!("✈ {}", tr("Senden"))),
+                    )
+                    .on_hover_text(Command::Send.title().trim_end_matches(" …"))
+                    .clicked()
+                {
+                    clicked = Some(Command::Send);
+                }
+                if ui
+                    .add_enabled(
+                        !self.project.svg.is_empty(),
+                        egui::Button::new(tr("Vorschau & Zeit berechnen"))
+                            .min_size(Vec2::new(0.0, 28.0)),
+                    )
+                    .on_hover_text(tr(
+                        "Auftragsvorschau, Zeitschätzung und Simulation (Strg/⌘+Umschalt+P)",
+                    ))
+                    .clicked()
+                {
+                    clicked = Some(Command::Preview);
+                }
+            });
+        });
+        clicked
+    }
+
+    /// Reiter „Einstellungen“: Bereiche links, Inhalt rechts.
+    fn settings_tab(&mut self, ctx: &egui::Context) {
+        egui::SidePanel::left("settings_nav")
+            .resizable(false)
+            .exact_width(200.0)
+            .frame(
+                egui::Frame::side_top_panel(&ctx.style())
+                    .fill(form::SIDEBAR)
+                    .inner_margin(egui::Margin::symmetric(8, 10)),
+            )
+            .show(ctx, |ui| {
+                for (page, title) in [
+                    (SettingsPage::Devices, tr("Lasercutter")),
+                    (SettingsPage::Materials, tr("Materialien")),
+                    (SettingsPage::General, tr("Allgemein")),
+                ] {
+                    let text = egui::RichText::new(title).size(14.0);
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), 30.0],
+                            egui::Button::selectable(self.settings_page == page, text),
+                        )
+                        .clicked()
+                    {
+                        self.settings_page = page;
+                    }
+                }
+            });
+        egui::CentralPanel::default()
+            .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(16.0))
+            .show(ctx, |ui| match self.settings_page {
+                SettingsPage::Devices => {
+                    ui.heading(tr("Lasercutter"));
+                    ui.add_space(6.0);
+                    self.devices
+                        .settings_page(ui, &mut self.project, &mut self.status);
+                }
+                SettingsPage::Materials => {
+                    ui.heading(tr("Materialbibliothek"));
+                    ui.add_space(6.0);
+                    self.jobs.library_page(ui, &mut self.status);
+                }
+                SettingsPage::General => self.general_page(ui),
+            });
+    }
+
+    /// Einstellungen → Allgemein: Update-Prüfung und Geräteliste übertragen.
+    fn general_page(&mut self, ui: &mut egui::Ui) {
+        ui.heading(tr("Allgemein"));
+        ui.add_space(6.0);
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.set_max_width(620.0);
+            form::section(ui, tr("Updates"), |ui| {
+                let mut auto = !self.settings.update_check_disabled;
+                if ui
+                    .checkbox(&mut auto, tr("Alle 14 Tage nach Updates suchen"))
+                    .on_hover_text(tr("Fragt bei GitHub nach einem neuen Release von VisiCutRust; es wird nichts automatisch installiert."))
+                    .changed()
+                {
+                    self.settings.update_check_disabled = !auto;
+                    self.save_settings();
+                }
+                form::row(ui, tr("Installiert"), |ui| {
+                    ui.label(visicut_core::update::current_version())
+                });
+                let last = self.settings.last_update_check;
+                let days = visicut_core::update::now_secs().saturating_sub(last) / 86_400;
+                form::row(ui, tr("Zuletzt geprüft"), |ui| {
+                    ui.label(match (last, days) {
+                        (0, _) => tr("noch nie").to_owned(),
+                        (_, 0) => tr("heute").to_owned(),
+                        (_, days) => tr!("vor {days} Tagen", days = days),
+                    })
+                });
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            self.update_check.is_none(),
+                            egui::Button::new(tr("Jetzt nach Updates suchen")),
+                        )
+                        .clicked()
+                    {
+                        self.start_update_check(true);
+                    }
+                    if self.update_check.is_some() {
+                        ui.spinner();
+                    }
+                });
+            });
+            form::section(ui, tr("Lasercutter"), |ui| {
+                self.devices
+                    .transfer(ui, &mut self.project, &mut self.status);
+                form::caption(ui, tr("Importieren liest VisiCut-Gerätedateien, .vcsettings-Archive und eigene Exporte; Herunterladen holt die Einstellungen eines Labors. Neue Geräte werden sofort gesichert."));
+            });
+        });
+    }
+
+    /// Kopf der Seitenleiste „Vorbereiten“: aktiver Lasercutter wie die
+    /// Druckerkarte in Bambu Studio.
+    fn device_card(&mut self, ui: &mut egui::Ui) -> Option<Command> {
+        let mut clicked = None;
+        form::panel_header(ui, tr("Lasercutter"), |ui| {
+            if ui
+                .small_button("⚙")
+                .on_hover_text(tr("Lasercutter einrichten"))
+                .clicked()
+            {
+                clicked = Some(Command::Devices);
+            }
+        });
+        egui::Frame::new()
+            .inner_margin(egui::Margin::symmetric(10, 4))
+            .show(ui, |ui| {
+                form::card(ui, |ui| {
+                    let current = self.devices.store.selected;
+                    let names: Vec<String> = self
+                        .devices
+                        .store
+                        .devices
+                        .iter()
+                        .map(|d| d.name.clone())
+                        .collect();
+                    egui::ComboBox::from_id_salt("active_device")
+                        .width(ui.available_width() - 8.0)
+                        .selected_text(egui::RichText::new(&names[current]).strong())
+                        .show_ui(ui, |ui| {
+                            for (index, name) in names.iter().enumerate() {
+                                if ui.selectable_label(index == current, name).clicked() {
+                                    clicked = Some(Command::Device(index));
+                                }
+                            }
+                        });
+                    let device = self.devices.device();
+                    form::caption(
+                        ui,
+                        format!(
+                            "{}:{} · {} × {} mm",
+                            device.hostname,
+                            device.port,
+                            self.project.bed_width_mm,
+                            self.project.bed_height_mm
+                        ),
+                    );
+                });
+            });
+        clicked
     }
 
     fn enabled(&self, command: Command) -> bool {
@@ -1342,14 +1585,14 @@ impl VisiCutRust {
                 workspace::center(&mut self.project);
                 self.dirty = true;
             }
-            Command::Devices => self.devices.open_manager(),
+            Command::Devices => self.show_settings(SettingsPage::Devices),
             Command::ToggleGrid => self.show_grid = !self.show_grid,
             Command::ToggleCamera => self.devices.toggle_camera(&self.project),
             Command::RefreshCamera => self.devices.refresh_camera(&self.project),
             Command::ZoomIn => self.zoom = workspace::zoom_in(self.zoom),
             Command::ZoomOut => self.zoom = workspace::zoom_out(self.zoom),
             Command::ZoomFit => self.zoom = 1.0,
-            Command::Materials => self.open_material_library(),
+            Command::Materials => self.show_settings(SettingsPage::Materials),
             Command::Preview => self.show_preview = true,
             Command::Send => self.send(),
             Command::Text => self.compose.open(compose_ui::Tool::Text, &self.project),
@@ -1657,46 +1900,6 @@ impl VisiCutRust {
                 });
                 ui.separator();
                 self.menu_item(ui, Command::Send, &mut clicked);
-            });
-        });
-        clicked
-    }
-
-    /// Werkzeugleiste wie unter macOS: Öffnen und Sichern links, die
-    /// Auftragsbefehle rechts.
-    fn toolbar(&self, ui: &mut egui::Ui) -> Option<Command> {
-        let mut clicked = None;
-        let mut tool = |ui: &mut egui::Ui, command: Command, text: &str| {
-            let mut hover = command.title().trim_end_matches(" …").to_owned();
-            if let Some(shortcut) = command.shortcut() {
-                hover += &format!(" ({})", ui.ctx().format_shortcut(&shortcut));
-            }
-            if ui
-                .add_enabled(
-                    self.enabled(command),
-                    egui::Button::new(text).min_size(Vec2::new(0.0, 26.0)),
-                )
-                .on_hover_text(hover)
-                .clicked()
-            {
-                clicked = Some(command);
-            }
-        };
-        ui.horizontal(|ui| {
-            tool(ui, Command::Open, &format!("📂 {}", tr("Öffnen")));
-            tool(ui, Command::Save, &format!("💾 {}", tr("Sichern")));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                tool(
-                    ui,
-                    Command::Send,
-                    &format!("✈ {}", tr("An Lasercutter senden")),
-                );
-                tool(ui, Command::Export, &format!("📤 {}", tr("Exportieren")));
-                tool(
-                    ui,
-                    Command::Preview,
-                    &format!("👁 {}", tr("Vorschau & Zeit")),
-                );
             });
         });
         clicked
@@ -2926,6 +3129,7 @@ impl VisiCutRust {
 
     #[cfg(feature = "screenshot")]
     fn capture(&mut self, ctx: &egui::Context) {
+        let computing = self.preview.computing();
         let Some((path, frames)) = &mut self.capture else {
             return;
         };
@@ -2953,7 +3157,10 @@ impl VisiCutRust {
             self.allow_close = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         } else {
-            *frames += 1;
+            // Eine laufende Vorschauberechnung abwarten.
+            if !computing {
+                *frames += 1;
+            }
             if *frames == 10 {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
             }
@@ -3083,7 +3290,6 @@ impl eframe::App for VisiCutRust {
             self.drop_files(ctx, dropped);
         }
         self.keyboard(ctx);
-        self.jobs.windows(ctx, &mut self.status);
         if let Some(object) = self.jobs.take_deleted_object() {
             self.delete_objects(ctx, &[object]);
         }
@@ -3098,14 +3304,9 @@ impl eframe::App for VisiCutRust {
         }
         self.poll_update(ctx);
         self.update_window(ctx);
-        let mut auto_update = !self.settings.update_check_disabled;
-        let device_action =
-            self.devices
-                .windows(ctx, &mut self.project, &mut self.status, &mut auto_update);
-        if auto_update == self.settings.update_check_disabled {
-            self.settings.update_check_disabled = !auto_update;
-            self.save_settings();
-        }
+        let device_action = self
+            .devices
+            .windows(ctx, &mut self.project, &mut self.status);
         match device_action {
             Some(devices_ui::Action::CalibrationPage(points)) => {
                 self.request(ctx, Replace::Calibration(points));
@@ -3113,7 +3314,6 @@ impl eframe::App for VisiCutRust {
             Some(devices_ui::Action::ShiftPattern(power)) => {
                 self.request(ctx, Replace::ShiftPattern(power));
             }
-            Some(devices_ui::Action::CheckUpdate) => self.start_update_check(true),
             None => {}
         }
         if self.show_preview {
@@ -3122,13 +3322,20 @@ impl eframe::App for VisiCutRust {
         }
         let mut commands = Vec::new();
         let send_enabled = self.sendable && !self.busy();
-        match self
-            .preview
-            .windows(ctx, &self.project, &mut self.status, send_enabled)
-        {
-            Some(preview_ui::Action::Send) => commands.push(Command::Send),
-            Some(preview_ui::Action::Export) => commands.push(Command::Export),
-            None => {}
+        self.preview.update(
+            ctx,
+            &self.project,
+            &mut self.status,
+            self.page == Page::Preview,
+        );
+        // Eine angeforderte Vorschau (Menü, Kürzel, Knopf) zeigt ihren Reiter.
+        if self.preview.open {
+            self.preview.open = false;
+            self.page = Page::Preview;
+        }
+        if self.page != Page::Settings {
+            self.devices.close_manager_if_clean();
+            self.jobs.close_library_if_clean();
         }
         if self.preview.single_job != self.settings.single_job {
             self.settings.single_job = self.preview.single_job;
@@ -3137,12 +3344,18 @@ impl eframe::App for VisiCutRust {
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             commands.extend(self.menu_bar(ui));
         });
-        egui::TopBottomPanel::top("toolbar")
+        egui::TopBottomPanel::top("tabs")
             .frame(
-                egui::Frame::side_top_panel(&ctx.style())
-                    .inner_margin(egui::Margin::symmetric(10, 6)),
+                egui::Frame::new()
+                    .fill(form::TOPBAR)
+                    .inner_margin(egui::Margin {
+                        left: 6,
+                        right: 10,
+                        top: 0,
+                        bottom: 0,
+                    }),
             )
-            .show(ctx, |ui| commands.extend(self.toolbar(ui)));
+            .show(ctx, |ui| commands.extend(self.top_bar(ui)));
         egui::TopBottomPanel::bottom("status")
             .frame(
                 egui::Frame::side_top_panel(&ctx.style())
@@ -3163,20 +3376,44 @@ impl eframe::App for VisiCutRust {
                     }
                 });
             });
-        egui::SidePanel::left("settings")
-            .resizable(false)
-            .exact_width(340.0)
-            .frame(
-                egui::Frame::side_top_panel(&ctx.style())
-                    .fill(form::SIDEBAR)
-                    .inner_margin(egui::Margin::symmetric(10, 4)),
-            )
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| commands.extend(self.sidebar(ui)));
-            });
-        egui::CentralPanel::default()
-            .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(0.0))
-            .show(ctx, |ui| commands.extend(self.canvas(ui)));
+        match self.page {
+            Page::Prepare => {
+                egui::SidePanel::left("settings")
+                    .resizable(false)
+                    .exact_width(340.0)
+                    .frame(
+                        egui::Frame::side_top_panel(&ctx.style())
+                            .fill(form::SIDEBAR)
+                            .inner_margin(0.0),
+                    )
+                    .show(ctx, |ui| {
+                        commands.extend(self.device_card(ui));
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            egui::Frame::new()
+                                .inner_margin(egui::Margin::symmetric(10, 0))
+                                .show(ui, |ui| commands.extend(self.sidebar(ui)));
+                        });
+                    });
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(0.0))
+                    .show(ctx, |ui| commands.extend(self.canvas(ui)));
+            }
+            Page::Preview => {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(0.0))
+                    .show(ctx, |ui| {
+                        match self
+                            .preview
+                            .page(ui, &self.project, &mut self.status, send_enabled)
+                        {
+                            Some(preview_ui::Action::Send) => commands.push(Command::Send),
+                            Some(preview_ui::Action::Export) => commands.push(Command::Export),
+                            None => {}
+                        }
+                    });
+            }
+            Page::Settings => self.settings_tab(ctx),
+        }
         for command in commands {
             self.run(ctx, command);
         }

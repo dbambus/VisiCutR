@@ -1338,7 +1338,10 @@ impl JobUi {
         }
     }
 
-    pub fn windows(&mut self, ctx: &egui::Context, status: &mut String) {
+    /// Seite „Einstellungen → Materialien“; Änderungen bleiben ein Entwurf
+    /// bis „Sichern“.
+    pub fn library_page(&mut self, ui: &mut egui::Ui, status: &mut String) {
+        self.open_library();
         let Some(Editor {
             mut draft,
             mut selected,
@@ -1346,13 +1349,9 @@ impl JobUi {
         else {
             return;
         };
-        let mut open = true;
-        let mut keep = true;
-        egui::Window::new(tr("Materialbibliothek"))
-            .id(egui::Id::new("material_library"))
-            .open(&mut open)
-            .default_size([700.0, 460.0])
-            .show(ctx, |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt("material_library")
+            .show(ui, |ui| {
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
                         ui.set_width(190.0);
@@ -1551,13 +1550,19 @@ impl JobUi {
                             Err(e) => *status = e,
                         }
                     }
-                    if ui.button(tr("Schließen")).clicked() {
-                        keep = false;
-                    }
                 });
             });
-        if open && keep {
-            self.editor = Some(Editor { draft, selected });
+        self.editor = Some(Editor { draft, selected });
+    }
+
+    /// Verwirft den Entwurf der Bibliothek, wenn er nichts Ungesichertes enthält.
+    pub fn close_library_if_clean(&mut self) {
+        if self
+            .editor
+            .as_ref()
+            .is_some_and(|e| e.draft == self.library.materials)
+        {
+            self.editor = None;
         }
     }
 }

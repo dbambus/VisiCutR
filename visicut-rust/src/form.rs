@@ -1,11 +1,13 @@
-//! Bausteine für die Seitenleiste im Stil der macOS-Oberfläche: Abschnitte
-//! als abgerundete Karten mit Überschrift, Zeilen mit Bezeichnung links und
-//! Bedienelement rechts, segmentierte Auswahl.
+//! Bausteine der Oberfläche im Stil von Bambu Studio: dunkle Reiterleiste,
+//! grüne Akzente, Abschnitte als Karten mit Überschrift, Zeilen mit
+//! Bezeichnung links und Bedienelement rechts, segmentierte Auswahl.
 
 use eframe::egui::{self, Color32, CornerRadius, RichText, Stroke, Vec2};
 
-/// Akzentfarbe (Systemblau wie unter macOS).
-pub const ACCENT: Color32 = Color32::from_rgb(0, 122, 255);
+/// Akzentfarbe (Grün wie in Bambu Studio).
+pub const ACCENT: Color32 = Color32::from_rgb(0, 174, 66);
+/// Dunkle Reiterleiste oben.
+pub const TOPBAR: Color32 = Color32::from_rgb(38, 46, 48);
 /// Hintergrund der Seitenleiste; die Karten heben sich weiß davon ab.
 pub const SIDEBAR: Color32 = Color32::from_gray(236);
 /// Hintergrund hinter dem Arbeitsbett.
@@ -23,6 +25,8 @@ pub fn apply_style(ctx: &egui::Context) {
         visuals.window_corner_radius = CornerRadius::same(10);
         visuals.menu_corner_radius = CornerRadius::same(8);
         visuals.hyperlink_color = ACCENT;
+        visuals.selection.bg_fill = ACCENT;
+        visuals.selection.stroke = Stroke::new(1.0, Color32::WHITE);
         for widget in [
             &mut visuals.widgets.noninteractive,
             &mut visuals.widgets.inactive,
@@ -175,12 +179,72 @@ pub fn tinted_choice(
 
 /// Hervorgehobene Schaltfläche (wie `.borderedProminent`).
 pub fn prominent(ui: &mut egui::Ui, enabled: bool, title: &str) -> bool {
+    ui.add_enabled(enabled, primary_button(title)).clicked()
+}
+
+/// Grüne Hauptschaltfläche (Bambu Studio „Slice“ / „Print“).
+pub fn primary_button(title: &str) -> egui::Button<'static> {
+    egui::Button::new(
+        RichText::new(title.to_owned())
+            .color(Color32::WHITE)
+            .strong(),
+    )
+    .fill(ACCENT)
+    .stroke(Stroke::NONE)
+    .min_size(Vec2::new(0.0, 28.0))
+}
+
+/// Reiter der dunklen Leiste: gewählt grün hinterlegt, sonst hell auf dunkel.
+pub fn top_tab(ui: &mut egui::Ui, selected: bool, title: &str) -> egui::Response {
+    let text = RichText::new(title).size(15.0).color(if selected {
+        Color32::WHITE
+    } else {
+        Color32::from_gray(215)
+    });
+    ui.add(
+        egui::Button::new(text)
+            .fill(if selected {
+                ACCENT
+            } else {
+                Color32::TRANSPARENT
+            })
+            .stroke(Stroke::NONE)
+            .corner_radius(0.0)
+            .min_size(Vec2::new(150.0, 40.0)),
+    )
+}
+
+/// Schlichte Schaltfläche auf der dunklen Leiste (Öffnen, Sichern …).
+pub fn top_button(ui: &mut egui::Ui, enabled: bool, title: &str) -> egui::Response {
     ui.add_enabled(
         enabled,
-        egui::Button::new(RichText::new(title).color(Color32::WHITE))
-            .fill(ACCENT)
-            .stroke(Stroke::NONE)
-            .min_size(Vec2::new(0.0, 28.0)),
+        egui::Button::new(
+            RichText::new(title)
+                .size(14.0)
+                .color(Color32::from_gray(225)),
+        )
+        .fill(Color32::TRANSPARENT)
+        .stroke(Stroke::NONE)
+        .min_size(Vec2::new(0.0, 40.0)),
     )
-    .clicked()
+}
+
+/// Kopfzeile eines Seitenleisten-Bereichs wie „Printer“ / „Process“ in
+/// Bambu Studio: graue Leiste über die volle Breite mit Titel.
+pub fn panel_header(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::new()
+        .fill(Color32::from_gray(246))
+        .inner_margin(egui::Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(title)
+                        .size(14.0)
+                        .strong()
+                        .color(Color32::from_gray(40)),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), add);
+            });
+        });
 }

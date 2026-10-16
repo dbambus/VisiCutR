@@ -78,8 +78,6 @@ pub enum Action {
     CalibrationPage(Vec<[f64; 2]>),
     /// Open the engrave shift test pattern with this power as a project.
     ShiftPattern(f32),
-    /// Check for a new release now (settings).
-    CheckUpdate,
 }
 
 /// Zeilenversatz-Kalibrierung eines Geräts: Testmuster und Ergebnis.
@@ -279,13 +277,11 @@ impl DeviceUi {
         }
     }
 
-    /// `auto_update`: automatische Update-Prüfung, im Einstellungsfenster schaltbar.
     pub fn windows(
         &mut self,
         ctx: &egui::Context,
         project: &mut Project,
         status: &mut String,
-        auto_update: &mut bool,
     ) -> Option<Action> {
         // Laufende Aktualisierung wie VisiCuts RefreshCameraThread: nach jedem
         // Bild die eingestellte Pause, nach Fehlern länger (ab 10 s).
@@ -320,11 +316,8 @@ impl DeviceUi {
                 _ => self.refresh_camera(project),
             }
         }
-        self.poll_download(ctx, status);
+        self.poll_download(ctx, project, status);
         let mut action = None;
-        if self.manager(ctx, project, status, auto_update) {
-            action = Some(Action::CheckUpdate);
-        }
         if let Some(calibration) = &mut self.calibration {
             let mut close = false;
             let mut apply = None;
@@ -392,8 +385,8 @@ impl DeviceUi {
         );
     }
 
-    /// Übernimmt fertige Downloads in den Entwurf der Verwaltung.
-    fn poll_download(&mut self, ctx: &egui::Context, status: &mut String) {
+    /// Sichert fertige Downloads und übernimmt sie in den Entwurf der Verwaltung.
+    fn poll_download(&mut self, ctx: &egui::Context, project: &mut Project, status: &mut String) {
         let Some((name, receiver)) = &self.download else {
             return;
         };
@@ -409,12 +402,9 @@ impl DeviceUi {
         self.download = None;
         match result {
             Ok(devices) => {
-                self.open_manager();
-                if let Some((draft, editing)) = &mut self.draft {
-                    let added = draft.merge(devices);
-                    *editing = draft.devices.len() - 1;
+                if let Some(added) = self.adopt(devices, project, status) {
                     *status = tr!(
-                        "{added} LTT iLaser 4000 von „{name}“ importiert · zum Übernehmen sichern",
+                        "{added} LTT iLaser 4000 von „{name}“ importiert",
                         added = added,
                         name = name
                     );
@@ -430,24 +420,17 @@ impl DeviceUi {
         }
     }
 
-    /// Einstellungsfenster; `true`, wenn „Jetzt nach Updates suchen“ gewählt wurde.
-    fn manager(
-        &mut self,
-        ctx: &egui::Context,
-        project: &mut Project,
-        status: &mut String,
-        auto_update: &mut bool,
-    ) -> bool {
+    /// Seite „Einstellungen → Lasercutter“: Geräteliste links, das gewählte
+    /// Gerät rechts; Änderungen bleiben ein Entwurf bis „Sichern“.
+    pub fn settings_page(&mut self, ui: &mut egui::Ui, project: &mut Project, status: &mut String) {
+        self.open_manager();
         let Some((mut draft, mut editing)) = self.draft.take() else {
-            return false;
+            return;
         };
-        let mut check_update = false;
-        let mut open = true;
+        let ctx = ui.ctx().clone();
         let mut save = false;
         let mut calibrate = false;
         let mut shift_test = false;
-        let mut download = None;
-        let downloading = self.download.as_ref().map(|(name, _)| name.clone());
         // Ergebnis von „Suchen“: eine Kamera wird übernommen, mehrere zur Wahl.
         if let Some(receiver) = &self.camera_search {
             match receiver.try_recv() {
@@ -471,11 +454,9 @@ impl DeviceUi {
         let searching = self.camera_search.is_some();
         let mut search = false;
         let found = std::mem::take(&mut self.camera_found);
-        egui::Window::new(tr("Lasercutter verwalten"))
-            .id(egui::Id::new("device_manager"))
-            .open(&mut open)
-            .default_size([640.0, 420.0])
-            .show(ctx, |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt("device_manager")
+            .show(ui, |ui| {
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
                         ui.set_width(170.0);
@@ -635,72 +616,7 @@ impl DeviceUi {
                     });
                 });
                 ui.separator();
-                // Allgemein: Update-Prüfung auf neue Releases.
                 ui.horizontal(|ui| {
-                    ui.checkbox(auto_update, tr("Alle 14 Tage nach Updates suchen"))
-                        .on_hover_text(tr("Fragt bei GitHub nach einem neuen Release von VisiCutRust; es wird nichts automatisch installiert."));
-                    check_update = ui.button(tr("Jetzt nach Updates suchen")).clicked();
-                });
-                ui.separator();
-                ui.horizontal(|ui| {
-                    if ui.button(tr("Importieren …")).clicked()
-                        && let Some(path) = rfd::FileDialog::new()
-                            .add_filter(
-                                tr("VisiCut-Einstellungen"),
-                                &["xml", "vcsettings", "zip", "vcrdevices", "json"],
-                            )
-                            .pick_file()
-                    {
-                        match std::fs::read(&path)
-                            .map_err(|e| e.to_string())
-                            .and_then(|b| device::import_bytes(&b))
-                        {
-                            Ok(devices) => {
-                                *status = tr!(
-                                    "{count} LTT iLaser 4000 importiert",
-                                    count = draft.merge(devices)
-                                );
-                                editing = draft.devices.len() - 1;
-                            }
-                            Err(e) => *status = e,
-                        }
-                    }
-                    ui.add_enabled_ui(downloading.is_none(), |ui| {
-                        egui::ComboBox::from_id_salt("labs")
-                            .selected_text(tr("Herunterladen"))
-                            .show_ui(ui, |ui| {
-                                for (name, url) in device::LAB_SETTINGS {
-                                    if ui.selectable_label(false, *name).clicked() {
-                                        download = Some((*name, *url));
-                                    }
-                                }
-                            });
-                    });
-                    if let Some(name) = &downloading {
-                        ui.spinner()
-                            .on_hover_text(tr!("Lädt „{name}“ …", name = name));
-                    }
-                    if ui.button(tr("Exportieren …")).clicked()
-                        && let Some(path) = rfd::FileDialog::new()
-                            .add_filter(tr("VisiCutRust-Lasercutter"), &["vcrdevices"])
-                            .set_file_name("Lasercutter.vcrdevices")
-                            .save_file()
-                    {
-                        *status = match device::export(&path, &draft.devices) {
-                            Ok(omitted) => {
-                                let mut text = tr!(
-                                    "{count} Lasercutter exportiert",
-                                    count = draft.devices.len()
-                                );
-                                if omitted {
-                                    text += " · ";
-                                    text += tr("Kamera-Passwörter wurden nicht exportiert");
-                                }
-                                text
-                            }
-                            Err(e) => e,
-                        };
-                    }
                     if ui
                         .add_enabled(
                             editing != draft.selected,
@@ -755,9 +671,6 @@ impl DeviceUi {
                 best: [shift_calibration::CENTER_BLOCK; 10],
             });
         }
-        if let Some((name, url)) = download {
-            self.start_download(name, url, status);
-        }
         // Die Auswahl bleibt, bis eine neue Suche startet oder das Fenster schließt.
         if search {
             let (tx, rx) = channel();
@@ -766,16 +679,112 @@ impl DeviceUi {
             });
             self.camera_search = Some(rx);
             *status = tr("Suche VisiCam-Kameras im lokalen Netz …").into();
-        } else if open {
+        } else {
             self.camera_found = found;
         }
         if save {
             self.save(draft.clone(), project, status);
         }
-        if open {
-            self.draft = Some((draft, editing));
+        self.draft = Some((draft, editing));
+    }
+
+    /// Verwirft den Entwurf der Verwaltung, wenn er nichts Ungesichertes
+    /// enthält; so zeigt die Seite beim nächsten Öffnen die aktuelle Liste.
+    pub fn close_manager_if_clean(&mut self) {
+        if self
+            .draft
+            .as_ref()
+            .is_some_and(|(draft, _)| *draft == self.store)
+        {
+            self.draft = None;
         }
-        check_update
+    }
+
+    /// Sichert hinzugekommene Geräte sofort und hängt sie auch an einen
+    /// offenen Entwurf an; `None`, wenn das Sichern fehlschlug.
+    fn adopt(
+        &mut self,
+        devices: Vec<LaserDevice>,
+        project: &mut Project,
+        status: &mut String,
+    ) -> Option<usize> {
+        let mut store = self.store.clone();
+        let added = store.merge(devices.clone());
+        if !self.save(store, project, status) {
+            return None;
+        }
+        if let Some((draft, editing)) = &mut self.draft {
+            draft.merge(devices);
+            *editing = draft.devices.len() - 1;
+        }
+        Some(added)
+    }
+
+    /// Importieren, Herunterladen und Exportieren der Geräteliste
+    /// (Einstellungen → Allgemein). Importe werden sofort gesichert.
+    pub fn transfer(&mut self, ui: &mut egui::Ui, project: &mut Project, status: &mut String) {
+        let downloading = self.download.as_ref().map(|(name, _)| name.clone());
+        let mut download = None;
+        ui.horizontal(|ui| {
+            if ui.button(tr("Importieren …")).clicked()
+                && let Some(path) = rfd::FileDialog::new()
+                    .add_filter(
+                        tr("VisiCut-Einstellungen"),
+                        &["xml", "vcsettings", "zip", "vcrdevices", "json"],
+                    )
+                    .pick_file()
+            {
+                match std::fs::read(&path)
+                    .map_err(|e| e.to_string())
+                    .and_then(|b| device::import_bytes(&b))
+                {
+                    Ok(devices) => {
+                        if let Some(count) = self.adopt(devices, project, status) {
+                            *status = tr!("{count} LTT iLaser 4000 importiert", count = count);
+                        }
+                    }
+                    Err(e) => *status = e,
+                }
+            }
+            ui.add_enabled_ui(downloading.is_none(), |ui| {
+                egui::ComboBox::from_id_salt("labs")
+                    .selected_text(tr("Herunterladen"))
+                    .show_ui(ui, |ui| {
+                        for (name, url) in device::LAB_SETTINGS {
+                            if ui.selectable_label(false, *name).clicked() {
+                                download = Some((*name, *url));
+                            }
+                        }
+                    });
+            });
+            if let Some(name) = &downloading {
+                ui.spinner()
+                    .on_hover_text(tr!("Lädt „{name}“ …", name = name));
+            }
+            // Exportiert die gesicherte Liste, nicht den Entwurf.
+            if ui.button(tr("Exportieren …")).clicked()
+                && let Some(path) = rfd::FileDialog::new()
+                    .add_filter(tr("VisiCutRust-Lasercutter"), &["vcrdevices"])
+                    .set_file_name("Lasercutter.vcrdevices")
+                    .save_file()
+            {
+                let devices = &self.store.devices;
+                *status = match device::export(&path, devices) {
+                    Ok(omitted) => {
+                        let mut text = tr!("{count} Lasercutter exportiert", count = devices.len());
+                        if omitted {
+                            text += " · ";
+                            text += tr("Kamera-Passwörter wurden nicht exportiert");
+                        }
+                        text
+                    }
+                    Err(e) => e,
+                };
+            }
+        });
+        if let Some((name, url)) = download {
+            self.start_download(name, url, status);
+        }
     }
 }
 

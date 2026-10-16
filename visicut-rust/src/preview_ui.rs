@@ -71,6 +71,8 @@ enum State {
 }
 
 pub struct PreviewUi {
+    /// Eine Vorschau wurde angefordert; die App zeigt den Reiter „Vorschau“
+    /// und setzt das Feld zurück.
     pub open: bool,
     /// Alle Verfahren in einen LTT-Auftrag (eine Datei) statt einen je
     /// Verfahren; die App speichert die Wahl in den Einstellungen.
@@ -108,7 +110,7 @@ impl PreviewUi {
         }
     }
 
-    /// Opens the dialog and prepares the job unless a current result exists.
+    /// Requests the preview tab and prepares the job unless a current result exists.
     pub fn request(&mut self, ctx: &egui::Context, project: &Project, status: &mut String) {
         self.open = true;
         let current = self.key(project);
@@ -200,15 +202,15 @@ impl PreviewUi {
         }
     }
 
-    /// Polls the background thread, detects stale results, handles the
-    /// shortcut and draws the dialog.
-    pub fn windows(
+    /// Polls the background thread, detects stale results and handles the
+    /// shortcut; `active`: the preview tab is shown (otherwise playback pauses).
+    pub fn update(
         &mut self,
         ctx: &egui::Context,
         project: &Project,
         status: &mut String,
-        send_enabled: bool,
-    ) -> Option<Action> {
+        active: bool,
+    ) {
         if ctx.input_mut(|i| {
             i.consume_key(
                 egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
@@ -219,79 +221,105 @@ impl PreviewUi {
         }
         self.poll(ctx, status);
         self.invalidate(ctx, project, status);
-        if !self.open {
+        if !active {
             self.playback.pause();
-            return None;
+        } else if self.playback.playing {
+            ctx.request_repaint();
         }
-        let mut open = self.open;
+    }
+
+    /// The job is being prepared in the background.
+    pub fn computing(&self) -> bool {
+        matches!(self.state, State::Computing { .. })
+    }
+
+    /// Needs a (re)computation: nothing computed yet or the project changed.
+    pub fn outdated(&self) -> bool {
+        matches!(self.state, State::Idle | State::Stale)
+    }
+
+    /// Tab „Vorschau“: Simulation in der Mitte, Zeit, Schritte und
+    /// Senden rechts wie die Ergebnisleiste in Bambu Studio.
+    pub fn page(
+        &mut self,
+        ui: &mut egui::Ui,
+        project: &Project,
+        status: &mut String,
+        send_enabled: bool,
+    ) -> Option<Action> {
         let mut action = None;
         let mut recompute = false;
-        egui::Window::new(tr("Vorschau & Zeit"))
-            .id(egui::Id::new("preview_window"))
-            .open(&mut open)
-            .default_size([920.0, 640.0])
-            .resizable(true)
-            .collapsible(false)
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| match &self.state {
-                    State::Idle | State::Stale => {
-                        ui.label(if matches!(self.state, State::Stale) {
-                            tr("Auftrag geändert. Vorschau und Zeit neu berechnen.")
-                        } else {
-                            tr("Noch keine Vorschau berechnet.")
-                        });
-                        recompute = ui.button(tr("Vorschau & Zeit berechnen")).clicked();
-                    }
-                    State::Computing { previous, .. } => {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label(tr(
-                                "Auftragsvorschau und Bearbeitungszeit werden berechnet …",
-                            ));
-                        });
-                        if let Some(ready) = previous {
-                            let before = self.single_job;
-                            action = dialog(
-                                ui,
-                                ready,
-                                project,
-                                &mut self.playback,
-                                &mut self.single_job,
-                                false,
-                            );
-                            recompute |= self.single_job != before;
-                        }
+        let shown = match &self.state {
+            State::Ready { ready, .. } => Some((ready, send_enabled)),
+            State::Computing {
+                previous: Some(ready),
+                ..
+            } => Some((ready, false)),
+            _ => None,
+        };
+        let Some((ready, send_enabled)) = shown else {
+            ui.vertical_centered(|ui| {
+                ui.add_space(ui.available_height() / 3.0);
+                match &self.state {
+                    State::Computing { .. } => {
+                        ui.spinner();
+                        ui.label(tr("Auftragsvorschau und Bearbeitungszeit werden berechnet …"));
                     }
                     State::Failed { error, .. } => {
                         ui.colored_label(WARNING, format!("⚠ {error}"));
                         recompute = ui.button(tr("Erneut versuchen")).clicked();
                     }
-                    State::Ready { ready, .. } => {
-                        let before = self.single_job;
-                        action = dialog(
-                            ui,
-                            ready,
-                            project,
-                            &mut self.playback,
-                            &mut self.single_job,
-                            send_enabled,
-                        );
-                        recompute |= self.single_job != before;
+                    _ if project.svg.is_empty() => {
+                        ui.heading(tr("Noch nichts vorzubereiten"));
+                        ui.label(tr("Unter „Vorbereiten“ ein Motiv öffnen, dann hier Vorschau und Zeit berechnen."));
                     }
-                });
+                    _ => {
+                        ui.label(if matches!(self.state, State::Stale) {
+                            tr("Auftrag geändert. Vorschau und Zeit neu berechnen.")
+                        } else {
+                            tr("Noch keine Vorschau berechnet.")
+                        });
+                        recompute = ui
+                            .add(crate::form::primary_button(tr("Vorschau & Zeit berechnen")))
+                            .clicked();
+                    }
+                }
             });
+            if recompute {
+                self.request(ui.ctx(), project, status);
+            }
+            return None;
+        };
+        let computing = matches!(self.state, State::Computing { .. });
+        let before = self.single_job;
+        egui::SidePanel::right("preview_summary")
+            .resizable(false)
+            .exact_width(340.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(crate::form::SIDEBAR)
+                    .inner_margin(egui::Margin::symmetric(12, 10)),
+            )
+            .show_inside(ui, |ui| {
+                action = summary(
+                    ui,
+                    ready,
+                    project,
+                    &mut self.single_job,
+                    send_enabled,
+                    computing,
+                );
+            });
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(crate::form::CANVAS)
+                    .inner_margin(16.0),
+            )
+            .show_inside(ui, |ui| simulation(ui, ready, project, &mut self.playback));
+        recompute |= self.single_job != before;
         if recompute {
-            self.request(ctx, project, status);
-        }
-        if matches!(action, Some(Action::Send)) {
-            open = false;
-        }
-        self.open = open;
-        if !self.open {
-            self.playback.pause();
-        }
-        if self.playback.playing {
-            ctx.request_repaint();
+            self.request(ui.ctx(), project, status);
         }
         action
     }
@@ -759,114 +787,128 @@ fn full_uv() -> Rect {
     Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0))
 }
 
-fn dialog(
+fn summary(
     ui: &mut egui::Ui,
     ready: &Ready,
     project: &Project,
-    playback: &mut Playback,
     single_job: &mut bool,
     send_enabled: bool,
+    computing: bool,
 ) -> Option<Action> {
     let job = &ready.job;
     let mut action = None;
-    ui.horizontal(|ui| {
-        ui.heading(tr!("Ca. {time}", time = duration(job.estimated_seconds)));
-        ui.label(tr("geschätzte Bearbeitungszeit"));
-    });
-    ui.label(tr!(
-        "{size} · {count} Einzelaufträge ({jobs}) · {host}:{port}",
-        size = bytes(ready.bytes),
-        count = job.jobs.len(),
-        jobs = job
-            .jobs
-            .iter()
-            .map(|j| j.name.as_str())
-            .collect::<Vec<_>>()
-            .join(" › "),
-        host = project.hostname,
-        port = project.port
-    ));
-    // Alle Verfahren in einen Auftrag oder einen je Verfahren.
-    ui.checkbox(single_job, tr("Alles in eine Datei"))
-        .on_hover_text(tr(
-            "Alle Verfahren in einem LTT-Auftrag statt einem je Verfahren",
-        ));
-    crate::form::caption(
-        ui,
-        if *single_job {
-            tr("Ein Auftrag mit allen Verfahren: Gravuren zuerst, dann Markieren und Schneiden.")
-                .to_string()
-        } else {
-            tr!(
-                "{count} Einzelaufträge · Engrav → Eng3D → Mark → Cut; jeder wird am Gerät einzeln gestartet.",
-                count = job.jobs.len()
-            )
-        },
-    );
-    for warning in &job.warnings {
-        egui::Frame::group(ui.style())
-            .stroke(Stroke::new(1.0, WARNING))
-            .show(ui, |ui| {
-                ui.colored_label(WARNING, format!("⚠ {warning}"));
+    egui::TopBottomPanel::bottom("preview_actions")
+        .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(0, 8)))
+        .show_inside(ui, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button(tr("LTT exportieren …")).clicked() {
+                    action = Some(Action::Export);
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add_enabled(
+                            send_enabled,
+                            crate::form::primary_button(tr("An Lasercutter senden …")),
+                        )
+                        .clicked()
+                    {
+                        action = Some(Action::Send);
+                    }
+                });
             });
-    }
-    ui.add_space(6.0);
-    simulation(ui, ready, project, playback);
-    ui.add_space(6.0);
-    ui.label(egui::RichText::new(tr("SCHRITTE")).strong().small());
-    egui::Grid::new("preview_steps")
-        .striped(true)
-        .num_columns(8)
-        .show(ui, |ui| {
-            for title in [
-                "#",
-                tr("Name"),
-                tr("Verfahren"),
-                tr("Leistung"),
-                tr("Tempo"),
-                tr("Durchgänge"),
-                tr("Parametersätze"),
-                tr("Zeit"),
-            ] {
-                ui.strong(title);
-            }
-            ui.end_row();
-            for (index, step) in job.steps.iter().enumerate() {
-                ui.label(format!("{}", index + 1));
-                ui.monospace(&step.name).on_hover_text(&step.description);
-                ui.colored_label(
-                    operation_color(step.operation),
-                    operation_title(step.operation),
-                );
-                ui.label(format!("{} %", decimal(step.power_percent as f64)));
-                ui.label(format!("{} %", decimal(step.speed_percent as f64)));
-                ui.label(step.passes.to_string());
-                ui.label(step.parameter_sets.to_string());
-                ui.label(tr!("ca. {time}", time = duration(step.estimated_seconds)));
-                ui.end_row();
+        });
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.heading(tr!("Ca. {time}", time = duration(job.estimated_seconds)));
+            if computing {
+                ui.spinner();
             }
         });
-    for (index, step) in job.steps.iter().enumerate() {
-        ui.small(format!("{}. {}", index + 1, step.description));
-    }
-    ui.small(tr(
-        "Schätzung aus Fahrwegen, Tempo und Durchgängen; bei Gravur mit Zeilenrücklauf und \
-         Overscan. Beschleunigung und Geräteeinstellungen können die tatsächliche Dauer verändern.",
-    ));
-    ui.separator();
-    ui.horizontal(|ui| {
-        if ui.button(tr("LTT exportieren …")).clicked() {
-            action = Some(Action::Export);
+        ui.label(tr("geschätzte Bearbeitungszeit"));
+        crate::form::caption(
+            ui,
+            tr!(
+                "{size} · {count} Einzelaufträge ({jobs}) · {host}:{port}",
+                size = bytes(ready.bytes),
+                count = job.jobs.len(),
+                jobs = job
+                    .jobs
+                    .iter()
+                    .map(|j| j.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" › "),
+                host = project.hostname,
+                port = project.port
+            ),
+        );
+        for warning in &job.warnings {
+            egui::Frame::group(ui.style())
+                .stroke(Stroke::new(1.0, WARNING))
+                .show(ui, |ui| {
+                    ui.colored_label(WARNING, format!("⚠ {warning}"));
+                });
         }
-        if ui
-            .add_enabled(
-                send_enabled,
-                egui::Button::new(tr("An Lasercutter senden …")),
+        crate::form::section(ui, tr("Schritte"), |ui| {
+            for (index, step) in job.steps.iter().enumerate() {
+                if index > 0 {
+                    ui.separator();
+                }
+                ui.horizontal(|ui| {
+                    ui.colored_label(
+                        operation_color(step.operation),
+                        egui::RichText::new(format!(
+                            "{}. {}",
+                            index + 1,
+                            operation_title(step.operation)
+                        ))
+                        .strong(),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(tr!("ca. {time}", time = duration(step.estimated_seconds)));
+                    });
+                });
+                ui.monospace(&step.name).on_hover_text(&step.description);
+                ui.small(tr!(
+                    "Leistung {power} % · Tempo {speed} %",
+                    power = decimal(step.power_percent as f64),
+                    speed = decimal(step.speed_percent as f64)
+                ));
+                let mut counts = tr!("{count} Durchgänge", count = step.passes);
+                if step.parameter_sets > 1 {
+                    counts += " · ";
+                    counts += &tr!("{count} Parametersätze", count = step.parameter_sets);
+                }
+                ui.small(counts);
+                crate::form::caption(ui, step.description.clone());
+            }
+        });
+        crate::form::section(ui, tr("Auftrag"), |ui| {
+            // Alle Verfahren in einen Auftrag oder einen je Verfahren.
+            ui.checkbox(single_job, tr("Alles in eine Datei"))
+                .on_hover_text(tr(
+                    "Alle Verfahren in einem LTT-Auftrag statt einem je Verfahren",
+                ));
+            crate::form::caption(
+                ui,
+                if *single_job {
+                    tr("Ein Auftrag mit allen Verfahren: Gravuren zuerst, dann Markieren und Schneiden.")
+                        .to_string()
+                } else {
+                    tr!(
+                        "{count} Einzelaufträge · Engrav → Eng3D → Mark → Cut; jeder wird am Gerät einzeln gestartet.",
+                        count = job.jobs.len()
+                    )
+                },
+            );
+        });
+        crate::form::caption(
+            ui,
+            tr(
+                "Schätzung aus Fahrwegen, Tempo und Durchgängen; bei Gravur mit Zeilenrücklauf und \
+                 Overscan. Beschleunigung und Geräteeinstellungen können die tatsächliche Dauer verändern.",
             )
-            .clicked()
-        {
-            action = Some(Action::Send);
-        }
+            .to_string(),
+        );
     });
     action
 }
@@ -875,10 +917,9 @@ fn simulation(ui: &mut egui::Ui, ready: &Ready, project: &Project, playback: &mu
     let total = ready.job.estimated_seconds;
     playback.tick(ui.input(|i| i.time), total);
     let width = ui.available_width().max(320.0);
-    let (rect, _) = ui.allocate_exact_size(
-        Vec2::new(width, (width * 0.5).clamp(220.0, 460.0)),
-        egui::Sense::hover(),
-    );
+    // Platz für Steuerleiste, Status und Legende darunter.
+    let height = (ui.available_height() - 90.0).max(220.0);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::hover());
     let frame = frame_at(&ready.job.timeline, playback.seconds);
     paint_simulation(
         &ui.painter_at(rect),

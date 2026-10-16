@@ -248,3 +248,121 @@ pub fn panel_header(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::
             });
         });
 }
+
+/// Auswahlfeld wie in Bambu Studio: dünner heller Rahmen, Winkel links vor
+/// dem Text, grüner Rahmen beim Überfahren. Gleiche Bedienung wie
+/// `egui::ComboBox` (`from_id_salt`, `selected_text`, `width`, `height`,
+/// `show_ui`).
+pub struct Dropdown {
+    id: egui::Id,
+    text: egui::WidgetText,
+    width: Option<f32>,
+    height: Option<f32>,
+}
+
+impl Dropdown {
+    pub fn from_id_salt(salt: impl std::hash::Hash) -> Self {
+        Self {
+            id: egui::Id::new(salt),
+            text: egui::WidgetText::default(),
+            width: None,
+            height: None,
+        }
+    }
+
+    pub fn selected_text(mut self, text: impl Into<egui::WidgetText>) -> Self {
+        self.text = text.into();
+        self
+    }
+
+    pub fn width(mut self, width: f32) -> Self {
+        self.width = Some(width);
+        self
+    }
+
+    pub fn height(mut self, height: f32) -> Self {
+        self.height = Some(height);
+        self
+    }
+
+    pub fn show_ui<R>(
+        self,
+        ui: &mut egui::Ui,
+        add: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> egui::InnerResponse<Option<R>> {
+        let id = ui.make_persistent_id(self.id);
+        let width = self.width.unwrap_or(ui.spacing().combo_width);
+        let height = ui.spacing().interact_size.y.max(24.0);
+        let (rect, response) =
+            ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::click());
+        let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+        let popup = id.with("popup");
+        let open = egui::Popup::is_id_open(ui.ctx(), popup);
+        if ui.is_rect_visible(rect) {
+            let painter = ui.painter();
+            let enabled = ui.is_enabled();
+            let border = if enabled && (response.hovered() || open) {
+                ACCENT
+            } else {
+                Color32::from_gray(205)
+            };
+            painter.rect(
+                rect,
+                3.0,
+                if enabled {
+                    Color32::WHITE
+                } else {
+                    Color32::from_gray(245)
+                },
+                Stroke::new(1.0, border),
+                egui::StrokeKind::Inside,
+            );
+            // Winkel „﹀“ links, offen „︿“.
+            let ink = if enabled {
+                Color32::from_gray(90)
+            } else {
+                Color32::from_gray(170)
+            };
+            let c = egui::pos2(rect.left() + 13.0, rect.center().y);
+            let (dy, w) = (if open { -2.0 } else { 2.0 }, 4.0);
+            painter.line(
+                vec![
+                    egui::pos2(c.x - w, c.y - dy),
+                    egui::pos2(c.x, c.y + dy),
+                    egui::pos2(c.x + w, c.y - dy),
+                ],
+                Stroke::new(1.2, ink),
+            );
+            let left = rect.left() + 25.0;
+            let galley = self.text.into_galley(
+                ui,
+                Some(egui::TextWrapMode::Truncate),
+                (rect.right() - 8.0 - left).max(0.0),
+                egui::TextStyle::Button,
+            );
+            let text_color = if enabled {
+                Color32::from_gray(30)
+            } else {
+                Color32::from_gray(150)
+            };
+            painter.galley(
+                egui::pos2(left, rect.center().y - galley.size().y / 2.0),
+                galley,
+                text_color,
+            );
+        }
+        let max_height = self.height.unwrap_or(ui.spacing().combo_height);
+        let inner = egui::Popup::menu(&response)
+            .id(popup)
+            .width(width)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+            .show(|ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(max_height)
+                    .show(ui, add)
+                    .inner
+            })
+            .map(|r| r.inner);
+        egui::InnerResponse::new(inner, response)
+    }
+}

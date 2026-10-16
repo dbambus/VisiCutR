@@ -1497,7 +1497,7 @@ impl VisiCutRust {
                         .iter()
                         .map(|d| d.name.clone())
                         .collect();
-                    egui::ComboBox::from_id_salt("active_device")
+                    form::Dropdown::from_id_salt("active_device")
                         .width(ui.available_width() - 8.0)
                         .selected_text(egui::RichText::new(&names[current]).strong())
                         .show_ui(ui, |ui| {

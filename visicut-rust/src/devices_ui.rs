@@ -747,7 +747,7 @@ impl DeviceUi {
                 }
             }
             ui.add_enabled_ui(downloading.is_none(), |ui| {
-                egui::ComboBox::from_id_salt("labs")
+                crate::form::Dropdown::from_id_salt("labs")
                     .selected_text(tr("Herunterladen"))
                     .show_ui(ui, |ui| {
                         for (name, url) in device::LAB_SETTINGS {

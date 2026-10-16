@@ -486,7 +486,7 @@ fn raster_options(
     let mut changed = false;
     if operation == Operation::Engrave {
         crate::form::row(ui, tr("Rasterung"), |ui| {
-            egui::ComboBox::from_id_salt(("dithering", id))
+            crate::form::Dropdown::from_id_salt(("dithering", id))
                 .selected_text(settings.dithering.title())
                 .show_ui(ui, |ui| {
                     for d in Dithering::ALL {
@@ -500,7 +500,7 @@ fn raster_options(
         ui.small(tr("Graustufen: Leistung folgt der Helligkeit."));
     }
     crate::form::row(ui, tr("Auflösung"), |ui| {
-        egui::ComboBox::from_id_salt(("dpi", id))
+        crate::form::Dropdown::from_id_salt(("dpi", id))
             .selected_text(format!("{} DPI", settings.dpi))
             .show_ui(ui, |ui| {
                 for dpi in RASTER_DPIS {
@@ -631,7 +631,7 @@ fn filters(
     }
     for (i, filter) in filters.iter_mut().enumerate() {
         ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt(("attribute", id, i))
+            crate::form::Dropdown::from_id_salt(("attribute", id, i))
                 .width(120.0)
                 .selected_text(filter.attribute.title())
                 .show_ui(ui, |ui| {
@@ -659,7 +659,7 @@ fn filters(
             if filter.attribute == Attribute::StrokeWidth {
                 options.extend([(true, false), (true, true)]);
             }
-            egui::ComboBox::from_id_salt(("comparison", id, i))
+            crate::form::Dropdown::from_id_salt(("comparison", id, i))
                 .width(36.0)
                 .selected_text(comparison_title(filter.compare, filter.inverted))
                 .show_ui(ui, |ui| {
@@ -798,7 +798,7 @@ impl JobUi {
         }
         let own = !library_material && (self.own_material || !project.material.is_empty());
         crate::form::row(ui, tr("Material"), |ui| {
-            egui::ComboBox::from_id_salt("material")
+            crate::form::Dropdown::from_id_salt("material")
                 .width(190.0)
                 .selected_text(if own {
                     tr("Eigenes Material …")
@@ -884,7 +884,7 @@ impl JobUi {
                 });
             } else {
                 crate::form::row(ui, tr("Stärke"), |ui| {
-                    egui::ComboBox::from_id_salt("thickness")
+                    crate::form::Dropdown::from_id_salt("thickness")
                         .width(130.0)
                         .selected_text(title(project.thickness_mm))
                         .show_ui(ui, |ui| {
@@ -1078,7 +1078,7 @@ impl JobUi {
                             ui.horizontal(|ui| {
                                 swatch(ui, row.color);
                                 let current = assignment(project, i);
-                                egui::ComboBox::from_id_salt(("object", i))
+                                crate::form::Dropdown::from_id_salt(("object", i))
                                     .width(90.0)
                                     .selected_text(assignment_title(current))
                                     .show_ui(ui, |ui| {
@@ -1412,7 +1412,7 @@ impl JobUi {
                                                 .range(0.0..=1000.0)
                                                 .suffix(" mm"),
                                         );
-                                        egui::ComboBox::from_id_salt(("profile", j))
+                                        crate::form::Dropdown::from_id_salt(("profile", j))
                                             .selected_text(operation_title(p.operation))
                                             .show_ui(ui, |ui| {
                                                 for o in Operation::ALL {

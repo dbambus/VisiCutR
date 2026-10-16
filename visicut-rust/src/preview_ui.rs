@@ -228,7 +228,8 @@ impl PreviewUi {
         }
     }
 
-    /// The job is being prepared in the background.
+    /// The job is being prepared in the background (screenshots wait for it).
+    #[cfg_attr(not(feature = "screenshot"), allow(dead_code))]
     pub fn computing(&self) -> bool {
         matches!(self.state, State::Computing { .. })
     }
@@ -945,7 +946,7 @@ fn simulation(ui: &mut egui::Ui, ready: &Ready, project: &Project, playback: &mu
         if ui.button("⏭").on_hover_text(tr("Zum Ende")).clicked() {
             playback.seek(total, total);
         }
-        egui::ComboBox::from_id_salt("preview_speed")
+        crate::form::Dropdown::from_id_salt("preview_speed")
             .width(64.0)
             .selected_text(format!("{}×", playback.speed))
             .show_ui(ui, |ui| {

@@ -114,7 +114,7 @@ impl Default for ComposeUi {
 }
 
 fn operation_choice(ui: &mut egui::Ui, id: &str, operation: &mut Operation) {
-    egui::ComboBox::from_id_salt(id)
+    crate::form::Dropdown::from_id_salt(id)
         .selected_text(match operation {
             Operation::Cut => tr("Schneiden (rot)"),
             Operation::Mark => tr("Markieren (blau)"),
@@ -139,7 +139,7 @@ fn mm(ui: &mut egui::Ui, label: &str, value: &mut f64, range: std::ops::RangeInc
 }
 
 fn font_choice(ui: &mut egui::Ui, fonts: &[String], font: &mut String) {
-    egui::ComboBox::from_id_salt("font")
+    crate::form::Dropdown::from_id_salt("font")
         .selected_text(font.as_str())
         .height(320.0)
         .show_ui(ui, |ui| {

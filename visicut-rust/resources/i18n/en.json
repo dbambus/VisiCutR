@@ -73,7 +73,6 @@
   "Datei öffnen, hierher ziehen oder das Beispiel öffnen": "Open a file, drag it here or open the example",
   "Der Text ergibt keine Umrisse (Schrift ohne passende Zeichen?)": "The text produces no outlines (font without matching glyphs?)",
   "Der Text wird in Umrisse umgewandelt und ist danach nicht mehr editierbar.": "The text is converted to outlines and can no longer be edited afterwards.",
-  "Die Übertragung startet den Laser nicht. Aufträge am Gerät in dieser Reihenfolge einzeln starten. Treiber am Gerät noch nicht validiert. Vor dem Start Material, Fokus und Druckluft prüfen.": "Sending does not start the laser. Start the jobs on the machine one by one in this order. Driver not yet validated on the machine. Check material, focus and air assist before starting.",
   "Doppelte Linien entfernen": "Remove duplicate lines",
   "Download unerwartet abgebrochen": "Download aborted unexpectedly",
   "Download von „{name}“ fehlgeschlagen: {error}": "Download of “{name}” failed: {error}",

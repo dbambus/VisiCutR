@@ -3,6 +3,21 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## 0.19.0 – 16.10.2026
+
+- **Zeichnung größer als die Zeichenfläche** (egui): Ragt eine importierte
+  Zeichnung über die Zeichenfläche ihrer Datei hinaus, fragt die App, ob alles
+  oder nur die Zeichenfläche übernommen wird. Beim Import mehrerer Dateien,
+  auch als zusätzliche Teile, gilt eine Antwort für alle.
+- **Windows-Oberfläche**: Das Mausrad zoomt die Arbeitsfläche, solange der
+  Zeiger darüber steht. Die farbige Bearbeitungsvorschau wird in der
+  angezeigten Größe gerechnet, dünne Linien bleiben sichtbar. Die Titelleiste
+  ist hell wie die Oberfläche; Position und Größe passen in die Seitenleiste.
+- **Sende-Dialog** (egui und macOS): Der allgemeine Hinweis unter den
+  Aufträgen entfällt; Warnungen zum Auftrag bleiben.
+- Formatierung und Clippy-Hinweis behoben, damit der Release-Workflow wieder
+  durchläuft.
+
 ## 0.18.0 – 15.10.2026
 
 - **Kamera wie in VisiCut** (Einstellungen → Lasercutter → Kamera, egui und

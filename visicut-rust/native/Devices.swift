@@ -409,13 +409,6 @@ struct DeviceSettings: View {
             }
             Divider()
             HStack {
-                Button(tr("Importieren …")) { adopt(model.importDevices()) }
-                Menu(tr("Herunterladen")) {
-                    ForEach(model.labs, id: \.url) { lab in
-                        Button(lab.name) { adopt(model.downloadDevices(lab)) }
-                    }
-                }.fixedSize()
-                Button(tr("Exportieren …")) { model.exportDevices(draft.devices) }
                 Spacer()
                 Button(tr("Als aktiven Lasercutter verwenden")) { draft.selected = editing }
                     .disabled(editing == draft.selected)
@@ -426,6 +419,7 @@ struct DeviceSettings: View {
             }.padding(12)
         }
         .frame(minWidth: 760, minHeight: 520)
+        .onChange(of: model.devices) { old, new in adopt(old: old, new: new) }
         .sheet(isPresented: $shiftTest) {
             ShiftCalibrationView(model: model, device: current.wrappedValue,
                                  canOpenPattern: draft == model.devices && editing == draft.selected) { machine in
@@ -439,10 +433,12 @@ struct DeviceSettings: View {
         }
     }
 
-    /// Imports are already saved; unsaved edits in the draft are kept.
-    private func adopt(_ imported: [LaserDevice]) {
-        guard !imported.isEmpty else { return }
-        draft.devices.append(contentsOf: imported)
+    /// Importe aus „Allgemein“ sind schon gesichert und hängen nur Geräte an;
+    /// ungesicherte Änderungen im Entwurf bleiben erhalten.
+    private func adopt(old: DeviceStore, new: DeviceStore) {
+        guard draft != new, new.devices.count > old.devices.count,
+              Array(new.devices.prefix(old.devices.count)) == old.devices else { return }
+        if draft == old { draft = new } else { draft.devices.append(contentsOf: new.devices.dropFirst(old.devices.count)) }
         editing = draft.devices.count - 1
     }
 

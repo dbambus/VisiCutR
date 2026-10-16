@@ -1058,6 +1058,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
             DispatchQueue.main.async { self?.refreshWindow() }
         }
         NSApp.activate(ignoringOtherApps: true)
+        // Alle 14 Tage nach einem neuen Release fragen (Einstellungen → Allgemein).
+        if !CommandLine.arguments.contains("--ui-test"), UpdateCheck.enabled, UpdateCheck.due {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { UpdateCheck.run(manual: false, model: self.model) }
+        }
         if CommandLine.arguments.contains("--ui-test") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { runUITest(self.model) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
@@ -1132,6 +1136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         }
         let app = submenu("VisiCutRust")
         app.addItem(menuItem(tr("Über VisiCutRust"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), target: NSApp))
+        app.addItem(menuItem(tr("Nach Updates suchen …"), action: #selector(checkForUpdates)))
         app.addItem(.separator())
         app.addItem(menuItem(tr("Einstellungen …"), action: #selector(showSettings), key: ","))
         app.addItem(.separator())
@@ -1352,7 +1357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         case #selector(toggleGrid): item.state = model.showGrid ? .on : .off; return true
         case #selector(toggleCamera): item.state = model.showCamera ? .on : .off; return !model.device.camera_url.isEmpty
         case #selector(refreshCamera): return model.showCamera && !model.cameraLoading
-        case #selector(openFile), #selector(openDemo), #selector(newProject), #selector(showSettings), #selector(openRecent(_:)),
+        case #selector(openFile), #selector(openDemo), #selector(newProject), #selector(showSettings), #selector(checkForUpdates), #selector(openRecent(_:)),
              #selector(chooseDevice(_:)): return !model.busy
         case #selector(chooseCutOrder(_:)):
             item.state = (item.representedObject as? String) == model.project.cut_order.rawValue ? .on : .off
@@ -1414,10 +1419,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         materialsWindow = window
         window.center(); window.makeKeyAndOrderFront(nil)
     }
+    @objc func checkForUpdates() { UpdateCheck.run(manual: true, model: model) }
+
     @objc func showSettings() {
         if let window = settingsWindow { window.makeKeyAndOrderFront(nil); return }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 560), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-        window.contentView = NSHostingView(rootView: DeviceSettings(model: model))
+        window.contentView = NSHostingView(rootView: TabView {
+            DeviceSettings(model: model).tabItem { Text(tr("Lasercutter")) }
+            GeneralSettings(model: model).tabItem { Text(tr("Allgemein")) }
+        })
         window.title = tr("Einstellungen")
         window.isReleasedWhenClosed = false
         settingsWindow = window

@@ -300,6 +300,10 @@ pub(crate) fn execute(request: &Value) -> Result<Value, String> {
             )?;
             Ok(json!({ "passwords_omitted": omitted }))
         }
+        "check_update" => Ok(json!({
+            "release": crate::update::check()?,
+            "current": crate::update::current_version(),
+        })),
         "find_cameras" => Ok(json!({ "urls": camera::discover() })),
         "homography" => Ok(json!({"matrix": camera::homography(&get(request, "calibration")?)?})),
         "camera_image" => {

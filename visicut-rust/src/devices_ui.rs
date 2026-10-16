@@ -78,6 +78,8 @@ pub enum Action {
     CalibrationPage(Vec<[f64; 2]>),
     /// Open the engrave shift test pattern with this power as a project.
     ShiftPattern(f32),
+    /// Check for a new release now (settings).
+    CheckUpdate,
 }
 
 /// Zeilenversatz-Kalibrierung eines Geräts: Testmuster und Ergebnis.
@@ -277,11 +279,13 @@ impl DeviceUi {
         }
     }
 
+    /// `auto_update`: automatische Update-Prüfung, im Einstellungsfenster schaltbar.
     pub fn windows(
         &mut self,
         ctx: &egui::Context,
         project: &mut Project,
         status: &mut String,
+        auto_update: &mut bool,
     ) -> Option<Action> {
         // Laufende Aktualisierung wie VisiCuts RefreshCameraThread: nach jedem
         // Bild die eingestellte Pause, nach Fehlern länger (ab 10 s).
@@ -318,7 +322,9 @@ impl DeviceUi {
         }
         self.poll_download(ctx, status);
         let mut action = None;
-        self.manager(ctx, project, status);
+        if self.manager(ctx, project, status, auto_update) {
+            action = Some(Action::CheckUpdate);
+        }
         if let Some(calibration) = &mut self.calibration {
             let mut close = false;
             let mut apply = None;
@@ -424,10 +430,18 @@ impl DeviceUi {
         }
     }
 
-    fn manager(&mut self, ctx: &egui::Context, project: &mut Project, status: &mut String) {
+    /// Einstellungsfenster; `true`, wenn „Jetzt nach Updates suchen“ gewählt wurde.
+    fn manager(
+        &mut self,
+        ctx: &egui::Context,
+        project: &mut Project,
+        status: &mut String,
+        auto_update: &mut bool,
+    ) -> bool {
         let Some((mut draft, mut editing)) = self.draft.take() else {
-            return;
+            return false;
         };
+        let mut check_update = false;
         let mut open = true;
         let mut save = false;
         let mut calibrate = false;
@@ -621,6 +635,13 @@ impl DeviceUi {
                     });
                 });
                 ui.separator();
+                // Allgemein: Update-Prüfung auf neue Releases.
+                ui.horizontal(|ui| {
+                    ui.checkbox(auto_update, tr("Alle 14 Tage nach Updates suchen"))
+                        .on_hover_text(tr("Fragt bei GitHub nach einem neuen Release von VisiCutRust; es wird nichts automatisch installiert."));
+                    check_update = ui.button(tr("Jetzt nach Updates suchen")).clicked();
+                });
+                ui.separator();
                 ui.horizontal(|ui| {
                     if ui.button(tr("Importieren …")).clicked()
                         && let Some(path) = rfd::FileDialog::new()
@@ -754,6 +775,7 @@ impl DeviceUi {
         if open {
             self.draft = Some((draft, editing));
         }
+        check_update
     }
 }
 

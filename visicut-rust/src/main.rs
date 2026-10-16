@@ -317,6 +317,9 @@ struct VisiCutRust {
     handle_drag: Option<HandleDrag>,
     /// Sprache und zuletzt geöffnete Dateien.
     settings: settings::AppSettings,
+    /// Laufende Update-Prüfung (`true`: von Hand gestartet) und gefundenes Release.
+    update_check: Option<(bool, UpdateCheck)>,
+    update_found: Option<visicut_core::update::Release>,
     #[cfg(feature = "screenshot")]
     capture: Option<(PathBuf, u32)>,
 }
@@ -376,11 +379,22 @@ impl VisiCutRust {
             rotate_deg: 0.0,
             handle_drag: None,
             settings,
+            update_check: None,
+            update_found: None,
             #[cfg(feature = "screenshot")]
             capture: None,
         };
         app.reset_project();
         app.preview.single_job = app.settings.single_job;
+        // Alle 14 Tage im Hintergrund nach einem neuen Release fragen.
+        if !app.settings.update_check_disabled
+            && visicut_core::update::is_due(
+                app.settings.last_update_check,
+                visicut_core::update::now_secs(),
+            )
+        {
+            app.start_update_check(false);
+        }
         if let Some(error) = device_error {
             app.report(tr!(
                 "Geräteliste nicht lesbar, FAU-Standard wird verwendet: {error}",
@@ -415,6 +429,95 @@ impl VisiCutRust {
     }
 
     /// Sichert Sprache und Verlauf; ein Fehler steht nur in der Statuszeile.
+    /// Fragt im Hintergrund bei GitHub nach einem neuen Release.
+    fn start_update_check(&mut self, manual: bool) {
+        if self.update_check.is_some() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(visicut_core::update::check());
+        });
+        self.update_check = Some((manual, rx));
+        if manual {
+            self.status = tr("Suche nach Updates …").into();
+        }
+    }
+
+    /// Ergebnis der Update-Prüfung; Fehler der automatischen Prüfung stehen
+    /// nur in der Statuszeile.
+    fn poll_update(&mut self, ctx: &egui::Context) {
+        let Some((manual, receiver)) = &self.update_check else {
+            return;
+        };
+        let manual = *manual;
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(200));
+                return;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err(tr("Update-Prüfung abgebrochen").into())
+            }
+        };
+        self.update_check = None;
+        match result {
+            Ok(found) => {
+                self.settings.last_update_check = visicut_core::update::now_secs();
+                self.save_settings();
+                match found {
+                    Some(release) => self.update_found = Some(release),
+                    None if manual => {
+                        self.status = tr!(
+                            "VisiCutRust {version} ist aktuell",
+                            version = visicut_core::update::current_version()
+                        )
+                    }
+                    None => {}
+                }
+            }
+            Err(e) if manual => self.report(e),
+            Err(e) => self.status = e,
+        }
+    }
+
+    /// Hinweis auf ein neues Release mit Link zur Download-Seite.
+    fn update_window(&mut self, ctx: &egui::Context) {
+        let Some(release) = &self.update_found else {
+            return;
+        };
+        let mut close = false;
+        egui::Window::new(tr("Update verfügbar"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(tr!(
+                    "VisiCutRust {version} ist verfügbar (installiert: {current}).",
+                    version = release.version,
+                    current = visicut_core::update::current_version()
+                ));
+                if !release.notes.is_empty() {
+                    egui::ScrollArea::vertical()
+                        .max_height(200.0)
+                        .show(ui, |ui| {
+                            ui.small(&release.notes);
+                        });
+                }
+                ui.horizontal(|ui| {
+                    if ui.button(tr("Download-Seite öffnen")).clicked() {
+                        ctx.open_url(egui::OpenUrl::new_tab(&release.url));
+                        close = true;
+                    }
+                    close |= ui.button(tr("Später")).clicked();
+                });
+            });
+        if close {
+            self.update_found = None;
+        }
+    }
+
     fn save_settings(&mut self) {
         if let Err(e) = self.settings.save() {
             self.status = tr!("Einstellungen nicht gesichert: {error}", error = e);
@@ -2937,6 +3040,9 @@ enum HandleDrag {
     Rotate { start: Pos2, degrees: f32 },
 }
 
+/// Ergebnis einer Update-Prüfung im Hintergrund.
+type UpdateCheck = std::sync::mpsc::Receiver<Result<Option<visicut_core::update::Release>, String>>;
+
 impl eframe::App for VisiCutRust {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         #[cfg(feature = "screenshot")]
@@ -2990,16 +3096,24 @@ impl eframe::App for VisiCutRust {
         if let Some((svg, name)) = self.vectorize.windows(ctx, false, &mut self.status) {
             self.request(ctx, Replace::Vectorized { svg, name });
         }
-        match self
-            .devices
-            .windows(ctx, &mut self.project, &mut self.status)
-        {
+        self.poll_update(ctx);
+        self.update_window(ctx);
+        let mut auto_update = !self.settings.update_check_disabled;
+        let device_action =
+            self.devices
+                .windows(ctx, &mut self.project, &mut self.status, &mut auto_update);
+        if auto_update == self.settings.update_check_disabled {
+            self.settings.update_check_disabled = !auto_update;
+            self.save_settings();
+        }
+        match device_action {
             Some(devices_ui::Action::CalibrationPage(points)) => {
                 self.request(ctx, Replace::Calibration(points));
             }
             Some(devices_ui::Action::ShiftPattern(power)) => {
                 self.request(ctx, Replace::ShiftPattern(power));
             }
+            Some(devices_ui::Action::CheckUpdate) => self.start_update_check(true),
             None => {}
         }
         if self.show_preview {

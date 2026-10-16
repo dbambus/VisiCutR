@@ -22,7 +22,7 @@ arch="$(uname -m)"
 xcrun swiftc -parse-as-library -swift-version 5 -O \
   -target "$arch-apple-macosx14.0" \
   -module-cache-path target/swift-module-cache \
-  native/VisiCutApp.swift native/JobSimulation.swift native/Devices.swift native/Mapping.swift native/Vectorize.swift native/Compose.swift target/release/libvisicut_core.a \
+  native/VisiCutApp.swift native/JobSimulation.swift native/Devices.swift native/Mapping.swift native/Vectorize.swift native/Compose.swift native/Updates.swift target/release/libvisicut_core.a \
   -o target/release/visicut-native \
   -framework SwiftUI -framework AppKit -framework CoreFoundation \
   -framework Security -framework OpenGL -framework CoreGraphics \

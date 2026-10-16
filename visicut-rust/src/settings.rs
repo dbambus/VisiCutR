@@ -18,6 +18,10 @@ pub struct AppSettings {
     pub recent: Vec<PathBuf>,
     /// Alle Verfahren in einen LTT-Auftrag (Auftragsvorschau).
     pub single_job: bool,
+    /// Keine automatische Update-Prüfung (Einstellungen).
+    pub update_check_disabled: bool,
+    /// Zeit der letzten Update-Prüfung in Sekunden seit 1970.
+    pub last_update_check: u64,
 }
 
 impl AppSettings {

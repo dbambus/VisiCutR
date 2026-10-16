@@ -17,4 +17,5 @@ pub mod shift_calibration;
 pub mod svg;
 pub mod svg_import;
 pub mod timeline;
+pub mod update;
 pub mod vectorize;

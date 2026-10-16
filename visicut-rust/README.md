@@ -396,6 +396,15 @@ Liste stehen in `app-settings.json` im Einstellungsordner neben der
 Geräteliste. Die macOS-App speichert die Sprache in den Benutzereinstellungen;
 der UI-Test läuft immer auf Deutsch.
 
+**Updates**: Beide Oberflächen fragen höchstens alle 14 Tage beim Start bei
+GitHub nach dem neuesten Release von `dbambus/VisiCutRust`
+(`api.github.com/repos/dbambus/VisiCutRust/releases/latest`). Ist es neuer als
+die laufende Version, erscheint ein Hinweis mit den Release-Notizen und einem
+Link zur Download-Seite; installiert wird nichts automatisch. Abschalten unter
+**Einstellungen → Allgemein** (macOS) bzw. im Einstellungsfenster (Windows,
+Linux); dort und im App-Menü (macOS) lässt sich auch sofort prüfen. Fehler der
+automatischen Prüfung erscheinen nur in der Statuszeile.
+
 Ungesicherte Änderungen fragen nicht nach dem Sichern (beide Oberflächen):
 Beim Öffnen, bei **Neu** und beim Beenden legt die App den Stand im Ordner
 `cache` des Einstellungsordners ab (höchstens zehn, ältere werden gelöscht)

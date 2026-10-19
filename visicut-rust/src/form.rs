@@ -1,11 +1,11 @@
 //! Bausteine der Oberfläche im Stil von Bambu Studio: dunkle Reiterleiste,
-//! grüne Akzente, Abschnitte als Karten mit Überschrift, Zeilen mit
+//! orange Akzente, Abschnitte als Karten mit Überschrift, Zeilen mit
 //! Bezeichnung links und Bedienelement rechts, segmentierte Auswahl.
 
 use eframe::egui::{self, Color32, CornerRadius, RichText, Stroke, Vec2};
 
-/// Akzentfarbe (Grün wie in Bambu Studio).
-pub const ACCENT: Color32 = Color32::from_rgb(0, 174, 66);
+/// Akzentfarbe (gedecktes Orange, dunkel genug für weiße Schrift).
+pub const ACCENT: Color32 = Color32::from_rgb(192, 98, 30);
 /// Dunkle Reiterleiste oben.
 pub const TOPBAR: Color32 = Color32::from_rgb(38, 46, 48);
 /// Hintergrund der Seitenleiste (weiß wie in Bambu Studio).
@@ -46,7 +46,39 @@ pub fn apply_style(ctx: &egui::Context) {
         visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_gray(185));
         visuals.widgets.active.weak_bg_fill = Color32::from_gray(228);
         visuals.widgets.active.bg_fill = Color32::from_gray(228);
+        // Dunklere Schrift als egui (Grau 80/60): besser lesbar.
+        visuals.widgets.noninteractive.fg_stroke.color = Color32::from_gray(30);
+        visuals.widgets.inactive.fg_stroke.color = Color32::from_gray(25);
+        visuals.widgets.hovered.fg_stroke.color = Color32::from_gray(10);
+        visuals.widgets.active.fg_stroke.color = Color32::BLACK;
+        visuals.weak_text_color = Some(Color32::from_gray(95));
+        visuals.disabled_alpha = 0.6;
     });
+}
+
+/// Systemschrift in normaler Stärke statt egui's dünner Ubuntu-Light;
+/// Ubuntu-Light bleibt als Ersatz für fehlende Zeichen.
+pub fn apply_fonts(ctx: &egui::Context) {
+    const CANDIDATES: &[&str] = &[
+        "/System/Library/Fonts/SFNS.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "C:\\Windows\\Fonts\\segoeui.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ];
+    let Some(data) = CANDIDATES.iter().find_map(|path| std::fs::read(path).ok()) else {
+        return;
+    };
+    let mut fonts = egui::FontDefinitions::default();
+    fonts
+        .font_data
+        .insert("system".to_owned(), egui::FontData::from_owned(data).into());
+    fonts
+        .families
+        .entry(egui::FontFamily::Proportional)
+        .or_default()
+        .insert(0, "system".to_owned());
+    ctx.set_fonts(fonts);
 }
 
 /// Bereich wie „Process“ in Bambu Studio: graue Kopfleiste über die volle
@@ -98,7 +130,7 @@ pub fn unit_value<N: egui::emath::Numeric>(
     let unit_galley = ui.painter().layout_no_wrap(
         unit.to_owned(),
         egui::FontId::proportional(12.0),
-        Color32::from_gray(120),
+        Color32::from_gray(95),
     );
     let field = egui::Rect::from_min_max(
         rect.min + Vec2::new(1.0, 1.0),
@@ -148,7 +180,7 @@ pub fn unit_value<N: egui::emath::Numeric>(
         rect.center().y - unit_galley.size().y / 2.0,
     );
     ui.painter()
-        .galley(unit_pos, unit_galley, Color32::from_gray(120));
+        .galley(unit_pos, unit_galley, Color32::from_gray(95));
     response
 }
 
@@ -189,7 +221,7 @@ pub fn caption(ui: &mut egui::Ui, text: impl Into<String>) {
         egui::Label::new(
             RichText::new(text.into())
                 .size(11.5)
-                .color(Color32::from_gray(95)),
+                .color(Color32::from_gray(75)),
         )
         .wrap(),
     );
@@ -204,7 +236,7 @@ pub fn divider(ui: &mut egui::Ui) {
 }
 
 /// Umschalter wie „Global / Objects“ in Bambu Studio: graue Pille, die
-/// gewählte Option grün; liefert die neu gewählte Option.
+/// gewählte Option orange; liefert die neu gewählte Option.
 pub fn segmented<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
     current: T,
@@ -225,7 +257,7 @@ pub fn segmented<T: PartialEq + Copy>(
                     let text = RichText::new(title).color(if selected {
                         Color32::WHITE
                     } else {
-                        Color32::from_gray(90)
+                        Color32::from_gray(55)
                     });
                     let button = egui::Button::new(if selected { text.strong() } else { text })
                         .fill(if selected {
@@ -257,7 +289,7 @@ pub fn tinted_choice(
     let text = RichText::new(title).size(13.0).color(if selected {
         color
     } else {
-        Color32::from_gray(110)
+        Color32::from_gray(70)
     });
     // Feste Breite: längere Übersetzungen dürfen die Seitenleiste nicht verbreitern.
     ui.spacing_mut().button_padding.x = 1.0;
@@ -286,7 +318,7 @@ pub fn prominent(ui: &mut egui::Ui, enabled: bool, title: &str) -> bool {
     ui.add_enabled(enabled, primary_button(title)).clicked()
 }
 
-/// Grüne Hauptschaltfläche (Bambu Studio „Slice“ / „Print“).
+/// Orange Hauptschaltfläche (Bambu Studio „Slice“ / „Print“).
 pub fn primary_button(title: &str) -> egui::Button<'static> {
     egui::Button::new(
         RichText::new(title.to_owned())
@@ -298,12 +330,12 @@ pub fn primary_button(title: &str) -> egui::Button<'static> {
     .min_size(Vec2::new(0.0, 28.0))
 }
 
-/// Reiter der dunklen Leiste: gewählt grün hinterlegt, sonst hell auf dunkel.
+/// Reiter der dunklen Leiste: gewählt orange hinterlegt, sonst hell auf dunkel.
 pub fn top_tab(ui: &mut egui::Ui, selected: bool, title: &str) -> egui::Response {
     let text = RichText::new(title).size(15.0).color(if selected {
         Color32::WHITE
     } else {
-        Color32::from_gray(215)
+        Color32::from_gray(232)
     });
     ui.add(
         egui::Button::new(text)
@@ -325,7 +357,7 @@ pub fn top_button(ui: &mut egui::Ui, enabled: bool, title: &str) -> egui::Respon
         egui::Button::new(
             RichText::new(title)
                 .size(14.0)
-                .color(Color32::from_gray(225)),
+                .color(Color32::from_gray(235)),
         )
         .fill(Color32::TRANSPARENT)
         .stroke(Stroke::NONE)
@@ -358,7 +390,7 @@ pub fn panel_header(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::
 }
 
 /// Auswahlfeld wie in Bambu Studio: dünner heller Rahmen, Winkel links vor
-/// dem Text, grüner Rahmen beim Überfahren. Gleiche Bedienung wie
+/// dem Text, orangefarbener Rahmen beim Überfahren. Gleiche Bedienung wie
 /// `egui::ComboBox` (`from_id_salt`, `selected_text`, `width`, `height`,
 /// `show_ui`).
 pub struct Dropdown {
@@ -466,7 +498,7 @@ impl Dropdown {
             let text_color = if enabled {
                 Color32::from_gray(30)
             } else {
-                Color32::from_gray(150)
+                Color32::from_gray(130)
             };
             painter.galley(
                 egui::pos2(left, rect.center().y - galley.size().y / 2.0),

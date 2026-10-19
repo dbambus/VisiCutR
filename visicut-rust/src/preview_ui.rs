@@ -144,24 +144,20 @@ impl PreviewUi {
         *status = tr("Auftragsvorschau und Bearbeitungszeit werden berechnet …").into();
     }
 
-    /// Toolbar entry: compute button, estimate and the processing toggle.
-    pub fn toolbar(&mut self, ui: &mut egui::Ui, project: &Project, status: &mut String) {
-        let computing = matches!(self.state, State::Computing { .. });
-        if ui
-            .add_enabled(
-                !computing && !project.svg.is_empty(),
-                egui::Button::new(tr("👁 Vorschau & Zeit berechnen")),
-            )
-            .on_hover_text(tr(
-                "Auftragsvorschau, Zeitschätzung und Simulation (Strg/⌘+Umschalt+P)",
-            ))
-            .clicked()
-        {
-            self.request(ui.ctx(), project, status);
-        }
+    /// Toolbar row under the work area: shown while computing and once a
+    /// result is ready (the compute button sits in the top bar).
+    pub fn has_toolbar(&self) -> bool {
+        matches!(self.state, State::Computing { .. } | State::Ready { .. })
+    }
+
+    /// Toolbar entry: estimate and the processing toggle.
+    pub fn toolbar(&mut self, ui: &mut egui::Ui) {
         match &self.state {
             State::Computing { .. } => {
                 ui.spinner();
+                ui.label(tr(
+                    "Auftragsvorschau und Bearbeitungszeit werden berechnet …",
+                ));
             }
             State::Ready { ready, .. } => {
                 ui.label(tr!(
@@ -179,14 +175,7 @@ impl PreviewUi {
                     ui.checkbox(&mut self.show_processing, tr("Bearbeitung anzeigen"));
                 });
             }
-            State::Idle | State::Stale => {
-                ui.label(
-                    egui::RichText::new(tr("Nach Änderungen neu berechnen"))
-                        .size(11.5)
-                        .color(Color32::from_gray(95)),
-                );
-            }
-            State::Failed { .. } => {}
+            State::Idle | State::Stale | State::Failed { .. } => {}
         }
     }
 

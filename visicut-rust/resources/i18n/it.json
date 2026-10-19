@@ -518,7 +518,6 @@
   "Übertragung fehlgeschlagen; Teiljob könnte am Gerät liegen: {error}": "Trasmissione non riuscita; un lavoro parziale potrebbe trovarsi sul dispositivo: {error}",
   "Übertragung unerwartet abgebrochen; Gerätestatus prüfen": "Trasmissione interrotta inaspettatamente; controlla lo stato del dispositivo",
   "Übertragung von {job} fehlgeschlagen: {error}\nBereits übertragen: {sent}. Dieser Job kann teilweise am Gerät liegen. Weitere Aufträge wurden nicht gesendet; vor erneutem Senden Gerätespeicher prüfen.": "Trasmissione di {job} non riuscita: {error}\nGià trasmessi: {sent}. Questo lavoro potrebbe trovarsi in parte sul dispositivo. Gli altri lavori non sono stati inviati; prima di inviare di nuovo controlla la memoria del dispositivo.",
-  "👁 Vorschau & Zeit berechnen": "👁 Calcola anteprima & tempo",
   "1 Bearbeitungsschritt": "1 passo di lavorazione",
   "1. Kalibrierseite als Projekt öffnen und auf Restmaterial markieren.\n2. Foto aufnehmen.\n3. Nummerierte Marker auf die Kreuze ziehen (Nummer = Anzahl Striche).\nMindestens 4 Punkte, nicht auf einer Linie.": "1. Apri la pagina di calibrazione come progetto e marcala su materiale di scarto.\n2. Scatta una foto.\n3. Trascina i marcatori numerati sulle croci (numero = numero di tratti).\nAlmeno 4 punti, non su una linea.",
   "Ablage": "File",
@@ -944,5 +943,7 @@
   "heute": "oggi",
   "vor {days} Tagen": "{days} giorni fa",
   "{added} LTT iLaser 4000 von „{name}“ importiert": "{added} LTT iLaser 4000 importati da “{name}”",
-  "Leistung & Tempo": "Potenza e velocità"
+  "Leistung & Tempo": "Potenza e velocità",
+  "Job-Einstellungen …": "Impostazioni del lavoro …",
+  "Reihenfolge der Schnitt- und Markierpfade; wird mit dem Projekt gesichert.": "Ordine dei percorsi di taglio e marcatura; salvato con il progetto."
 }

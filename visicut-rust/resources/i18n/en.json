@@ -518,7 +518,6 @@
   "Übertragung fehlgeschlagen; Teiljob könnte am Gerät liegen: {error}": "Transfer failed; a partial job may be on the machine: {error}",
   "Übertragung unerwartet abgebrochen; Gerätestatus prüfen": "Transfer aborted unexpectedly; check the machine status",
   "Übertragung von {job} fehlgeschlagen: {error}\nBereits übertragen: {sent}. Dieser Job kann teilweise am Gerät liegen. Weitere Aufträge wurden nicht gesendet; vor erneutem Senden Gerätespeicher prüfen.": "Transfer of {job} failed: {error}\nAlready transferred: {sent}. This job may be partially stored on the machine. No further jobs were sent; check the machine memory before sending again.",
-  "👁 Vorschau & Zeit berechnen": "👁 Calculate preview & time",
   "1 Bearbeitungsschritt": "1 processing step",
   "1. Kalibrierseite als Projekt öffnen und auf Restmaterial markieren.\n2. Foto aufnehmen.\n3. Nummerierte Marker auf die Kreuze ziehen (Nummer = Anzahl Striche).\nMindestens 4 Punkte, nicht auf einer Linie.": "1. Open the calibration page as a project and mark it on scrap material.\n2. Take a photo.\n3. Drag the numbered markers onto the crosses (number = count of strokes).\nAt least 4 points, not on one line.",
   "Ablage": "File",
@@ -944,5 +943,7 @@
   "heute": "today",
   "vor {days} Tagen": "{days} days ago",
   "{added} LTT iLaser 4000 von „{name}“ importiert": "{added} LTT iLaser 4000 imported from “{name}”",
-  "Leistung & Tempo": "Power & speed"
+  "Leistung & Tempo": "Power & speed",
+  "Job-Einstellungen …": "Job Settings …",
+  "Reihenfolge der Schnitt- und Markierpfade; wird mit dem Projekt gesichert.": "Order of cut and mark paths; saved with the project."
 }

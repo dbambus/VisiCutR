@@ -49,6 +49,8 @@ enum Command {
     ZoomOut,
     ZoomFit,
     Materials,
+    /// Einstellungen → Job (Schnittreihenfolge).
+    JobSettings,
     Preview,
     Send,
     Text,
@@ -73,8 +75,6 @@ enum Command {
     ClearCache,
     /// Sprache der Oberfläche; `None` folgt dem System.
     Language(Option<i18n::Language>),
-    /// Reihenfolge der Schnitt- und Markierpfade (Menü Job).
-    CutOrder(CutOrder),
     /// Aktiver Lasercutter (Menü Datei → Lasercutter), Index in der Geräteliste.
     Device(usize),
 }
@@ -125,6 +125,7 @@ impl Command {
             Self::ZoomOut => tr("Verkleinern"),
             Self::ZoomFit => tr("Zoom zurücksetzen"),
             Self::Materials => tr("Materialbibliothek …"),
+            Self::JobSettings => tr("Job-Einstellungen …"),
             Self::Preview => tr("Vorschau & Zeit …"),
             Self::Send => tr("An Lasercutter senden …"),
             Self::Text => tr("Text …"),
@@ -145,7 +146,6 @@ impl Command {
             Self::ClearRecent => tr("Liste leeren"),
             Self::ClearCache => tr("Zwischenspeicher leeren …"),
             Self::Language(_) => tr("Sprache"),
-            Self::CutOrder(order) => jobs_ui::cut_order_title(order),
         }
     }
 
@@ -175,6 +175,7 @@ impl Command {
             | Self::Vectorize
             | Self::Center
             | Self::Send
+            | Self::JobSettings
             | Self::Text
             | Self::Shape
             | Self::Sign
@@ -190,7 +191,6 @@ impl Command {
             | Self::ClearRecent
             | Self::ClearCache
             | Self::Language(_)
-            | Self::CutOrder(_)
             | Self::Device(_)
             | Self::ExportPlf => return None,
         };
@@ -267,6 +267,7 @@ enum Page {
 enum SettingsPage {
     Devices,
     Materials,
+    Job,
     General,
 }
 
@@ -355,6 +356,7 @@ impl VisiCutRust {
             .send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Light));
         cc.egui_ctx.set_visuals(egui::Visuals::light());
         form::apply_style(&cc.egui_ctx);
+        form::apply_fonts(&cc.egui_ctx);
         // Strg+Plus/Minus/0 zoomen die Arbeitsfläche, nicht die Oberfläche.
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let (devices, device_error) = devices_ui::DeviceUi::load();
@@ -433,13 +435,14 @@ impl VisiCutRust {
                 .get(index + 1)
                 .map(|path| (PathBuf::from(path), 0));
         }
-        // Reiter für die Aufnahme: `--page preview|materials|general|devices`.
+        // Reiter für die Aufnahme: `--page preview|materials|job|general|devices`.
         #[cfg(feature = "screenshot")]
         if let Some(index) = arguments.iter().position(|argument| argument == "--page") {
             match arguments.get(index + 1).map(String::as_str) {
                 Some("preview") => app.show_preview = true,
                 Some("devices") => app.show_settings(SettingsPage::Devices),
                 Some("materials") => app.show_settings(SettingsPage::Materials),
+                Some("job") => app.show_settings(SettingsPage::Job),
                 Some("general") => app.show_settings(SettingsPage::General),
                 _ => {}
             }
@@ -1389,6 +1392,7 @@ impl VisiCutRust {
                 for (page, title) in [
                     (SettingsPage::Devices, tr("Lasercutter")),
                     (SettingsPage::Materials, tr("Materialien")),
+                    (SettingsPage::Job, tr("Job")),
                     (SettingsPage::General, tr("Allgemein")),
                 ] {
                     let text = egui::RichText::new(title).size(14.0);
@@ -1417,8 +1421,53 @@ impl VisiCutRust {
                     ui.add_space(6.0);
                     self.jobs.library_page(ui, &mut self.status);
                 }
+                SettingsPage::Job => self.job_page(ui),
                 SettingsPage::General => self.general_page(ui),
             });
+    }
+
+    /// Einstellungen → Job: Schnittreihenfolge des Projekts (früher Menü Job).
+    fn job_page(&mut self, ui: &mut egui::Ui) {
+        ui.heading(tr("Job"));
+        ui.add_space(6.0);
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.set_max_width(620.0);
+            form::section(ui, tr("Schnittreihenfolge"), |ui| {
+                form::caption(
+                    ui,
+                    tr("Reihenfolge der Schnitt- und Markierpfade; wird mit dem Projekt gesichert."),
+                );
+                ui.add_space(4.0);
+                let enabled = !self.busy();
+                for order in CutOrder::ALL {
+                    // Darunter VisiCuts weitere Reihenfolgen.
+                    if order == CutOrder::File {
+                        form::divider(ui);
+                        ui.add_space(4.0);
+                    }
+                    let selected = self.project.cut_order == order;
+                    if ui
+                        .add_enabled(
+                            enabled,
+                            egui::RadioButton::new(selected, jobs_ui::cut_order_title(order)),
+                        )
+                        .clicked()
+                        && !selected
+                    {
+                        self.project.cut_order = order;
+                        self.dirty = true;
+                    }
+                    // Erklärung unter dem Text des Knopfs eingerückt.
+                    egui::Frame::new()
+                        .inner_margin(egui::Margin {
+                            left: 24,
+                            ..Default::default()
+                        })
+                        .show(ui, |ui| form::caption(ui, jobs_ui::cut_order_help(order)));
+                    ui.add_space(2.0);
+                }
+            });
+        });
     }
 
     /// Einstellungen → Allgemein: Update-Prüfung und Geräteliste übertragen.
@@ -1547,7 +1596,7 @@ impl VisiCutRust {
             Command::ClearRecent => !self.settings.recent.is_empty(),
             Command::ClearCache => !session::states(&session::dir()).is_empty(),
             Command::Language(_) => true,
-            Command::CutOrder(_) | Command::Device(_) => !self.busy(),
+            Command::Device(_) => !self.busy(),
             Command::Undo => self.undo.is_some() && !self.busy(),
             Command::Center | Command::ExportPlf => self.texture.is_some() && !self.busy(),
             Command::ToggleCamera => self.devices.has_camera(),
@@ -1559,7 +1608,8 @@ impl VisiCutRust {
             | Command::Quit
             | Command::ToggleGrid
             | Command::ZoomFit
-            | Command::Materials => true,
+            | Command::Materials
+            | Command::JobSettings => true,
         }
     }
 
@@ -1593,6 +1643,7 @@ impl VisiCutRust {
             Command::ZoomOut => self.zoom = workspace::zoom_out(self.zoom),
             Command::ZoomFit => self.zoom = 1.0,
             Command::Materials => self.show_settings(SettingsPage::Materials),
+            Command::JobSettings => self.show_settings(SettingsPage::Job),
             Command::Preview => self.show_preview = true,
             Command::Send => self.send(),
             Command::Text => self.compose.open(compose_ui::Tool::Text, &self.project),
@@ -1632,12 +1683,6 @@ impl VisiCutRust {
                     .devices
                     .select(index, &mut self.project, &mut self.status)
                 {
-                    self.dirty = true;
-                }
-            }
-            Command::CutOrder(order) => {
-                if self.project.cut_order != order {
-                    self.project.cut_order = order;
                     self.dirty = true;
                 }
             }
@@ -1874,30 +1919,7 @@ impl VisiCutRust {
                 for command in [Command::Materials, Command::Preview] {
                     self.menu_item(ui, command, &mut clicked);
                 }
-                ui.separator();
-                // Reihenfolge der Schnitt- und Markierpfade.
-                ui.menu_button(tr("Schnittreihenfolge"), |ui| {
-                    for order in CutOrder::ALL {
-                        // Darunter VisiCuts weitere Reihenfolgen.
-                        if order == CutOrder::File {
-                            ui.separator();
-                        }
-                        let command = Command::CutOrder(order);
-                        if ui
-                            .add_enabled(
-                                self.enabled(command),
-                                egui::Button::selectable(
-                                    self.project.cut_order == order,
-                                    command.title(),
-                                ),
-                            )
-                            .on_hover_text(jobs_ui::cut_order_help(order))
-                            .clicked()
-                        {
-                            clicked = Some(command);
-                        }
-                    }
-                });
+                self.menu_item(ui, Command::JobSettings, &mut clicked);
                 ui.separator();
                 self.menu_item(ui, Command::Send, &mut clicked);
             });
@@ -2204,13 +2226,16 @@ impl VisiCutRust {
                 });
         }
         form::divider(ui);
-        egui::Frame::new()
-            .inner_margin(egui::Margin::symmetric(20, 8))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| self.preview.toolbar(ui, &self.project, &mut self.status));
-            });
-        form::divider(ui);
+        // Berechnen steht oben in der Leiste; hier nur Zeitschätzung und Anzeige.
+        if self.preview.has_toolbar() {
+            egui::Frame::new()
+                .inner_margin(egui::Margin::symmetric(20, 8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| self.preview.toolbar(ui));
+                });
+            form::divider(ui);
+        }
         ui.painter()
             .rect_filled(ui.available_rect_before_wrap(), 0.0, form::CANVAS);
         if self.texture.is_none() && !self.devices.camera_shown() {

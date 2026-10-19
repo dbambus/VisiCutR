@@ -38,7 +38,7 @@ pub fn cut_order_title(order: CutOrder) -> &'static str {
     }
 }
 
-/// Erklärung einer Schnittreihenfolge (Tooltip im Menü Job).
+/// Erklärung einer Schnittreihenfolge (Einstellungen → Job).
 pub fn cut_order_help(order: CutOrder) -> &'static str {
     match order {
         CutOrder::VisiCut => tr("Innere Konturen zuerst, Reihenfolge wie VisiCut."),

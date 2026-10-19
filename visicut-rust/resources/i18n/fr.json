@@ -518,7 +518,6 @@
   "Übertragung fehlgeschlagen; Teiljob könnte am Gerät liegen: {error}": "Échec du transfert ; un job partiel peut se trouver sur la machine : {error}",
   "Übertragung unerwartet abgebrochen; Gerätestatus prüfen": "Transfert interrompu de façon inattendue ; vérifier l'état de la machine",
   "Übertragung von {job} fehlgeschlagen: {error}\nBereits übertragen: {sent}. Dieser Job kann teilweise am Gerät liegen. Weitere Aufträge wurden nicht gesendet; vor erneutem Senden Gerätespeicher prüfen.": "Échec du transfert de {job} : {error}\nDéjà transféré : {sent}. Ce job peut se trouver partiellement sur la machine. Les autres jobs n'ont pas été envoyés ; vérifier la mémoire de la machine avant de renvoyer.",
-  "👁 Vorschau & Zeit berechnen": "👁 Calculer l'aperçu & le temps",
   "1 Bearbeitungsschritt": "1 étape d'usinage",
   "1. Kalibrierseite als Projekt öffnen und auf Restmaterial markieren.\n2. Foto aufnehmen.\n3. Nummerierte Marker auf die Kreuze ziehen (Nummer = Anzahl Striche).\nMindestens 4 Punkte, nicht auf einer Linie.": "1. Ouvrir la page de calibrage comme projet et la marquer sur une chute de matériau.\n2. Prendre une photo.\n3. Faire glisser les repères numérotés sur les croix (numéro = nombre de traits).\nAu moins 4 points, non alignés.",
   "Ablage": "Fichier",
@@ -944,5 +943,7 @@
   "heute": "aujourd’hui",
   "vor {days} Tagen": "il y a {days} jours",
   "{added} LTT iLaser 4000 von „{name}“ importiert": "{added} LTT iLaser 4000 importés depuis « {name} »",
-  "Leistung & Tempo": "Puissance et vitesse"
+  "Leistung & Tempo": "Puissance et vitesse",
+  "Job-Einstellungen …": "Réglages de la tâche …",
+  "Reihenfolge der Schnitt- und Markierpfade; wird mit dem Projekt gesichert.": "Ordre des tracés de découpe et de marquage ; enregistré avec le projet."
 }

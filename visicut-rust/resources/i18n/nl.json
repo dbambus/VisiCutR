@@ -518,7 +518,6 @@
   "Übertragung fehlgeschlagen; Teiljob könnte am Gerät liegen: {error}": "Overdracht mislukt; een deeltaak kan op het apparaat staan: {error}",
   "Übertragung unerwartet abgebrochen; Gerätestatus prüfen": "Overdracht onverwacht afgebroken; controleer de apparaatstatus",
   "Übertragung von {job} fehlgeschlagen: {error}\nBereits übertragen: {sent}. Dieser Job kann teilweise am Gerät liegen. Weitere Aufträge wurden nicht gesendet; vor erneutem Senden Gerätespeicher prüfen.": "Overdracht van {job} mislukt: {error}\nAl verzonden: {sent}. Deze taak kan gedeeltelijk op het apparaat staan. Verdere taken zijn niet verzonden; controleer vóór opnieuw verzenden het apparaatgeheugen.",
-  "👁 Vorschau & Zeit berechnen": "👁 Voorbeeld & tijd berekenen",
   "1 Bearbeitungsschritt": "1 bewerkingsstap",
   "1. Kalibrierseite als Projekt öffnen und auf Restmaterial markieren.\n2. Foto aufnehmen.\n3. Nummerierte Marker auf die Kreuze ziehen (Nummer = Anzahl Striche).\nMindestens 4 Punkte, nicht auf einer Linie.": "1. Kalibratiepagina als project openen en op restmateriaal markeren.\n2. Foto maken.\n3. Genummerde markers naar de kruisjes slepen (nummer = aantal streepjes).\nMinimaal 4 punten, niet op één lijn.",
   "Ablage": "Archief",
@@ -944,5 +943,7 @@
   "heute": "vandaag",
   "vor {days} Tagen": "{days} dagen geleden",
   "{added} LTT iLaser 4000 von „{name}“ importiert": "{added} LTT iLaser 4000 geïmporteerd van ‘{name}’",
-  "Leistung & Tempo": "Vermogen en snelheid"
+  "Leistung & Tempo": "Vermogen en snelheid",
+  "Job-Einstellungen …": "Taakinstellingen …",
+  "Reihenfolge der Schnitt- und Markierpfade; wird mit dem Projekt gesichert.": "Volgorde van snij- en markeerpaden; wordt met het project opgeslagen."
 }

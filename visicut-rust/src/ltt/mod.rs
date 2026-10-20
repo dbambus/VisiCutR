@@ -1749,6 +1749,7 @@ mod tests {
             width_mm: 60.0,
             height_mm: 30.0,
             svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="60mm" height="30mm" viewBox="0 0 60 30"><rect x="5" y="5" width="20" height="20" fill="none" stroke="red"/><rect x="25" y="5" width="20" height="20" fill="none" stroke="red"/></svg>"#.into(),
+            remove_duplicate_lines: false,
             ..Default::default()
         };
         let plain = prepare(&project).unwrap();
@@ -1833,6 +1834,8 @@ mod tests {
                     outline,
                     ..crate::project::JobStep::new(Operation::Cut)
                 }],
+                // The overlapping edges stay, only the outline merges them.
+                remove_duplicate_lines: false,
                 ..Default::default()
             };
             prepare(&project).unwrap()

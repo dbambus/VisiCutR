@@ -49,6 +49,8 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Project {
         raster: raster(dir, case),
         // Byte-gleich mit Java nur in VisiCuts Reihenfolge.
         cut_order: CutOrder::VisiCut,
+        // VisiCut schneidet doppelte Linien mehrfach.
+        remove_duplicate_lines: false,
         ..Project::default()
     };
     // Further parameter sets need a step; filters `[]` select every object.

@@ -173,7 +173,10 @@ lokal nach einem Build für die jeweilige Host-Architektur.
    Fläche des Umrissrechtecks). **Doppelte Linien entfernen**
    schneidet Abschnitte, die genau auf einer schon geschnittenen Linie
    desselben Schritts liegen (gemeinsame Kanten, doppelt platzierte Objekte),
-   nur einmal; die Schrittbeschreibung nennt, wie viel entfernt wurde.
+   nur einmal; die Schrittbeschreibung nennt, wie viel entfernt wurde. Neue
+   Projekte und Dateien ohne diese Angabe schalten es ein, gespeicherte
+   Projekte behalten ihre Wahl (Windows/Linux: **Einstellungen → Job**,
+   macOS: Seitenleiste).
    **Nur Umriss** (je Schneid- oder Markierschritt, VisiCut „useOutline“)
    schneidet nur den Rand der Fläche, die alle Objekte des Schritts zusammen
    bedecken: Überlappungen und innere Linien entfallen, Löcher der

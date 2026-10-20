@@ -39,8 +39,9 @@ pub struct Project {
     /// Order of vector paths; anything but the default is experimental.
     #[serde(default)]
     pub cut_order: CutOrder,
-    /// Cut lines that run along an earlier line of the same step only once.
-    #[serde(default)]
+    /// Cut lines that run along an earlier line of the same step only once
+    /// (default on; files without the field get the default).
+    #[serde(default = "default_true")]
     pub remove_duplicate_lines: bool,
     /// Machine-specific settings, copied from the selected device.
     #[serde(default)]
@@ -323,7 +324,7 @@ struct ProjectFile {
     ignore_filters: Vec<Vec<Filter>>,
     #[serde(default = "legacy_cut_order")]
     cut_order: CutOrder,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     remove_duplicate_lines: bool,
     #[serde(default)]
     machine: MachineSettings,
@@ -397,6 +398,9 @@ fn default_port() -> u16 {
 fn default_rotary_diameter() -> f32 {
     100.0
 }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Operation {
@@ -456,7 +460,7 @@ impl Default for Project {
             raster: RasterSettings::default(),
             ignore_filters: Vec::new(),
             cut_order: CutOrder::default(),
-            remove_duplicate_lines: false,
+            remove_duplicate_lines: true,
             machine: MachineSettings::default(),
             part_name: String::new(),
             active_part: 0,
@@ -817,6 +821,19 @@ mod tests {
         let loaded: Project = serde_json::from_value(value).unwrap();
         assert!(loaded.steps.is_empty());
         assert!(loaded.validate().is_ok());
+    }
+
+    #[test]
+    fn duplicate_lines_default_on_and_keep_the_saved_choice() {
+        assert!(Project::default().remove_duplicate_lines);
+        let mut value = serde_json::to_value(project()).unwrap();
+        let fields = value.as_object_mut().unwrap();
+        fields.remove("remove_duplicate_lines");
+        let loaded: Project = serde_json::from_value(value.clone()).unwrap();
+        assert!(loaded.remove_duplicate_lines);
+        value["remove_duplicate_lines"] = false.into();
+        let loaded: Project = serde_json::from_value(value).unwrap();
+        assert!(!loaded.remove_duplicate_lines);
     }
 
     #[test]

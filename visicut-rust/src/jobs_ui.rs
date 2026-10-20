@@ -983,15 +983,6 @@ impl JobUi {
                     );
                 }
             }
-            *dirty |= ui
-                .checkbox(
-                    &mut project.remove_duplicate_lines,
-                    tr("Doppelte Linien entfernen"),
-                )
-                .on_hover_text(tr("\
-                    Linien, die genau auf einer bereits geschnittenen Linie desselben Schritts \
-                     liegen (z. B. gemeinsame Kanten), nur einmal schneiden"))
-                .changed();
         });
         match assignment_mode(project) {
             AssignmentMode::Whole => {

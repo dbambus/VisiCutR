@@ -498,7 +498,12 @@ impl DeviceUi {
                     ui.separator();
                     ui.vertical(|ui| {
                         let device = &mut draft.devices[editing];
-                        egui::Grid::new("device").num_columns(2).show(ui, |ui| {
+                        // Ein Raster für alle Abschnitte: die Felder fluchten in
+                        // einer Spalte, auch bei aufgeklappter „Maschine“.
+                        egui::Grid::new("device")
+                            .num_columns(2)
+                            .min_col_width(machine_label_width(ui))
+                            .show(ui, |ui| {
                             for (label, value) in [
                                 (tr("Name"), &mut device.name),
                                 (tr("Beschreibung"), &mut device.description),
@@ -524,11 +529,26 @@ impl DeviceUi {
                                  ändert den Auftrag nicht",
                             ));
                             ui.end_row();
-                        });
-                        // Kamera wie im VisiCut-Dialog: URL mit „Suchen“, Anmeldung, Zeiten.
-                        ui.add_space(6.0);
-                        ui.strong(tr("Kamera"));
-                        egui::Grid::new("camera").num_columns(2).show(ui, |ui| {
+                            top_label(ui, tr("Hinweis nach dem Senden"));
+                            ui.vertical(|ui| {
+                                let width = ui.spacing().text_edit_width;
+                                ui.set_max_width(width);
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut device.job_sent_text)
+                                        .desired_width(width)
+                                        .desired_rows(4),
+                                );
+                                ui.small(tr(
+                                    "Autofokus, Druckluft und Absaugung stellt der LTT-Treiber \
+                                     nicht ein; dieser Text erinnert nach dem Senden daran. \
+                                     $jobname wird durch die Auftragsnamen ersetzt.",
+                                ));
+                            });
+                            ui.end_row();
+                            // Kamera wie im VisiCut-Dialog: URL mit „Suchen“, Anmeldung, Zeiten.
+                            section_title(ui, |ui| {
+                                ui.strong(tr("Kamera"));
+                            });
                             ui.label(tr("Kamera-URL"));
                             ui.horizontal(|ui| {
                                 ui.text_edit_singleline(&mut device.camera_url);
@@ -600,19 +620,36 @@ impl DeviceUi {
                                     .clicked();
                             });
                             ui.end_row();
-                        });
-                        ui.label(tr("Hinweis nach dem Senden ($jobname = Auftragsnamen):"));
-                        ui.add(
-                            egui::TextEdit::multiline(&mut device.job_sent_text).desired_rows(4),
-                        );
-                        ui.small(tr(
-                            "Autofokus, Druckluft und Absaugung stellt der LTT-Treiber nicht ein.",
-                        ));
-                        egui::CollapsingHeader::new(tr("Maschine"))
-                            .id_salt("machine")
-                            .show(ui, |ui| {
-                                shift_test |= machine_settings(ui, &mut device.machine);
+                            let mut machine = egui::collapsing_header::CollapsingState::load_with_default_open(
+                                ui.ctx(),
+                                egui::Id::new("device_machine"),
+                                false,
+                            );
+                            let mut toggle = false;
+                            section_title(ui, |ui| {
+                                let size = egui::Vec2::splat(ui.spacing().icon_width);
+                                let (_, icon) = ui.allocate_exact_size(size, Sense::click());
+                                // Kleines Dreieck wie im CollapsingHeader.
+                                let (small, _) = ui.spacing().icon_rectangles(icon.rect);
+                                egui::collapsing_header::paint_default_icon(
+                                    ui,
+                                    machine.openness(ui.ctx()),
+                                    &icon.clone().with_new_rect(small),
+                                );
+                                let title = egui::Label::new(
+                                    egui::RichText::new(tr("Maschine")).strong(),
+                                )
+                                .sense(Sense::click());
+                                toggle = icon.clicked() | ui.add(title).clicked();
                             });
+                            if toggle {
+                                machine.toggle(ui);
+                            }
+                            machine.store(ui.ctx());
+                            if machine.is_open() {
+                                shift_test |= machine_rows(ui, &mut device.machine);
+                            }
+                        });
                     });
                 });
                 ui.separator();
@@ -788,61 +825,113 @@ impl DeviceUi {
     }
 }
 
-/// Zeilenversatz, Kurvenbeschleunigung und Verweilzeit eines Geräts;
-/// `true`, wenn die Kalibrierung geöffnet werden soll.
-fn machine_settings(ui: &mut egui::Ui, machine: &mut MachineSettings) -> bool {
-    ui.label(tr(
-        "Zeilenversatz beim Gravieren (1/4000 Zoll, 8 = ein Pixel)",
-    ));
-    egui::Grid::new("engrave_shift").show(ui, |ui| {
-        for (row, values) in machine.engrave_shift.chunks_mut(5).enumerate() {
-            for (i, value) in values.iter_mut().enumerate() {
-                ui.label(format!("{} %", (row * 5 + i + 1) * 10));
-                ui.add(egui::DragValue::new(value).range(-400.0..=400.0).speed(1.0));
+/// Beschriftungen der Zeilen unter „Maschine“.
+fn machine_labels() -> [&'static str; 3] {
+    [
+        tr("Zeilenversatz"),
+        tr("Kurvenbeschleunigung"),
+        tr("Verweilzeit am Konturstart"),
+    ]
+}
+
+/// Mindestbreite der Beschriftungsspalte im Geräteraster: so breit wie die
+/// Beschriftungen unter „Maschine“, damit die Felder beim Aufklappen nicht
+/// nach rechts springen.
+fn machine_label_width(ui: &egui::Ui) -> f32 {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    machine_labels()
+        .into_iter()
+        .map(|label| {
+            ui.painter()
+                .layout_no_wrap(label.to_owned(), font.clone(), Color32::PLACEHOLDER)
+                .size()
+                .x
+        })
+        .fold(0.0, f32::max)
+}
+
+/// Beschriftung oben in ihrer Rasterzelle, auf Höhe der ersten Zeile eines
+/// mehrzeiligen Felds (sonst stünde sie in der Mitte).
+fn top_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    ui.vertical(|ui| ui.horizontal(|ui| ui.label(text)).inner)
+        .inner
+}
+
+/// Abschnittstitel in der Beschriftungsspalte mit etwas Abstand nach oben.
+fn section_title(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
+    ui.vertical(|ui| {
+        ui.add_space(8.0);
+        ui.horizontal(add);
+    });
+    ui.end_row();
+}
+
+/// Zeilen „Maschine“ im Geräteraster: Zeilenversatz, Kurvenbeschleunigung
+/// und Verweilzeit; `true`, wenn die Kalibrierung geöffnet werden soll.
+fn machine_rows(ui: &mut egui::Ui, machine: &mut MachineSettings) -> bool {
+    let [shift, acceleration, pierce_delay] = machine_labels();
+    top_label(ui, shift);
+    let calibrate = ui
+        .vertical(|ui| {
+            egui::Grid::new("engrave_shift").show(ui, |ui| {
+                for (row, values) in machine.engrave_shift.chunks_mut(5).enumerate() {
+                    for (i, value) in values.iter_mut().enumerate() {
+                        ui.label(format!("{} %", (row * 5 + i + 1) * 10));
+                        ui.add(egui::DragValue::new(value).range(-400.0..=400.0).speed(1.0));
+                    }
+                    ui.end_row();
+                }
+            });
+            ui.small(tr("Beim Gravieren, in 1/4000 Zoll (8 = ein Pixel)"));
+            ui.button(tr("Zeilenversatz kalibrieren …")).clicked()
+        })
+        .inner;
+    ui.end_row();
+    top_label(ui, acceleration);
+    ui.vertical(|ui| {
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::DragValue::new(&mut machine.curve_acceleration_mm_s2)
+                    .range(500.0..=5000.0)
+                    .suffix(" mm/s²"),
+            );
+            if ui.button("LibLaserCut").clicked() {
+                machine.curve_acceleration_mm_s2 = LIBLASERCUT_CURVE_ACCELERATION;
             }
-            ui.end_row();
+            if ui
+                .button(tr("Firmware 0,1 g"))
+                .on_hover_text(tr(
+                    "Rampe des Controllers bei verbundenen Kurven (experimentell)",
+                ))
+                .clicked()
+            {
+                machine.curve_acceleration_mm_s2 = FIRMWARE_CURVE_ACCELERATION;
+            }
+        });
+        if machine.experimental_curves() {
+            ui.small(tr(
+                "Experimentell: Kurven werden anders geplant als in VisiCut.",
+            ));
         }
     });
-    let calibrate = ui.button(tr("Zeilenversatz kalibrieren …")).clicked();
-    ui.horizontal(|ui| {
-        ui.label(tr("Kurvenbeschleunigung"));
-        ui.add(
-            egui::DragValue::new(&mut machine.curve_acceleration_mm_s2)
-                .range(500.0..=5000.0)
-                .suffix(" mm/s²"),
-        );
-        if ui.button("LibLaserCut").clicked() {
-            machine.curve_acceleration_mm_s2 = LIBLASERCUT_CURVE_ACCELERATION;
-        }
-        if ui
-            .button(tr("Firmware 0,1 g"))
-            .on_hover_text(tr(
-                "Rampe des Controllers bei verbundenen Kurven (experimentell)",
-            ))
-            .clicked()
-        {
-            machine.curve_acceleration_mm_s2 = FIRMWARE_CURVE_ACCELERATION;
-        }
-    });
-    if machine.experimental_curves() {
-        ui.small(tr(
-            "Experimentell: Kurven werden anders geplant als in VisiCut.",
-        ));
-    }
-    ui.horizontal(|ui| {
-        ui.label(tr("Verweilzeit am Konturstart"));
+    ui.end_row();
+    top_label(ui, pierce_delay);
+    ui.vertical(|ui| {
         ui.add(
             egui::DragValue::new(&mut machine.pierce_delay_ms)
                 .range(0.0..=1000.0)
                 .suffix(" ms"),
         );
+        ui.small(tr(
+            "pddelay der Gerätekonfiguration; nur für die Zeitschätzung.",
+        ));
     });
-    ui.small(tr(
-        "pddelay der Gerätekonfiguration; nur für die Zeitschätzung.",
-    ));
+    ui.end_row();
+    ui.label("");
     if ui.button(tr("Standardwerte")).clicked() {
         *machine = MachineSettings::default();
     }
+    ui.end_row();
     calibrate
 }
 

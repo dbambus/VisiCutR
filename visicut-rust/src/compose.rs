@@ -2168,7 +2168,12 @@ mod tests {
             quantity: 4,
             ..NestSettings::default()
         };
-        let nested = nest(&demo(), &settings).unwrap();
+        // Even if the project itself keeps duplicate lines.
+        let separate_lines = Project {
+            remove_duplicate_lines: false,
+            ..demo()
+        };
+        let nested = nest(&separate_lines, &settings).unwrap();
         assert!(nested.project.remove_duplicate_lines);
         // The frames are stacked along their cut lines, not their 0.5 mm
         // strokes, so the shared straight edges are removed.
@@ -2185,7 +2190,7 @@ mod tests {
         .unwrap();
         assert!(job.estimated_seconds < separate.estimated_seconds);
         let with_gap = nest(
-            &demo(),
+            &separate_lines,
             &NestSettings {
                 gap_mm: 1.0,
                 ..settings

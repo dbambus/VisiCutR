@@ -1486,6 +1486,34 @@ impl VisiCutRust {
                     ui.add_space(2.0);
                 }
             });
+            // Früher in der Objektzuordnung; gehört wie die Reihenfolge zum Projekt.
+            form::section(ui, tr("Doppelte Linien"), |ui| {
+                if ui
+                    .add_enabled(
+                        !self.busy(),
+                        egui::Checkbox::new(
+                            &mut self.project.remove_duplicate_lines,
+                            tr("Doppelte Linien entfernen"),
+                        ),
+                    )
+                    .changed()
+                {
+                    self.dirty = true;
+                }
+                egui::Frame::new()
+                    .inner_margin(egui::Margin {
+                        left: 24,
+                        ..Default::default()
+                    })
+                    .show(ui, |ui| {
+                        form::caption(
+                            ui,
+                            tr("Linien, die genau auf einer bereits geschnittenen Linie desselben \
+                                Schritts liegen (z. B. gemeinsame Kanten), nur einmal schneiden; \
+                                wird mit dem Projekt gesichert."),
+                        )
+                    });
+            });
         });
     }
 

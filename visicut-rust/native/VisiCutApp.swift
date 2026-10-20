@@ -1013,8 +1013,7 @@ final class AppModel: ObservableObject {
                       ["jobs": prepared.jobs.map(\.name).joined(separator: " → "), "time": duration(prepared.estimated_seconds)])
         let target = tr("Lasercutter: {name} ({host}:{port})",
                         ["name": device.name, "host": snapshot.hostname, "port": String(snapshot.port)])
-        let notice = tr("Die Übertragung startet den Laser nicht. Aufträge am Gerät in dieser Reihenfolge einzeln starten. Treiber am Gerät noch nicht validiert. Vor dem Start Material, Fokus und Druckluft prüfen.")
-        alert.informativeText = ([jobs + "\n" + target] + prepared.warnings + [notice]).joined(separator: "\n\n")
+        alert.informativeText = ([jobs + "\n" + target] + prepared.warnings).joined(separator: "\n\n")
         alert.addButton(withTitle: tr("Senden"))
         alert.addButton(withTitle: tr("Abbrechen"))
         guard alert.runModal() == .alertFirstButtonReturn, snapshot == project else { return }

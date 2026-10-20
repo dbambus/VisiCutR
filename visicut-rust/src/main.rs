@@ -2814,12 +2814,6 @@ impl VisiCutRust {
         for warning in &prepared.warnings {
             ui.colored_label(WARNING, format!("⚠ {warning}"));
         }
-        ui.add_space(6.0);
-        ui.small(tr(
-            "Die Übertragung startet den Laser nicht. Aufträge am Gerät in dieser Reihenfolge \
-             einzeln starten. Treiber am Gerät noch nicht validiert. Vor dem Start Material, \
-             Fokus und Druckluft prüfen.",
-        ));
     }
 
     fn poll_send(&mut self, ctx: &egui::Context) {

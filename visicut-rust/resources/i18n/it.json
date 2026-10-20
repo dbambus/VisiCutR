@@ -73,7 +73,6 @@
   "Datei öffnen, hierher ziehen oder das Beispiel öffnen": "Apri un file, trascinalo qui o apri l'esempio",
   "Der Text ergibt keine Umrisse (Schrift ohne passende Zeichen?)": "Il testo non produce contorni (font senza i caratteri necessari?)",
   "Der Text wird in Umrisse umgewandelt und ist danach nicht mehr editierbar.": "Il testo viene convertito in contorni e poi non è più modificabile.",
-  "Die Übertragung startet den Laser nicht. Aufträge am Gerät in dieser Reihenfolge einzeln starten. Treiber am Gerät noch nicht validiert. Vor dem Start Material, Fokus und Druckluft prüfen.": "La trasmissione non avvia il laser. Avvia i lavori sul dispositivo uno alla volta in quest'ordine. Driver non ancora validato sul dispositivo. Prima dell'avvio controlla materiale, fuoco e aria compressa.",
   "Doppelte Linien entfernen": "Rimuovi linee doppie",
   "Download unerwartet abgebrochen": "Download interrotto inaspettatamente",
   "Download von „{name}“ fehlgeschlagen: {error}": "Download di “{name}” non riuscito: {error}",

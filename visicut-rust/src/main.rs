@@ -2,6 +2,7 @@ mod compose_ui;
 mod devices_ui;
 mod form;
 mod jobs_ui;
+mod object_bar;
 mod preview_ui;
 mod settings;
 mod vectorize_ui;
@@ -49,8 +50,6 @@ enum Command {
     ZoomOut,
     ZoomFit,
     Materials,
-    /// Einstellungen → Job (Schnittreihenfolge).
-    JobSettings,
     Preview,
     Send,
     Text,
@@ -59,6 +58,8 @@ enum Command {
     Array,
     Nest,
     Undo,
+    /// Den zuletzt widerrufenen Schritt wiederherstellen.
+    Redo,
     Delete,
     Duplicate,
     /// Das gewählte Teil als neues Teil kopieren.
@@ -73,8 +74,6 @@ enum Command {
     ClearRecent,
     /// Alle ungesicherten Zwischenstände löschen (`session`).
     ClearCache,
-    /// Sprache der Oberfläche; `None` folgt dem System.
-    Language(Option<i18n::Language>),
     /// Aktiver Lasercutter (Menü Datei → Lasercutter), Index in der Geräteliste.
     Device(usize),
 }
@@ -125,7 +124,6 @@ impl Command {
             Self::ZoomOut => tr("Verkleinern"),
             Self::ZoomFit => tr("Zoom zurücksetzen"),
             Self::Materials => tr("Materialbibliothek …"),
-            Self::JobSettings => tr("Job-Einstellungen …"),
             Self::Preview => tr("Vorschau & Zeit …"),
             Self::Send => tr("An Lasercutter senden …"),
             Self::Text => tr("Text …"),
@@ -134,6 +132,7 @@ impl Command {
             Self::Array => tr("Kopien im Raster …"),
             Self::Nest => tr("Teile verschachteln (Nesting) …"),
             Self::Undo => tr("Widerrufen"),
+            Self::Redo => tr("Wiederholen"),
             Self::Delete => tr("Löschen"),
             Self::Duplicate => tr("Duplizieren"),
             Self::DuplicatePart => tr("Teil duplizieren"),
@@ -145,7 +144,6 @@ impl Command {
             Self::OpenRecent(_) => tr("Zuletzt geöffnet"),
             Self::ClearRecent => tr("Liste leeren"),
             Self::ClearCache => tr("Zwischenspeicher leeren …"),
-            Self::Language(_) => tr("Sprache"),
         }
     }
 
@@ -169,13 +167,13 @@ impl Command {
             Self::ToggleGrid => (Modifiers::COMMAND, Key::G),
             // Nur ohne aktives Eingabefeld (siehe `keyboard`).
             Self::Undo => (Modifiers::COMMAND, Key::Z),
+            Self::Redo => (COMMAND_SHIFT, Key::Z),
             Self::Delete => (Modifiers::NONE, Key::Delete),
             Self::Duplicate => (Modifiers::COMMAND, Key::D),
             Self::Demo
             | Self::Vectorize
             | Self::Center
             | Self::Send
-            | Self::JobSettings
             | Self::Text
             | Self::Shape
             | Self::Sign
@@ -190,7 +188,6 @@ impl Command {
             | Self::OpenRecent(_)
             | Self::ClearRecent
             | Self::ClearCache
-            | Self::Language(_)
             | Self::Device(_)
             | Self::ExportPlf => return None,
         };
@@ -329,6 +326,8 @@ struct VisiCutRust {
     compose: compose_ui::ComposeUi,
     /// Stand vor der letzten Werkzeug- oder Löschaktion (ein Schritt).
     undo: Option<Snapshot>,
+    /// Stand vor dem letzten Widerrufen; verfällt mit der nächsten Aktion.
+    redo: Option<Snapshot>,
     /// Bezugspunkt für X/Y und Größenänderungen (0, ½ oder 1 je Achse).
     reference: [f32; 2],
     rotate_deg: f32,
@@ -397,6 +396,7 @@ impl VisiCutRust {
             vectorize: vectorize_ui::VectorizeUi::default(),
             compose: compose_ui::ComposeUi::default(),
             undo: None,
+            redo: None,
             reference: [0.0, 0.0],
             rotate_deg: 0.0,
             handle_drag: None,
@@ -694,7 +694,7 @@ impl VisiCutRust {
         if self.texture.is_none() {
             return;
         }
-        self.undo = Some(self.snapshot());
+        self.checkpoint();
         let mut all = self.all_textures();
         all.push(self.texture.clone());
         let mut part = self.project.active();
@@ -703,7 +703,7 @@ impl VisiCutRust {
         self.project.add_part(part);
         self.arrange_textures(all);
         self.dirty = true;
-        self.status = tr("Teil dupliziert · Bearbeiten › Widerrufen macht es rückgängig").into();
+        self.status = tr("Teil dupliziert · Widerrufen macht es rückgängig").into();
     }
 
     /// Grafiken über den Dateidialog als neue Teile hinzufügen.
@@ -893,8 +893,7 @@ impl VisiCutRust {
                     let added = self.project.part_count().saturating_sub(before);
                     if added > 0 {
                         self.status = tr!(
-                            "{count} Datei(en) als Teile hinzugefügt · \
-                             Bearbeiten › Widerrufen macht es rückgängig",
+                            "{count} Datei(en) als Teile hinzugefügt · Widerrufen macht es rückgängig",
                             count = added
                         );
                     }
@@ -1058,7 +1057,7 @@ impl VisiCutRust {
             Ok(textures) => textures,
             Err(e) => return self.report(e),
         };
-        self.undo = Some(self.snapshot());
+        self.checkpoint();
         let same_part = project.active_part == self.project.active_part
             && project.parts.len() == self.project.parts.len();
         let old_steps = if same_part {
@@ -1119,7 +1118,7 @@ impl VisiCutRust {
         if self.texture.is_none() {
             return;
         }
-        self.undo = Some(self.snapshot());
+        self.checkpoint();
         let several = self.project.part_count() > 1;
         let mut all = self.all_textures();
         all.remove(self.project.active_part.min(all.len() - 1));
@@ -1127,9 +1126,9 @@ impl VisiCutRust {
         self.arrange_textures(all);
         self.dirty = true;
         self.status = if several {
-            tr("Teil entfernt · Bearbeiten › Widerrufen stellt es wieder her")
+            tr("Teil entfernt · Widerrufen stellt es wieder her")
         } else {
-            tr("Motiv entfernt · Bearbeiten › Widerrufen stellt es wieder her")
+            tr("Motiv entfernt · Widerrufen stellt es wieder her")
         }
         .into();
     }
@@ -1143,13 +1142,33 @@ impl VisiCutRust {
         }
     }
 
+    /// Merkt den Stand vor einer Werkzeug- oder Löschaktion für Widerrufen;
+    /// ein widerrufener Schritt lässt sich danach nicht mehr wiederholen.
+    fn checkpoint(&mut self) {
+        self.undo = Some(self.snapshot());
+        self.redo = None;
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) {
+        self.project = snapshot.project;
+        self.texture = snapshot.texture;
+        self.part_textures = snapshot.part_textures;
+        self.dirty = true;
+    }
+
     fn undo_last(&mut self) {
         if let Some(snapshot) = self.undo.take() {
-            self.project = snapshot.project;
-            self.texture = snapshot.texture;
-            self.part_textures = snapshot.part_textures;
-            self.dirty = true;
+            self.redo = Some(self.snapshot());
+            self.restore(snapshot);
             self.status = tr("Letzte Änderung widerrufen").into();
+        }
+    }
+
+    fn redo_last(&mut self) {
+        if let Some(snapshot) = self.redo.take() {
+            self.undo = Some(self.snapshot());
+            self.restore(snapshot);
+            self.status = tr("Änderung wiederhergestellt").into();
         }
     }
 
@@ -1327,16 +1346,16 @@ impl VisiCutRust {
         let mut clicked = None;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
-            for (command, icon) in [(Command::Open, "📂"), (Command::Save, "💾")] {
-                let hover = command.title().trim_end_matches(" …").to_owned();
-                if form::top_button(ui, self.enabled(command), icon)
-                    .on_hover_text(hover)
-                    .clicked()
-                {
-                    clicked = Some(command);
-                }
-            }
-            ui.add_space(12.0);
+            // Datei-Menü hinter dem Haus wie in Bambu Studio, abgesetzt durch
+            // einen Strich.
+            let home = form::top_icon(ui, object_bar::Icon::Home).on_hover_text(tr("Datei"));
+            egui::Popup::menu(&home).show(|ui| self.file_menu(ui, &mut clicked));
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(17.0, 40.0), Sense::hover());
+            ui.painter().vline(
+                rect.center().x,
+                rect.y_range().shrink(10.0),
+                Stroke::new(1.0, Color32::from_gray(90)),
+            );
             for (page, title) in [
                 (Page::Prepare, format!("✂  {}", tr("Vorbereiten"))),
                 (Page::Preview, format!("👁  {}", tr("Vorschau"))),
@@ -1426,7 +1445,7 @@ impl VisiCutRust {
             });
     }
 
-    /// Einstellungen → Job: Schnittreihenfolge des Projekts (früher Menü Job).
+    /// Einstellungen → Job: Schnittreihenfolge des Projekts.
     fn job_page(&mut self, ui: &mut egui::Ui) {
         ui.heading(tr("Job"));
         ui.add_space(6.0);
@@ -1470,12 +1489,41 @@ impl VisiCutRust {
         });
     }
 
-    /// Einstellungen → Allgemein: Update-Prüfung und Geräteliste übertragen.
+    /// Einstellungen → Allgemein: Sprache, Update-Prüfung und Geräteliste übertragen.
     fn general_page(&mut self, ui: &mut egui::Ui) {
         ui.heading(tr("Allgemein"));
         ui.add_space(6.0);
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.set_max_width(620.0);
+            form::section(ui, tr("Sprache"), |ui| {
+                let chosen = self
+                    .settings
+                    .language
+                    .as_deref()
+                    .and_then(i18n::Language::from_code);
+                let mut picked = chosen;
+                form::row(ui, tr("Oberfläche"), |ui| {
+                    form::Dropdown::from_id_salt("language")
+                        .width(200.0)
+                        .selected_text(chosen.map_or(tr("Systemsprache"), |l| l.native_name()))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut picked, None, tr("Systemsprache"));
+                            ui.separator();
+                            for language in i18n::Language::ALL {
+                                ui.selectable_value(
+                                    &mut picked,
+                                    Some(language),
+                                    language.native_name(),
+                                );
+                            }
+                        });
+                });
+                if picked != chosen {
+                    self.settings.language = picked.map(|l| l.code().to_owned());
+                    i18n::set_language(self.settings.language());
+                    self.save_settings();
+                }
+            });
             form::section(ui, tr("Updates"), |ui| {
                 let mut auto = !self.settings.update_check_disabled;
                 if ui
@@ -1568,6 +1616,14 @@ impl VisiCutRust {
                         ),
                     );
                 });
+                // Rotationseinheit direkt unter dem Gerät, ohne eigenen Bereich.
+                if self.devices.device().rotary_axis {
+                    egui::Frame::new()
+                        .inner_margin(egui::Margin::symmetric(4, 2))
+                        .show(ui, |ui| {
+                            self.devices.rotary(ui, &mut self.project, &mut self.dirty);
+                        });
+                }
             });
         clicked
     }
@@ -1595,9 +1651,9 @@ impl VisiCutRust {
             Command::OpenRecent(_) => !self.busy(),
             Command::ClearRecent => !self.settings.recent.is_empty(),
             Command::ClearCache => !session::states(&session::dir()).is_empty(),
-            Command::Language(_) => true,
             Command::Device(_) => !self.busy(),
             Command::Undo => self.undo.is_some() && !self.busy(),
+            Command::Redo => self.redo.is_some() && !self.busy(),
             Command::Center | Command::ExportPlf => self.texture.is_some() && !self.busy(),
             Command::ToggleCamera => self.devices.has_camera(),
             Command::RefreshCamera => self.devices.camera_shown() && !self.devices.camera_loading(),
@@ -1608,8 +1664,7 @@ impl VisiCutRust {
             | Command::Quit
             | Command::ToggleGrid
             | Command::ZoomFit
-            | Command::Materials
-            | Command::JobSettings => true,
+            | Command::Materials => true,
         }
     }
 
@@ -1643,7 +1698,6 @@ impl VisiCutRust {
             Command::ZoomOut => self.zoom = workspace::zoom_out(self.zoom),
             Command::ZoomFit => self.zoom = 1.0,
             Command::Materials => self.show_settings(SettingsPage::Materials),
-            Command::JobSettings => self.show_settings(SettingsPage::Job),
             Command::Preview => self.show_preview = true,
             Command::Send => self.send(),
             Command::Text => self.compose.open(compose_ui::Tool::Text, &self.project),
@@ -1652,6 +1706,7 @@ impl VisiCutRust {
             Command::Array => self.compose.open(compose_ui::Tool::Array, &self.project),
             Command::Nest => self.compose.open(compose_ui::Tool::Nest, &self.project),
             Command::Undo => self.undo_last(),
+            Command::Redo => self.redo_last(),
             Command::Delete => self.delete_part(),
             Command::DuplicatePart => self.duplicate_part(),
             Command::Duplicate => {
@@ -1686,11 +1741,6 @@ impl VisiCutRust {
                     self.dirty = true;
                 }
             }
-            Command::Language(language) => {
-                self.settings.language = language.map(|l| l.code().to_owned());
-                i18n::set_language(self.settings.language());
-                self.save_settings();
-            }
         }
     }
 
@@ -1719,11 +1769,14 @@ impl VisiCutRust {
         if self.busy() || ctx.memory(|m| m.focused().is_some()) {
             return;
         }
-        // Widerrufen, Löschen und Duplizieren nur ohne aktives Eingabefeld,
+        // Widerrufen, Wiederholen, Löschen und Duplizieren nur ohne aktives Eingabefeld,
         // damit diese Tasten dort weiter Text bearbeiten.
         let editing = ctx.input_mut(|i| {
             let mut commands = Vec::new();
-            if i.consume_key(Modifiers::COMMAND, Key::Z) {
+            // Erst mit Umschalt prüfen: egui ignoriert eine zusätzliche Umschalttaste.
+            if i.consume_key(COMMAND_SHIFT, Key::Z) || i.consume_key(Modifiers::COMMAND, Key::Y) {
+                commands.push(Command::Redo);
+            } else if i.consume_key(Modifiers::COMMAND, Key::Z) {
                 commands.push(Command::Undo);
             }
             if i.consume_key(Modifiers::COMMAND, Key::D) {
@@ -1783,170 +1836,64 @@ impl VisiCutRust {
         }
     }
 
-    fn menu_bar(&self, ui: &mut egui::Ui) -> Option<Command> {
-        let mut clicked = None;
-        egui::MenuBar::new().ui(ui, |ui| {
-            ui.menu_button(tr("Datei"), |ui| {
-                for command in [
-                    Command::New,
-                    Command::Open,
-                    Command::AddPart,
-                    Command::Demo,
-                    Command::Vectorize,
-                ] {
-                    self.menu_item(ui, command, &mut clicked);
+    /// Inhalt des Datei-Menüs hinter dem Haus-Symbol der dunklen Leiste.
+    fn file_menu(&self, ui: &mut egui::Ui, clicked: &mut Option<Command>) {
+        for command in [
+            Command::New,
+            Command::Open,
+            Command::AddPart,
+            Command::Demo,
+            Command::Vectorize,
+        ] {
+            self.menu_item(ui, command, clicked);
+        }
+        ui.menu_button(tr("Zuletzt geöffnet"), |ui| {
+            if self.settings.recent.is_empty() {
+                ui.add_enabled(false, egui::Button::new(tr("Keine Dateien")));
+            }
+            for (index, path) in self.settings.recent.iter().enumerate() {
+                let command = Command::OpenRecent(index);
+                let name = path.file_name().map_or_else(
+                    || path.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                );
+                if ui
+                    .add_enabled(self.enabled(command), egui::Button::new(name))
+                    .on_hover_text(path.display().to_string())
+                    .clicked()
+                {
+                    *clicked = Some(command);
                 }
-                ui.menu_button(tr("Zuletzt geöffnet"), |ui| {
-                    if self.settings.recent.is_empty() {
-                        ui.add_enabled(false, egui::Button::new(tr("Keine Dateien")));
-                    }
-                    for (index, path) in self.settings.recent.iter().enumerate() {
-                        let command = Command::OpenRecent(index);
-                        let name = path.file_name().map_or_else(
-                            || path.display().to_string(),
-                            |n| n.to_string_lossy().into_owned(),
-                        );
-                        if ui
-                            .add_enabled(self.enabled(command), egui::Button::new(name))
-                            .on_hover_text(path.display().to_string())
-                            .clicked()
-                        {
-                            clicked = Some(command);
-                        }
-                    }
-                    ui.separator();
-                    self.menu_item(ui, Command::ClearRecent, &mut clicked);
-                });
-                self.menu_item(ui, Command::ClearCache, &mut clicked);
-                ui.separator();
-                // Aktiver Lasercutter und Einstellungen statt einer Auswahl in
-                // der Seitenleiste.
-                ui.menu_button(tr("Lasercutter"), |ui| {
-                    for (index, device) in self.devices.store.devices.iter().enumerate() {
-                        let command = Command::Device(index);
-                        if ui
-                            .add_enabled(
-                                self.enabled(command),
-                                egui::Button::selectable(
-                                    index == self.devices.store.selected,
-                                    &device.name,
-                                ),
-                            )
-                            .on_hover_text(format!("{}:{}", device.hostname, device.port))
-                            .clicked()
-                        {
-                            clicked = Some(command);
-                        }
-                    }
-                });
-                self.menu_item(ui, Command::Devices, &mut clicked);
-                ui.separator();
-                for command in [
-                    Command::Save,
-                    Command::SaveAs,
-                    Command::Export,
-                    Command::ExportPlf,
-                ] {
-                    self.menu_item(ui, command, &mut clicked);
-                }
-                ui.separator();
-                self.menu_item(ui, Command::Quit, &mut clicked);
-            });
-            ui.menu_button(tr("Bearbeiten"), |ui| {
-                self.menu_item(ui, Command::Undo, &mut clicked);
-                ui.separator();
-                self.menu_item(ui, Command::Duplicate, &mut clicked);
-                self.menu_item(ui, Command::DuplicatePart, &mut clicked);
-                self.menu_item(ui, Command::Delete, &mut clicked);
-                ui.separator();
-                for command in [
-                    Command::RotateLeft,
-                    Command::RotateRight,
-                    Command::FlipHorizontal,
-                    Command::FlipVertical,
-                ] {
-                    self.menu_item(ui, command, &mut clicked);
-                }
-                ui.separator();
-                self.menu_item(ui, Command::Center, &mut clicked);
-                ui.add_enabled(
-                    false,
-                    egui::Button::new(tr("Motiv verschieben")).shortcut_text(tr("Pfeiltasten")),
-                )
-                .on_disabled_hover_text(tr("1 mm je Tastendruck, mit Umschalt 10 mm"));
-            });
-            ui.menu_button(tr("Objekt"), |ui| {
-                for command in [Command::Text, Command::Shape, Command::Sign] {
-                    self.menu_item(ui, command, &mut clicked);
-                }
-                ui.separator();
-                for command in [Command::Array, Command::Nest] {
-                    self.menu_item(ui, command, &mut clicked);
-                }
-            });
-            ui.menu_button(tr("Darstellung"), |ui| {
-                for command in [Command::ZoomIn, Command::ZoomOut, Command::ZoomFit] {
-                    self.menu_item(ui, command, &mut clicked);
-                }
-                self.menu_item(ui, Command::ToggleGrid, &mut clicked);
-                ui.separator();
-                self.menu_item(ui, Command::ToggleCamera, &mut clicked);
-                self.menu_item(ui, Command::RefreshCamera, &mut clicked);
-                ui.separator();
-                ui.menu_button(tr("Sprache"), |ui| {
-                    let chosen = self
-                        .settings
-                        .language
-                        .as_deref()
-                        .and_then(i18n::Language::from_code);
-                    if ui
-                        .add(egui::Button::new(tr("Systemsprache")).selected(chosen.is_none()))
-                        .clicked()
-                    {
-                        clicked = Some(Command::Language(None));
-                    }
-                    ui.separator();
-                    for language in i18n::Language::ALL {
-                        let button = egui::Button::new(language.native_name())
-                            .selected(chosen == Some(language));
-                        if ui.add(button).clicked() {
-                            clicked = Some(Command::Language(Some(language)));
-                        }
-                    }
-                });
-            });
-            ui.menu_button(tr("Job"), |ui| {
-                for command in [Command::Materials, Command::Preview] {
-                    self.menu_item(ui, command, &mut clicked);
-                }
-                self.menu_item(ui, Command::JobSettings, &mut clicked);
-                ui.separator();
-                self.menu_item(ui, Command::Send, &mut clicked);
-            });
+            }
+            ui.separator();
+            self.menu_item(ui, Command::ClearRecent, clicked);
         });
-        clicked
+        self.menu_item(ui, Command::ClearCache, clicked);
+        ui.separator();
+        for command in [
+            Command::Save,
+            Command::SaveAs,
+            Command::Export,
+            Command::ExportPlf,
+        ] {
+            self.menu_item(ui, command, clicked);
+        }
+        ui.separator();
+        self.menu_item(ui, Command::Quit, clicked);
     }
 
-    /// Seitenleiste in der Reihenfolge der macOS-Oberfläche: Projekt,
-    /// Rotationseinheit, Material, Zuordnung und Bearbeitung, Position. Die
-    /// Auftragsbefehle stehen in der Werkzeugleiste.
+    /// Seitenleiste in der Reihenfolge der macOS-Oberfläche: Teile, Material,
+    /// Zuordnung und Bearbeitung (Rotationseinheit unter dem Lasercutter). Position, Größe
+    /// und die Objektbefehle stehen in der Objektleiste über der Arbeitsfläche.
     fn sidebar(&mut self, ui: &mut egui::Ui) -> Option<Command> {
         let mut clicked = None;
         if self.project.has_artwork() {
             form::section(ui, tr("Teile"), |ui| self.parts_panel(ui, &mut clicked));
         }
-        if self.devices.device().rotary_axis {
-            form::section(ui, tr("Rotationseinheit"), |ui| {
-                self.devices.rotary(ui, &mut self.project, &mut self.dirty);
-            });
-        }
         form::section(ui, tr("Material"), |ui| {
             self.jobs.material(ui, &mut self.project, &mut self.dirty);
         });
         self.jobs.processing(ui, &mut self.project, &mut self.dirty);
-        form::section(ui, tr("Position und Größe"), |ui| {
-            self.transform_panel(ui, &mut clicked);
-        });
         ui.add_space(8.0);
         clicked
     }
@@ -2005,7 +1952,8 @@ impl VisiCutRust {
 
     /// Position und Größe wie in Grafikprogrammen: Bezugspunkt, X/Y des
     /// Bezugspunkts, Breite/Höhe um ihn herum, Drehen und Spiegeln.
-    fn transform_panel(&mut self, ui: &mut egui::Ui, clicked: &mut Option<Command>) {
+    /// Aufklappfeld „Position und Größe“ der Objektleiste.
+    fn position_panel(&mut self, ui: &mut egui::Ui) {
         let mut reference = self.reference;
         let mut dirty = false;
         let mut proportional = self.proportional;
@@ -2118,10 +2066,13 @@ impl VisiCutRust {
         self.reference = reference;
         self.proportional = proportional;
         self.dirty |= dirty;
+    }
+
+    /// Aufklappfeld „Drehen“ der Objektleiste: freier Winkel und 90°-Schritte.
+    fn rotate_panel(&mut self, ui: &mut egui::Ui, clicked: &mut Option<Command>) {
         let editable = self.texture.is_some() && !self.busy();
-        // Drehen und Spiegeln nur als Symbole; die Tooltips nennen den Befehl.
         ui.horizontal(|ui| {
-            ui.label("⟳").on_hover_text(tr("Drehen"));
+            ui.label(tr("Winkel"));
             ui.add(
                 egui::DragValue::new(&mut self.rotate_deg)
                     .range(-360.0..=360.0)
@@ -2136,12 +2087,11 @@ impl VisiCutRust {
             {
                 *clicked = Some(Command::RotateBy);
             }
-            ui.separator();
+        });
+        ui.horizontal(|ui| {
             for (command, text) in [
                 (Command::RotateLeft, "⟲ 90°"),
                 (Command::RotateRight, "⟳ 90°"),
-                (Command::FlipHorizontal, "↔"),
-                (Command::FlipVertical, "↕"),
             ] {
                 if ui
                     .add_enabled(editable, egui::Button::new(text))
@@ -2238,6 +2188,8 @@ impl VisiCutRust {
         }
         ui.painter()
             .rect_filled(ui.available_rect_before_wrap(), 0.0, form::CANVAS);
+        ui.add_space(10.0);
+        self.object_bar(ui, &mut clicked);
         if self.texture.is_none() && !self.devices.camera_shown() {
             self.empty_state(ui, &mut clicked);
         } else {
@@ -2367,6 +2319,85 @@ impl VisiCutRust {
                 if let Some(command) = chosen.pop() {
                     *clicked = Some(command);
                 }
+            });
+        });
+    }
+
+    /// Objektleiste wie in Bambu Studio: Hinzufügen, Transformieren,
+    /// Anordnen und Bearbeiten als Symbole; Position, Größe und Drehen
+    /// öffnen ein Aufklappfeld.
+    fn object_bar(&mut self, ui: &mut egui::Ui, clicked: &mut Option<Command>) {
+        use object_bar::Icon;
+        let editable = self.texture.is_some() && !self.busy();
+        let hover = |ui: &egui::Ui, command: Command| {
+            let mut text = command.title().trim_end_matches(" …").to_owned();
+            if let Some(shortcut) = command.shortcut() {
+                text += &format!(" ({})", ui.ctx().format_shortcut(&shortcut));
+            }
+            text
+        };
+        object_bar::bar(ui, |ui| {
+            let mut tool = |ui: &mut egui::Ui, icon: Icon, command: Command| {
+                let text = hover(ui, command);
+                if object_bar::button(ui, icon, self.enabled(command), false, &text).clicked() {
+                    *clicked = Some(command);
+                }
+            };
+            tool(ui, Icon::AddPart, Command::AddPart);
+            tool(ui, Icon::Text, Command::Text);
+            tool(ui, Icon::Shape, Command::Shape);
+            tool(ui, Icon::Sign, Command::Sign);
+            object_bar::separator(ui);
+            // Aufklappfelder: hinterlegt, solange sie offen sind.
+            let popup = |ui: &mut egui::Ui, icon: Icon, title: &str, hover: &str| {
+                let id = ui.make_persistent_id(("object_bar", title));
+                let open = egui::Popup::is_id_open(ui.ctx(), id);
+                let response = object_bar::button(ui, icon, editable, open, hover);
+                (id, response)
+            };
+            let moving = format!(
+                "{}\n{}: {}",
+                tr("Position und Größe"),
+                tr("Pfeiltasten"),
+                tr("1 mm je Tastendruck, mit Umschalt 10 mm")
+            );
+            let (position_id, position) =
+                popup(ui, Icon::Transform, tr("Position und Größe"), &moving);
+            let (rotate_id, rotate) = popup(ui, Icon::Rotate, tr("Drehen"), tr("Drehen"));
+            let mut tool = |ui: &mut egui::Ui, icon: Icon, command: Command| {
+                let text = hover(ui, command);
+                if object_bar::button(ui, icon, self.enabled(command), false, &text).clicked() {
+                    *clicked = Some(command);
+                }
+            };
+            tool(ui, Icon::FlipHorizontal, Command::FlipHorizontal);
+            tool(ui, Icon::FlipVertical, Command::FlipVertical);
+            tool(ui, Icon::Center, Command::Center);
+            object_bar::separator(ui);
+            tool(ui, Icon::Array, Command::Array);
+            tool(ui, Icon::Nest, Command::Nest);
+            object_bar::separator(ui);
+            tool(ui, Icon::Duplicate, Command::Duplicate);
+            tool(ui, Icon::Delete, Command::Delete);
+            object_bar::separator(ui);
+            tool(ui, Icon::Undo, Command::Undo);
+            tool(ui, Icon::Redo, Command::Redo);
+            let panel = |response: &egui::Response, id: egui::Id| {
+                egui::Popup::from_toggle_button_response(response)
+                    .id(id)
+                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                    .gap(6.0)
+            };
+            panel(&position, position_id).show(|ui| {
+                ui.set_width(330.0);
+                ui.label(egui::RichText::new(tr("Position und Größe")).strong());
+                ui.add_space(4.0);
+                self.position_panel(ui);
+            });
+            panel(&rotate, rotate_id).show(|ui| {
+                ui.label(egui::RichText::new(tr("Drehen")).strong());
+                ui.add_space(4.0);
+                self.rotate_panel(ui, clicked);
             });
         });
     }
@@ -3360,9 +3391,6 @@ impl eframe::App for VisiCutRust {
             self.settings.single_job = self.preview.single_job;
             self.save_settings();
         }
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
-            commands.extend(self.menu_bar(ui));
-        });
         egui::TopBottomPanel::top("tabs")
             .frame(
                 egui::Frame::new()

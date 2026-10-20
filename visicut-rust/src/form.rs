@@ -350,19 +350,16 @@ pub fn top_tab(ui: &mut egui::Ui, selected: bool, title: &str) -> egui::Response
     )
 }
 
-/// Schlichte Schaltfläche auf der dunklen Leiste (Öffnen, Sichern …).
-pub fn top_button(ui: &mut egui::Ui, enabled: bool, title: &str) -> egui::Response {
-    ui.add_enabled(
-        enabled,
-        egui::Button::new(
-            RichText::new(title)
-                .size(14.0)
-                .color(Color32::from_gray(235)),
-        )
-        .fill(Color32::TRANSPARENT)
-        .stroke(Stroke::NONE)
-        .min_size(Vec2::new(0.0, 40.0)),
-    )
+/// Symbol auf der dunklen Leiste (Haus für das Datei-Menü).
+pub fn top_icon(ui: &mut egui::Ui, icon: crate::object_bar::Icon) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(48.0, 40.0), egui::Sense::click());
+    let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&response));
+    if response.hovered() || open {
+        ui.painter().rect_filled(rect, 0.0, Color32::from_gray(62));
+    }
+    let icon_rect = egui::Rect::from_center_size(rect.center(), Vec2::splat(30.0));
+    crate::object_bar::paint(ui.painter(), icon, icon_rect, Color32::from_gray(235));
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// Kopfzeile eines Seitenleisten-Bereichs wie „Printer“ / „Process“ in

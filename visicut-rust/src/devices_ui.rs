@@ -68,6 +68,8 @@ struct Calibration {
     device: LaserDevice,
     points: CameraCalibration,
     picture: Option<(egui::TextureHandle, Vec2)>,
+    /// Passmarken im Kalibrierfoto (Pixel); beim Übernehmen in mm gesichert.
+    markers: Vec<[f64; 2]>,
     loading: Option<Pending>,
     selected: usize,
     problem: Option<String>,
@@ -421,14 +423,14 @@ impl DeviceUi {
     }
 
     /// Seite „Einstellungen → Lasercutter“: Geräteliste links, das gewählte
-    /// Gerät rechts; Änderungen bleiben ein Entwurf bis „Sichern“.
+    /// Gerät rechts; Änderungen werden gesichert, sobald kein Feld mehr
+    /// bearbeitet wird (Eingabe beendet, kein Ziehen).
     pub fn settings_page(&mut self, ui: &mut egui::Ui, project: &mut Project, status: &mut String) {
         self.open_manager();
         let Some((mut draft, mut editing)) = self.draft.take() else {
             return;
         };
         let ctx = ui.ctx().clone();
-        let mut save = false;
         let mut calibrate = false;
         let mut shift_test = false;
         // Ergebnis von „Suchen“: eine Kamera wird übernommen, mehrere zur Wahl.
@@ -663,18 +665,6 @@ impl DeviceUi {
                     {
                         draft.selected = editing;
                     }
-                    let changed = draft != self.store;
-                    if ui
-                        .add_enabled(changed, egui::Button::new(tr("Verwerfen")))
-                        .on_hover_text(tr("Ungesicherte Änderungen an der Geräteliste verwerfen"))
-                        .clicked()
-                    {
-                        draft = self.store.clone();
-                        editing = editing.min(draft.devices.len() - 1);
-                    }
-                    save = ui
-                        .add_enabled(changed, egui::Button::new(tr("Sichern")))
-                        .clicked();
                 });
             });
         if calibrate {
@@ -690,12 +680,14 @@ impl DeviceUi {
                         [200.0, 480.0],
                     ],
                     view_points: Vec::new(),
+                    marker_points: Vec::new(),
                 });
             let shot = device.clone();
             self.calibration = Some(Calibration {
                 device,
                 points,
                 picture: None,
+                markers: Vec::new(),
                 loading: Some(spawn(move || camera::capture(&shot))),
                 selected: 0,
                 problem: None,
@@ -719,7 +711,10 @@ impl DeviceUi {
         } else {
             self.camera_found = found;
         }
-        if save {
+        // Sofort sichern statt Entwurf: sonst ging z. B. eine neue Kamera-URL
+        // beim Verlassen der Seite verloren und „Kamera“ lud weiter die alte.
+        let editing_field = ctx.memory(|m| m.focused().is_some()) || ctx.dragged_id().is_some();
+        if draft != self.store && !editing_field {
             self.save(draft.clone(), project, status);
         }
         self.draft = Some((draft, editing));
@@ -1002,6 +997,7 @@ fn calibration_window(
         Some(Ok(image)) => {
             let size = Vec2::new(image.width() as f32, image.height() as f32);
             c.picture = Some((texture(ctx, "Kalibrierfoto", &image), size));
+            c.markers = camera::find_markers(&image);
             // Place missing markers where an uncalibrated camera would see them.
             while c.points.view_points.len() < c.points.reference_points.len() {
                 let r = c.points.reference_points[c.points.view_points.len()];
@@ -1045,6 +1041,9 @@ fn calibration_window(
                             *p = [local.x.clamp(0.0, size.x) as f64, local.y.clamp(0.0, size.y) as f64];
                         }
                     }
+                    for p in &c.markers {
+                        painter.circle_stroke(to_screen(*p), 18.0, Stroke::new(2.5, Color32::from_rgb(40, 180, 90)));
+                    }
                     for (i, p) in c.points.view_points.iter().enumerate() {
                         let center = to_screen(*p);
                         let color = if i == c.selected { Color32::from_rgb(40, 120, 230) } else { Color32::YELLOW };
@@ -1084,6 +1083,13 @@ fn calibration_window(
                         }
                     });
                     ui.small(tr("1. Kalibrierseite öffnen und markieren.\n2. Foto aufnehmen.\n3. Marker auf die Kreuze ziehen (Nummer = Anzahl Striche).\nMindestens 4 Punkte."));
+                    if c.picture.is_some() {
+                        ui.small(match c.markers.len() {
+                            0 => tr("Keine Passmarken erkannt: das Kamerabild wird nur über die Kalibrierung ausgerichtet.").into(),
+                            1 => tr("1 Passmarke erkannt (grün); für die Nachführung sind mindestens 2 nötig.").into(),
+                            n => tr!("{count} Passmarken erkannt (grün): spätere Bilder werden daran nachgeführt.", count = n),
+                        });
+                    }
                     if let Some(problem) = &c.problem {
                         ui.colored_label(Color32::from_rgb(180, 75, 40), problem);
                     }
@@ -1099,9 +1105,12 @@ fn calibration_window(
                     *action = Some(Action::CalibrationPage(c.points.reference_points.clone()));
                 }
                 if ui.add_enabled(c.points.view_points.len() == c.points.reference_points.len(), egui::Button::new(tr("Übernehmen"))).clicked() {
-                    match camera::homography(&c.points) {
-                        Ok(_) => {
-                            *apply = Some(c.points.clone());
+                    let mut points = c.points.clone();
+                    points.marker_points.clear();
+                    match camera::homography(&points).and_then(|_| camera::markers_on_bed(&c.markers, &points)) {
+                        Ok(markers) => {
+                            points.marker_points = markers;
+                            *apply = Some(points);
                             *close = true;
                         }
                         Err(e) => c.problem = Some(e),

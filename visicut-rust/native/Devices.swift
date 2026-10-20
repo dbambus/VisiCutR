@@ -55,6 +55,8 @@ enum CameraKeychain {
 struct CameraCalibration: Codable, Equatable {
     var reference_points: [[Double]]
     var view_points: [[Double]]
+    /// Passmarken in mm (aus der Rust-Oberfläche); Kamerabilder werden daran nachgeführt.
+    var marker_points: [[Double]]? = nil
 }
 
 struct LaserDevice: Codable, Equatable {
@@ -701,6 +703,9 @@ struct CameraCalibrationView: View {
 
     private func save() {
         do {
+            // Neue Kalibrierung: alte Passmarken-Positionen passen nicht mehr.
+            var calibration = calibration
+            calibration.marker_points = nil
             _ = try RustCore.call("homography", values: ["calibration": RustCore.json(calibration)])
             apply(calibration)
             dismiss()

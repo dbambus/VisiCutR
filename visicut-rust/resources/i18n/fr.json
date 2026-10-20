@@ -396,7 +396,6 @@
   "Um den Winkel drehen": "Pivoter de l'angle",
   "Unbekannte Projektversion": "Version de projet inconnue",
   "Unbekannte Version der Geräteliste": "Version de la liste des appareils inconnue",
-  "Ungesicherte Änderungen an der Geräteliste verwerfen": "Abandonner les modifications non enregistrées de la liste des appareils",
   "Ungesicherte Änderungen verwerfen": "Abandonner les modifications non enregistrées",
   "Ungespeicherte Änderungen": "Modifications non enregistrées",
   "Ungültige Größe für die Vektorisierung": "Taille invalide pour la vectorisation",
@@ -946,5 +945,8 @@
   "Reihenfolge der Schnitt- und Markierpfade; wird mit dem Projekt gesichert.": "Ordre des tracés de découpe et de marquage ; enregistré avec le projet.",
   "Oberfläche": "Interface",
   "Wiederholen": "Rétablir",
-  "Änderung wiederhergestellt": "Modification rétablie"
+  "Änderung wiederhergestellt": "Modification rétablie",
+  "1 Passmarke erkannt (grün); für die Nachführung sind mindestens 2 nötig.": "1 repère détecté (vert) ; le suivi en nécessite au moins 2.",
+  "{count} Passmarken erkannt (grün): spätere Bilder werden daran nachgeführt.": "{count} repères détectés (vert) : les images suivantes seront réalignées dessus.",
+  "Keine Passmarken erkannt: das Kamerabild wird nur über die Kalibrierung ausgerichtet.": "Aucun repère détecté : l'image de la caméra est alignée uniquement par l'étalonnage."
 }

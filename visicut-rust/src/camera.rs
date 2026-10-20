@@ -329,6 +329,286 @@ pub fn capture(device: &LaserDevice) -> Result<RgbaImage, String> {
     )?)
 }
 
+/// Connected area of equal pixels (dark or light) with its bounding box.
+struct Blob {
+    area: f64,
+    sum: [f64; 2],
+    min: [usize; 2],
+    max: [usize; 2],
+}
+
+impl Blob {
+    fn size(&self) -> [f64; 2] {
+        [
+            (self.max[0] - self.min[0] + 1) as f64,
+            (self.max[1] - self.min[1] + 1) as f64,
+        ]
+    }
+
+    fn center(&self) -> [f64; 2] {
+        [self.sum[0] / self.area, self.sum[1] / self.area]
+    }
+
+    fn diameter(&self) -> f64 {
+        let [w, h] = self.size();
+        w.max(h)
+    }
+
+    fn fill(&self) -> f64 {
+        let [w, h] = self.size();
+        self.area / (w * h)
+    }
+}
+
+/// Labels the 4-connected areas where `mask` equals `value`.
+fn label(mask: &[bool], w: usize, value: bool) -> (Vec<u32>, Vec<Blob>) {
+    let mut labels = vec![u32::MAX; mask.len()];
+    let mut blobs = Vec::new();
+    let mut stack = Vec::new();
+    for start in 0..mask.len() {
+        if mask[start] != value || labels[start] != u32::MAX {
+            continue;
+        }
+        let id = blobs.len() as u32;
+        let mut b = Blob {
+            area: 0.0,
+            sum: [0.0; 2],
+            min: [usize::MAX; 2],
+            max: [0; 2],
+        };
+        labels[start] = id;
+        stack.push(start);
+        while let Some(i) = stack.pop() {
+            let (x, y) = (i % w, i / w);
+            b.area += 1.0;
+            b.sum = [b.sum[0] + x as f64, b.sum[1] + y as f64];
+            b.min = [b.min[0].min(x), b.min[1].min(y)];
+            b.max = [b.max[0].max(x), b.max[1].max(y)];
+            let neighbours = [
+                (x > 0).then(|| i - 1),
+                (x + 1 < w).then(|| i + 1),
+                (y > 0).then(|| i - w),
+                (i + w < mask.len()).then(|| i + w),
+            ];
+            for j in neighbours.into_iter().flatten() {
+                if mask[j] == value && labels[j] == u32::MAX {
+                    labels[j] = id;
+                    stack.push(j);
+                }
+            }
+        }
+        blobs.push(b);
+    }
+    (labels, blobs)
+}
+
+/// Finds VisiCam-style fiducials (dark ring with a dark dot in its centre on a
+/// light sticker) and returns the dot centres in image pixels. The light gap
+/// between ring and dot is searched, because the ring itself often touches a
+/// dark surrounding.
+pub fn find_markers(image: &RgbaImage) -> Vec<[f64; 2]> {
+    let (w, h) = (image.width() as usize, image.height() as usize);
+    if w < 32 || h < 32 {
+        return Vec::new();
+    }
+    let gray: Vec<f32> = image
+        .pixels()
+        .map(|p| 0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32)
+        .collect();
+    // Schwelle: Mitte zwischen hellstem und dunkelstem Wert der Umgebung
+    // (Blöcke, je 3 × 3 Blöcke um den Pixel); kontrastarme Flächen sind hell.
+    let block = (w.max(h) / 125).max(8);
+    let (bw, bh) = (w.div_ceil(block), h.div_ceil(block));
+    let (mut low, mut high) = (vec![f32::MAX; bw * bh], vec![f32::MIN; bw * bh]);
+    for (i, v) in gray.iter().enumerate() {
+        let b = (i / w / block) * bw + (i % w) / block;
+        low[b] = low[b].min(*v);
+        high[b] = high[b].max(*v);
+    }
+    let around = |values: &[f32], bx: usize, by: usize, pick: fn(f32, f32) -> f32| {
+        let mut r = values[by * bw + bx];
+        for y in by.saturating_sub(1)..(by + 2).min(bh) {
+            for x in bx.saturating_sub(1)..(bx + 2).min(bw) {
+                r = pick(r, values[y * bw + x]);
+            }
+        }
+        r
+    };
+    let threshold: Vec<Option<f32>> = (0..bw * bh)
+        .map(|b| {
+            let (lo, hi) = (
+                around(&low, b % bw, b / bw, f32::min),
+                around(&high, b % bw, b / bw, f32::max),
+            );
+            (hi - lo > 25.0).then_some((hi + lo) / 2.0)
+        })
+        .collect();
+    let dark: Vec<bool> = gray
+        .iter()
+        .enumerate()
+        .map(|(i, v)| threshold[(i / w / block) * bw + (i % w) / block].is_some_and(|t| *v < t))
+        .collect();
+    let (dark_labels, dark_blobs) = label(&dark, w, true);
+    let (_, light_blobs) = label(&dark, w, false);
+    let largest = w.max(h) as f64;
+    let mut markers = Vec::new();
+    for gap in &light_blobs {
+        let ([gw, gh], d, c) = (gap.size(), gap.diameter(), gap.center());
+        let middle = [
+            (gap.min[0] + gap.max[0]) as f64 / 2.0,
+            (gap.min[1] + gap.max[1]) as f64 / 2.0,
+        ];
+        // Heller Kreisring: rund, mittig hohl, sinnvolle Größe.
+        if d < 0.008 * largest
+            || d > largest / 15.0
+            || gw / gh > 1.8
+            || gh / gw > 1.8
+            || !(0.3..0.8).contains(&gap.fill())
+            || (c[0] - middle[0]).hypot(c[1] - middle[1]) > 0.1 * d
+        {
+            continue;
+        }
+        // In der Mitte der dunkle Punkt …
+        let Some(dot) = dark_labels
+            .get(c[1].round() as usize * w + c[0].round() as usize)
+            .and_then(|id| dark_blobs.get(*id as usize))
+        else {
+            continue;
+        };
+        let o = dot.center();
+        if !(0.2..0.55).contains(&(dot.diameter() / d))
+            || dot.fill() < 0.5
+            || (o[0] - c[0]).hypot(o[1] - c[1]) > 0.1 * d
+        {
+            continue;
+        }
+        // … außen herum der dunkle Ring.
+        let ring = (0..16)
+            .filter(|k| {
+                let a = *k as f64 * std::f64::consts::TAU / 16.0;
+                let (x, y) = (c[0] + a.cos() * 0.65 * d, c[1] + a.sin() * 0.65 * d);
+                x >= 0.0
+                    && y >= 0.0
+                    && (x as usize) < w
+                    && (y as usize) < h
+                    && dark[y as usize * w + x as usize]
+            })
+            .count();
+        if ring >= 15 {
+            markers.push([o[0] + 0.5, o[1] + 0.5]);
+        }
+    }
+    markers
+}
+
+/// Bed positions (mm) of markers seen at `pixels` in the calibration photo,
+/// so later pictures can be re-aligned on them.
+pub fn markers_on_bed(
+    pixels: &[[f64; 2]],
+    calibration: &CameraCalibration,
+) -> Result<Vec<[f64; 2]>, String> {
+    let inverse = homography(&CameraCalibration {
+        reference_points: calibration.view_points.clone(),
+        view_points: calibration.reference_points.clone(),
+        marker_points: Vec::new(),
+    })?;
+    Ok(pixels.iter().map(|p| transform(&inverse, *p)).collect())
+}
+
+/// Affine (3 points) or similarity (2 points) transform mapping `from` onto `to`.
+fn fit_affine(from: &[[f64; 2]], to: &[[f64; 2]]) -> Option<Matrix> {
+    match from.len() {
+        2 => {
+            let (a, b) = (
+                [from[1][0] - from[0][0], from[1][1] - from[0][1]],
+                [to[1][0] - to[0][0], to[1][1] - to[0][1]],
+            );
+            let n = a[0] * a[0] + a[1] * a[1];
+            if n < 1e-9 {
+                return None;
+            }
+            let (c, s) = (
+                (a[0] * b[0] + a[1] * b[1]) / n,
+                (a[0] * b[1] - a[1] * b[0]) / n,
+            );
+            Some([
+                [c, -s, to[0][0] - c * from[0][0] + s * from[0][1]],
+                [s, c, to[0][1] - s * from[0][0] - c * from[0][1]],
+                [0.0, 0.0, 1.0],
+            ])
+        }
+        3 => {
+            let [p, q, r] = [from[0], from[1], from[2]];
+            let det = (q[0] - p[0]) * (r[1] - p[1]) - (r[0] - p[0]) * (q[1] - p[1]);
+            if det.abs() < 1e-9 {
+                return None;
+            }
+            // Spalten: Bild der x- und y-Einheit aus den beiden Kantenvektoren.
+            let inv = [
+                [(r[1] - p[1]) / det, -(r[0] - p[0]) / det],
+                [-(q[1] - p[1]) / det, (q[0] - p[0]) / det],
+            ];
+            let mut m = [[0.0; 3]; 3];
+            for (i, row) in m.iter_mut().take(2).enumerate() {
+                let (dq, dr) = (to[1][i] - to[0][i], to[2][i] - to[0][i]);
+                row[0] = dq * inv[0][0] + dr * inv[1][0];
+                row[1] = dq * inv[0][1] + dr * inv[1][1];
+                row[2] = to[0][i] - row[0] * p[0] - row[1] * p[1];
+            }
+            m[2][2] = 1.0;
+            Some(m)
+        }
+        _ => None,
+    }
+}
+
+/// Homography for this picture: the calibration, re-aligned on the markers
+/// found in it when the calibration knows their bed positions (the camera
+/// moves a little whenever the lid is closed). Returns how many matched.
+pub fn tracked_homography(
+    calibration: &CameraCalibration,
+    picture: &RgbaImage,
+) -> Result<(Matrix, usize), String> {
+    let h = homography(calibration)?;
+    if calibration.marker_points.len() < 2 {
+        return Ok((h, 0));
+    }
+    let found = find_markers(picture);
+    let tolerance = 0.08 * picture.width().max(picture.height()) as f64;
+    let mut used = vec![false; found.len()];
+    let (mut bed, mut expected, mut seen) = (Vec::new(), Vec::new(), Vec::new());
+    for marker in &calibration.marker_points {
+        let p = transform(&h, *marker);
+        let nearest = found
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !used[*i])
+            .map(|(i, f)| (i, (f[0] - p[0]).hypot(f[1] - p[1])))
+            .filter(|(_, d)| *d < tolerance)
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        if let Some((i, _)) = nearest {
+            used[i] = true;
+            bed.push(*marker);
+            expected.push(p);
+            seen.push(found[i]);
+        }
+    }
+    let tracked = match seen.len() {
+        0 | 1 => None,
+        2 | 3 => fit_affine(&expected, &seen).map(|a| multiply(&a, &h)),
+        _ => homography(&CameraCalibration {
+            reference_points: bed,
+            view_points: seen.clone(),
+            marker_points: Vec::new(),
+        })
+        .ok(),
+    };
+    Ok(match tracked {
+        Some(m) => (m, seen.len()),
+        None => (h, 0),
+    })
+}
+
 /// Camera picture projected onto the bed.
 pub fn background_image(
     device: &LaserDevice,
@@ -339,14 +619,9 @@ pub fn background_image(
         .camera_calibration
         .as_ref()
         .ok_or(tr("Kamera ist noch nicht kalibriert"))?;
-    let h = homography(calibration)?;
-    Ok(correct(
-        &capture(device)?,
-        &h,
-        bed_width_mm,
-        bed_height_mm,
-        2400,
-    ))
+    let picture = capture(device)?;
+    let (h, _) = tracked_homography(calibration, &picture)?;
+    Ok(correct(&picture, &h, bed_width_mm, bed_height_mm, 2400))
 }
 
 /// Bed-aligned camera background as PNG.
@@ -397,6 +672,74 @@ pub fn calibration_svg(
 mod tests {
     use super::*;
 
+    /// Dark picture with VisiCam-style markers (sticker, ring, dot) at `centers`.
+    fn picture_with_markers(centers: &[[f64; 2]]) -> RgbaImage {
+        RgbaImage::from_fn(1500, 1000, |x, y| {
+            let v = centers.iter().find_map(|c| {
+                let (dx, dy) = (x as f64 - c[0], y as f64 - c[1]);
+                let r = dx.hypot(dy);
+                (dx.abs() < 30.0 && dy.abs() < 30.0).then_some(match r {
+                    r if r < 5.0 => 40,
+                    r if r < 11.0 => 210,
+                    r if r < 20.0 => 50,
+                    _ => 220,
+                })
+            });
+            let v = v.unwrap_or(if (x / 25 + y / 25) % 2 == 0 { 60 } else { 90 });
+            image::Rgba([v, v, v, 255])
+        })
+    }
+
+    #[test]
+    fn finds_markers_and_tracks_a_moved_camera() {
+        let centers = [
+            [200.0, 150.0],
+            [1300.0, 160.0],
+            [1290.0, 850.0],
+            [210.0, 840.0],
+        ];
+        let mut found = find_markers(&picture_with_markers(&centers));
+        found.sort_by(|a, b| {
+            (a[1] > 500.0, a[0])
+                .partial_cmp(&(b[1] > 500.0, b[0]))
+                .unwrap()
+        });
+        let expected = [centers[0], centers[1], centers[3], centers[2]];
+        assert_eq!(found.len(), 4, "{found:?}");
+        for (f, e) in found.iter().zip(expected) {
+            assert!(
+                (f[0] - e[0]).abs() < 1.0 && (f[1] - e[1]).abs() < 1.0,
+                "{f:?} vs {e:?}"
+            );
+        }
+        // Kalibrierung: 1 mm = 1.5 px; die Marken liegen dabei bei centers.
+        let mut calibration = CameraCalibration {
+            reference_points: vec![[0.0, 0.0], [1000.0, 0.0], [1000.0, 600.0], [0.0, 600.0]],
+            view_points: vec![[0.0, 0.0], [1500.0, 0.0], [1500.0, 900.0], [0.0, 900.0]],
+            marker_points: Vec::new(),
+        };
+        calibration.marker_points = markers_on_bed(&centers, &calibration).unwrap();
+        assert!((calibration.marker_points[0][0] - 200.0 / 1.5).abs() < 1e-6);
+        // Deckel anders geschlossen: alles 40 px nach rechts, 25 px nach unten.
+        let moved: Vec<_> = centers.iter().map(|c| [c[0] + 40.0, c[1] + 25.0]).collect();
+        let picture = picture_with_markers(&moved);
+        for keep in [4, 3, 2] {
+            let mut partial = calibration.clone();
+            partial.marker_points.truncate(keep);
+            let (h, matched) = tracked_homography(&partial, &picture).unwrap();
+            assert_eq!(matched, keep);
+            let p = transform(&h, [500.0, 300.0]);
+            assert!(
+                (p[0] - 790.0).abs() < 1.5 && (p[1] - 475.0).abs() < 1.5,
+                "{keep}: {p:?}"
+            );
+        }
+        // Ohne Passmarken im Bild bleibt die Kalibrierung.
+        let (h, matched) = tracked_homography(&calibration, &picture_with_markers(&[])).unwrap();
+        let p = transform(&h, [500.0, 300.0]);
+        assert!(matched == 0 && (p[0] - 750.0).abs() < 1e-6 && (p[1] - 450.0).abs() < 1e-6);
+    }
+
     fn fau() -> CameraCalibration {
         LaserDevice::fau().camera_calibration.unwrap()
     }
@@ -437,6 +780,7 @@ mod tests {
         let calibration = CameraCalibration {
             reference_points: vec![[0.0, 0.0], [100.0, 0.0], [100.0, 50.0], [0.0, 50.0]],
             view_points: vec![[10.0, 20.0], [210.0, 25.0], [205.0, 130.0], [12.0, 120.0]],
+            marker_points: Vec::new(),
         };
         let h = homography(&calibration).unwrap();
         for (r, v) in calibration
@@ -460,11 +804,13 @@ mod tests {
         let line = CameraCalibration {
             reference_points: vec![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
             view_points: vec![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
+            marker_points: Vec::new(),
         };
         assert!(homography(&line).unwrap_err().contains("Linie"));
         let legacy = CameraCalibration {
             reference_points: vec![[200.0, 120.0], [800.0, 480.0]],
             view_points: vec![[100.0, 60.0], [400.0, 240.0]],
+            marker_points: Vec::new(),
         };
         let h = homography(&legacy).unwrap();
         assert_eq!(transform(&h, [500.0, 300.0]), [250.0, 150.0]);
@@ -558,6 +904,7 @@ mod tests {
             camera_calibration: Some(CameraCalibration {
                 reference_points: vec![[0.0, 0.0], [1000.0, 600.0]],
                 view_points: vec![[0.0, 0.0], [40.0, 30.0]],
+                marker_points: Vec::new(),
             }),
             ..Default::default()
         };

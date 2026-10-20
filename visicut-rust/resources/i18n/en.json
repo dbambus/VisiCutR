@@ -396,7 +396,6 @@
   "Um den Winkel drehen": "Rotate by angle",
   "Unbekannte Projektversion": "Unknown project version",
   "Unbekannte Version der Geräteliste": "Unknown device list version",
-  "Ungesicherte Änderungen an der Geräteliste verwerfen": "Discard unsaved changes to the device list",
   "Ungesicherte Änderungen verwerfen": "Discard unsaved changes",
   "Ungespeicherte Änderungen": "Unsaved changes",
   "Ungültige Größe für die Vektorisierung": "Invalid size for vectorization",
@@ -946,5 +945,8 @@
   "Reihenfolge der Schnitt- und Markierpfade; wird mit dem Projekt gesichert.": "Order of cut and mark paths; saved with the project.",
   "Oberfläche": "Interface",
   "Wiederholen": "Redo",
-  "Änderung wiederhergestellt": "Change restored"
+  "Änderung wiederhergestellt": "Change restored",
+  "1 Passmarke erkannt (grün); für die Nachführung sind mindestens 2 nötig.": "1 fiducial marker found (green); tracking needs at least 2.",
+  "{count} Passmarken erkannt (grün): spätere Bilder werden daran nachgeführt.": "{count} fiducial markers found (green): later images are re-aligned on them.",
+  "Keine Passmarken erkannt: das Kamerabild wird nur über die Kalibrierung ausgerichtet.": "No fiducial markers found: the camera image is aligned by the calibration only."
 }

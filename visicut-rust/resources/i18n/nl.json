@@ -396,7 +396,6 @@
   "Um den Winkel drehen": "Over deze hoek draaien",
   "Unbekannte Projektversion": "Onbekende projectversie",
   "Unbekannte Version der Geräteliste": "Onbekende versie van de apparatenlijst",
-  "Ungesicherte Änderungen an der Geräteliste verwerfen": "Niet-opgeslagen wijzigingen in de apparatenlijst verwerpen",
   "Ungesicherte Änderungen verwerfen": "Niet-opgeslagen wijzigingen verwerpen",
   "Ungespeicherte Änderungen": "Niet-opgeslagen wijzigingen",
   "Ungültige Größe für die Vektorisierung": "Ongeldige grootte voor de vectorisatie",
@@ -946,5 +945,8 @@
   "Reihenfolge der Schnitt- und Markierpfade; wird mit dem Projekt gesichert.": "Volgorde van snij- en markeerpaden; wordt met het project opgeslagen.",
   "Oberfläche": "Interface",
   "Wiederholen": "Opnieuw",
-  "Änderung wiederhergestellt": "Wijziging hersteld"
+  "Änderung wiederhergestellt": "Wijziging hersteld",
+  "1 Passmarke erkannt (grün); für die Nachführung sind mindestens 2 nötig.": "1 pasmarkering gevonden (groen); voor het bijsturen zijn er minstens 2 nodig.",
+  "{count} Passmarken erkannt (grün): spätere Bilder werden daran nachgeführt.": "{count} pasmarkeringen gevonden (groen): latere beelden worden erop uitgelijnd.",
+  "Keine Passmarken erkannt: das Kamerabild wird nur über die Kalibrierung ausgerichtet.": "Geen pasmarkeringen gevonden: het camerabeeld wordt alleen via de kalibratie uitgelijnd."
 }

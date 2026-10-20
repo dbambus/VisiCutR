@@ -20,6 +20,10 @@ pub const MIN_CAMERA_REFRESH_MS: u32 = 50;
 pub struct CameraCalibration {
     pub reference_points: Vec<[f64; 2]>,
     pub view_points: Vec<[f64; 2]>,
+    /// Bed positions (mm) of the fiducial markers seen while calibrating;
+    /// later pictures are re-aligned on them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub marker_points: Vec<[f64; 2]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -305,6 +309,7 @@ pub fn from_visicut_xml(source: &str) -> Result<LaserDevice, String> {
         Some(h) => Some(CameraCalibration {
             reference_points: points(child(h, "referencePoints"))?,
             view_points: points(child(h, "viewPoints"))?,
+            marker_points: Vec::new(),
         }),
         None => None,
     };

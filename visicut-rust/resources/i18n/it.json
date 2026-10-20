@@ -396,7 +396,6 @@
   "Um den Winkel drehen": "Ruota dell'angolo",
   "Unbekannte Projektversion": "Versione del progetto sconosciuta",
   "Unbekannte Version der Geräteliste": "Versione dell'elenco dispositivi sconosciuta",
-  "Ungesicherte Änderungen an der Geräteliste verwerfen": "Scarta le modifiche non salvate all'elenco dispositivi",
   "Ungesicherte Änderungen verwerfen": "Scarta le modifiche non salvate",
   "Ungespeicherte Änderungen": "Modifiche non salvate",
   "Ungültige Größe für die Vektorisierung": "Dimensione non valida per la vettorizzazione",
@@ -946,5 +945,8 @@
   "Reihenfolge der Schnitt- und Markierpfade; wird mit dem Projekt gesichert.": "Ordine dei percorsi di taglio e marcatura; salvato con il progetto.",
   "Oberfläche": "Interfaccia",
   "Wiederholen": "Ripeti",
-  "Änderung wiederhergestellt": "Modifica ripristinata"
+  "Änderung wiederhergestellt": "Modifica ripristinata",
+  "1 Passmarke erkannt (grün); für die Nachführung sind mindestens 2 nötig.": "1 marcatore rilevato (verde); per l'allineamento ne servono almeno 2.",
+  "{count} Passmarken erkannt (grün): spätere Bilder werden daran nachgeführt.": "{count} marcatori rilevati (verde): le immagini successive vengono riallineate su di essi.",
+  "Keine Passmarken erkannt: das Kamerabild wird nur über die Kalibrierung ausgerichtet.": "Nessun marcatore rilevato: l'immagine della fotocamera è allineata solo tramite la calibrazione."
 }

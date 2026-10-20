@@ -444,6 +444,11 @@ final class AppModel: ObservableObject {
     } }
     @Published var showCamera = false
     @Published var cameraImage: NSImage?
+    /// PNG des zuletzt geladenen entzerrten Kamerabilds (Reststück-Erkennung).
+    @Published var cameraPNG: Data?
+    /// Erkannte Reststücke, die auf dem Arbeitsbett gezeigt werden.
+    @Published var remnants: [Remnant] = []
+    @Published var showRemnants = false
     @Published var cameraLoading = false
     /// Laufende Kamera-Aktualisierung: Fehler in Folge und Zähler gegen doppelte Schleifen.
     var cameraErrors = 0
@@ -1206,6 +1211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         view.addItem(.separator())
         view.addItem(menuItem(tr("Kamerabild anzeigen"), action: #selector(toggleCamera), key: "k"))
         view.addItem(menuItem(tr("Kamerabild aktualisieren"), action: #selector(refreshCamera), key: "k", modifiers: [.command, .shift]))
+        view.addItem(menuItem(tr("Reststücke erkennen …"), action: #selector(detectRemnants)))
         view.addItem(.separator())
         // Sprache der Oberfläche: Systemsprache oder eine feste Sprache (Name in der jeweiligen Sprache).
         let languageMenu = NSMenu(title: tr("Sprache"))
@@ -1353,6 +1359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
         case #selector(toggleGrid): item.state = model.showGrid ? .on : .off; return true
         case #selector(toggleCamera): item.state = model.showCamera ? .on : .off; return !model.device.camera_url.isEmpty
         case #selector(refreshCamera): return model.showCamera && !model.cameraLoading
+        case #selector(detectRemnants): return !model.device.camera_url.isEmpty && !model.busy && !model.showJobPreview
         case #selector(openFile), #selector(openDemo), #selector(newProject), #selector(showSettings), #selector(openRecent(_:)),
              #selector(chooseDevice(_:)): return !model.busy
         case #selector(chooseCutOrder(_:)):
@@ -1405,6 +1412,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTo
     @objc func toggleGrid() { model.showGrid.toggle() }
     @objc func toggleCamera() { model.toggleCamera() }
     @objc func refreshCamera() { model.refreshCamera() }
+    @objc func detectRemnants() { showWorkspace(); model.openRemnants() }
     @objc func showMainWindow() { showWorkspace() }
     @objc func showMaterials() {
         if let window = materialsWindow { window.makeKeyAndOrderFront(nil); return }
@@ -1559,6 +1567,7 @@ struct Workspace: View {
             .frame(minWidth: 560, minHeight: 640)
             .sheet(item: $model.vectorizeSource) { source in VectorizeSheet(model: model, source: source) }
             .sheet(item: $model.composeTool) { tool in ComposeSheet(model: model, tool: tool) }
+            .sheet(isPresented: $model.showRemnants) { RemnantSheet(model: model) }
         }
         .navigationTitle(model.project.name)
         .sheet(isPresented: $model.showJobPreview) { JobPreview(model: model) }
@@ -2449,6 +2458,7 @@ final class BedView: NSView {
             NSColor(calibratedWhite: 0.89, alpha: 1).setStroke(); fine.stroke()
             NSColor(calibratedWhite: 0.78, alpha: 1).setStroke(); major.stroke()
         }
+        model.drawRemnants(in: bed, scale: scale)
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: bed).addClip()
         let hints: [NSImageRep.HintKey: Any] = [.interpolation: NSImageInterpolation.high]
@@ -2927,12 +2937,13 @@ func runUITest(_ model: AppModel) {
         try testDevicesRotaryAndCamera(model)
         try testRulesEngravingAndMaterials(model)
         try testComposeTools(model)
+        try testRemnants(model)
         // Exercise the actual asynchronous preparation and sheet presentation.
         model.preparedJob = nil
         model.jobImage = nil
         model.previewJob()
         model.dirty = false
-        print("Native UI state tests passed: material, thickness, operation, presets, proportional scaling, handles, PLF export, camera login, native save / Rust reload, cut order and legacy files, bitmap vectorization, Rust export, object assignments, mixed job preview and estimate, stale preview invalidation, devices, rotary axis, camera background and calibration, rule mapping, 3D engraving, dithering, parameter sets, material library, text, sign, copies, nesting")
+        print("Native UI state tests passed: material, thickness, operation, presets, proportional scaling, handles, PLF export, camera login, native save / Rust reload, cut order and legacy files, bitmap vectorization, Rust export, object assignments, mixed job preview and estimate, stale preview invalidation, devices, rotary axis, camera background and calibration, rule mapping, 3D engraving, dithering, parameter sets, material library, text, sign, copies, nesting, remnants")
     } catch {
         fputs("Native UI tests failed: \(error)\n", stderr)
         exit(1)

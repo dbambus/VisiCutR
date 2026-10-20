@@ -3,6 +3,7 @@ mod devices_ui;
 mod form;
 mod jobs_ui;
 mod preview_ui;
+mod remnant_ui;
 mod settings;
 mod vectorize_ui;
 mod workspace;
@@ -45,6 +46,8 @@ enum Command {
     ToggleGrid,
     ToggleCamera,
     RefreshCamera,
+    /// Reststücke im Kamerabild erkennen.
+    Remnants,
     ZoomIn,
     ZoomOut,
     ZoomFit,
@@ -121,6 +124,7 @@ impl Command {
             Self::ToggleGrid => tr("Raster anzeigen"),
             Self::ToggleCamera => tr("Kamerabild anzeigen"),
             Self::RefreshCamera => tr("Kamerabild aktualisieren"),
+            Self::Remnants => tr("Reststücke erkennen …"),
             Self::ZoomIn => tr("Vergrößern"),
             Self::ZoomOut => tr("Verkleinern"),
             Self::ZoomFit => tr("Zoom zurücksetzen"),
@@ -173,6 +177,7 @@ impl Command {
             Self::Duplicate => (Modifiers::COMMAND, Key::D),
             Self::Demo
             | Self::Vectorize
+            | Self::Remnants
             | Self::Center
             | Self::Send
             | Self::Text
@@ -307,6 +312,7 @@ struct VisiCutRust {
     devices: devices_ui::DeviceUi,
     jobs: jobs_ui::JobUi,
     vectorize: vectorize_ui::VectorizeUi,
+    remnants: remnant_ui::RemnantUi,
     compose: compose_ui::ComposeUi,
     /// Stand vor der letzten Werkzeug- oder Löschaktion (ein Schritt).
     undo: Option<Snapshot>,
@@ -370,6 +376,7 @@ impl VisiCutRust {
             devices,
             jobs,
             vectorize: vectorize_ui::VectorizeUi::default(),
+            remnants: remnant_ui::RemnantUi::default(),
             compose: compose_ui::ComposeUi::default(),
             undo: None,
             reference: [0.0, 0.0],
@@ -955,6 +962,24 @@ impl VisiCutRust {
         }
     }
 
+    /// Umrisse der erkannten Reststücke als Schneid-Teil an ihrer Stelle auf dem Bett.
+    fn insert_remnants(
+        &mut self,
+        ctx: &egui::Context,
+        remnants: &[visicut_core::remnant::Remnant],
+    ) {
+        match visicut_core::remnant::add_part(&self.project, remnants) {
+            Ok(project) => {
+                self.apply_composed(ctx, project, Vec::new());
+                self.status = tr(
+                    "Reststücke als Teil eingefügt · Bearbeiten › Widerrufen macht es rückgängig",
+                )
+                .into();
+            }
+            Err(e) => self.report(e),
+        }
+    }
+
     fn composed(&mut self, ctx: &egui::Context, result: Result<Project, String>) {
         match result {
             Ok(project) => self.apply_composed(ctx, project, Vec::new()),
@@ -1206,6 +1231,7 @@ impl VisiCutRust {
             Command::Center | Command::ExportPlf => self.texture.is_some() && !self.busy(),
             Command::ToggleCamera => self.devices.has_camera(),
             Command::RefreshCamera => self.devices.camera_shown() && !self.devices.camera_loading(),
+            Command::Remnants => self.devices.has_camera() && !self.busy(),
             Command::ZoomIn => self.zoom < workspace::ZOOM_MAX,
             Command::ZoomOut => self.zoom > workspace::ZOOM_MIN,
             Command::Save
@@ -1243,6 +1269,7 @@ impl VisiCutRust {
             Command::ToggleGrid => self.show_grid = !self.show_grid,
             Command::ToggleCamera => self.devices.toggle_camera(&self.project),
             Command::RefreshCamera => self.devices.refresh_camera(&self.project),
+            Command::Remnants => self.remnants.open(&mut self.devices, &self.project),
             Command::ZoomIn => self.zoom = workspace::zoom_in(self.zoom),
             Command::ZoomOut => self.zoom = workspace::zoom_out(self.zoom),
             Command::ZoomFit => self.zoom = 1.0,
@@ -1501,6 +1528,7 @@ impl VisiCutRust {
                 ui.separator();
                 self.menu_item(ui, Command::ToggleCamera, &mut clicked);
                 self.menu_item(ui, Command::RefreshCamera, &mut clicked);
+                self.menu_item(ui, Command::Remnants, &mut clicked);
                 ui.separator();
                 ui.menu_button(tr("Sprache"), |ui| {
                     let chosen = self
@@ -2150,6 +2178,7 @@ impl VisiCutRust {
                 Stroke::new(1.0, Color32::from_gray(145)),
                 egui::StrokeKind::Inside,
             );
+            self.remnants.paint(&painter, bed, scale);
             if let Some(texture) = &self.texture {
                 let to_screen = |[x, y, w, h]: [f32; 4]| {
                     Rect::from_min_size(bed.min + Vec2::new(x, y) * scale, Vec2::new(w, h) * scale)
@@ -2995,6 +3024,12 @@ impl eframe::App for VisiCutRust {
         // Die Rückfrage bei ungesicherten Änderungen stellt `request`.
         if let Some((svg, name)) = self.vectorize.windows(ctx, false, &mut self.status) {
             self.request(ctx, Replace::Vectorized { svg, name });
+        }
+        if let Some(remnant_ui::Action::InsertPart(remnants)) =
+            self.remnants
+                .windows(ctx, &mut self.devices, &self.project, &mut self.status)
+        {
+            self.insert_remnants(ctx, &remnants);
         }
         match self
             .devices

@@ -148,7 +148,7 @@ extension AppModel {
                 || old.camera_user != new.camera_user || old.camera_password != new.camera_password
             devices = store
             applyDevice()
-            if cameraChanged { cameraImage = nil; if showCamera { refreshCamera() } }
+            if cameraChanged { cameraImage = nil; cameraPNG = nil; remnants = []; if showCamera { refreshCamera() } }
             return true
         } catch {
             self.error = error.localizedDescription
@@ -228,6 +228,7 @@ extension AppModel {
                 switch result {
                 case .success(let background):
                     self.cameraImage = NSImage(data: Data(background.png))
+                    self.cameraPNG = Data(background.png)
                     if !live || self.cameraErrors > 0 { self.status = tr("Kamerabild aktualisiert") }
                     self.cameraErrors = 0
                 case .failure(let error) where live && self.showCamera:

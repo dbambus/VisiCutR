@@ -136,7 +136,7 @@ pub fn list_button(ui: &mut egui::Ui, icon: Icon, enabled: bool, hover: &str) ->
     } else {
         egui::Sense::hover()
     };
-    let (rect, response) = ui.allocate_exact_size(vec2(32.0, 26.0), sense);
+    let (rect, response) = ui.allocate_exact_size(vec2(32.0, ui.spacing().interact_size.y), sense);
     if ui.is_rect_visible(rect) {
         let visuals = if enabled {
             ui.style().interact(&response)

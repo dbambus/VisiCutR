@@ -941,5 +941,10 @@
   "Material entfernen": "Remove material",
   "Stärke aller Profile dieser Zeile": "Thickness of all profiles in this group",
   "Stärke hinzufügen": "Add thickness",
-  "Verfahren für diese Stärke hinzufügen": "Add an operation for this thickness"
+  "Verfahren für diese Stärke hinzufügen": "Add an operation for this thickness",
+  "GNU LGPL v3 oder neuer": "GNU LGPL v3 or later",
+  "Info": "About",
+  "Lizenz": "License",
+  "Programm": "Application",
+  "Rust-Neuentwicklung auf Grundlage von VisiCut (Thomas Oster und Mitwirkende, LGPL). Ohne Gewähr; Aufträge vor dem Starten am Gerät prüfen.": "Rust reimplementation based on VisiCut (Thomas Oster and contributors, LGPL). No warranty; check jobs on the machine before starting them."
 }

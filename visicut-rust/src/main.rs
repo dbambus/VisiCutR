@@ -1702,6 +1702,24 @@ impl VisiCutR {
                     .transfer(ui, &mut self.project, &mut self.status);
                 form::caption(ui, tr("Importieren liest VisiCut-Gerätedateien, .vcsettings-Archive und eigene Exporte; Herunterladen holt die Einstellungen eines Labors. Neue Geräte werden sofort gesichert."));
             });
+            form::section(ui, tr("Info"), |ui| {
+                form::row(ui, tr("Programm"), |ui| {
+                    ui.label(format!(
+                        "VisiCutR {}",
+                        visicut_core::update::current_version()
+                    ));
+                });
+                form::row(ui, "GitHub", |ui| {
+                    ui.hyperlink_to("github.com/dbambus/VisiCutR", visicut_core::update::REPOSITORY);
+                });
+                form::row(ui, tr("Lizenz"), |ui| {
+                    ui.hyperlink_to(
+                        tr("GNU LGPL v3 oder neuer"),
+                        "https://www.gnu.org/licenses/lgpl-3.0.html",
+                    );
+                });
+                form::caption(ui, tr("Rust-Neuentwicklung auf Grundlage von VisiCut (Thomas Oster und Mitwirkende, LGPL). Ohne Gewähr; Aufträge vor dem Starten am Gerät prüfen."));
+            });
         });
     }
 
@@ -1811,7 +1829,7 @@ impl VisiCutR {
         let mut clicked = None;
         form::panel_header(ui, tr("Lasercutter"), |ui| {
             if ui
-                .small_button("⚙")
+                .button("⚙")
                 .on_hover_text(tr("Lasercutter einrichten"))
                 .clicked()
             {

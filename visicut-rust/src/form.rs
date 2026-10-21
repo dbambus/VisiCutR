@@ -22,7 +22,8 @@ pub fn apply_style(ctx: &egui::Context) {
     ctx.all_styles_mut(|style| {
         style.spacing.item_spacing = Vec2::new(8.0, 4.0);
         style.spacing.button_padding = Vec2::new(8.0, 3.0);
-        style.spacing.interact_size.y = 20.0;
+        // Eine Höhe für alle Knöpfe, Felder und Auswahlen.
+        style.spacing.interact_size.y = 24.0;
         let visuals = &mut style.visuals;
         visuals.window_corner_radius = CornerRadius::same(10);
         visuals.menu_corner_radius = CornerRadius::same(8);

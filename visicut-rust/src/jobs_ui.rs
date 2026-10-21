@@ -851,7 +851,7 @@ fn filters(
                     }
                 });
             if ui
-                .small_button("🗑")
+                .button("🗑")
                 .on_hover_text(tr("Bedingung entfernen"))
                 .clicked()
             {
@@ -898,7 +898,7 @@ fn filters(
         filters.remove(i);
         changed = true;
     }
-    if ui.small_button(tr("Bedingung hinzufügen")).clicked() {
+    if ui.button(tr("Bedingung hinzufügen")).clicked() {
         filters.push(Filter {
             attribute: Attribute::Color,
             value: document.first_color("#000000"),
@@ -1426,19 +1426,10 @@ impl JobUi {
                 Some((old, new)) if *old == template.name => {
                     let edit = ui.add(egui::TextEdit::singleline(new).desired_width(220.0));
                     let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if enter
-                        || ui
-                            .small_button("✔")
-                            .on_hover_text(tr("Umbenennen"))
-                            .clicked()
-                    {
+                    if enter || ui.button("✔").on_hover_text(tr("Umbenennen")).clicked() {
                         action = Some(TemplateAction::Rename(old.clone(), new.clone()));
                     }
-                    if ui
-                        .small_button("✖")
-                        .on_hover_text(tr("Abbrechen"))
-                        .clicked()
-                    {
+                    if ui.button("✖").on_hover_text(tr("Abbrechen")).clicked() {
                         action = Some(TemplateAction::CancelRename);
                     }
                 }
@@ -1647,7 +1638,7 @@ impl JobUi {
                         &mut set.passes,
                         None,
                     );
-                    if ui.small_button(tr("Parametersatz entfernen")).clicked() {
+                    if ui.button(tr("Parametersatz entfernen")).clicked() {
                         drop = Some(j);
                     }
                 }
@@ -1655,9 +1646,7 @@ impl JobUi {
                     step.additional.remove(j);
                     *dirty = true;
                 }
-                if step.additional.len() < 15
-                    && ui.small_button(tr("Weiteren Parametersatz")).clicked()
-                {
+                if step.additional.len() < 15 && ui.button(tr("Weiteren Parametersatz")).clicked() {
                     step.additional.push(first);
                     *dirty = true;
                 }
@@ -1715,7 +1704,7 @@ impl JobUi {
             project.ignore_filters.remove(i);
             *dirty = true;
         }
-        if ui.small_button(tr("Ignorierregel hinzufügen")).clicked() {
+        if ui.button(tr("Ignorierregel hinzufügen")).clicked() {
             project.ignore_filters.push(vec![Filter {
                 attribute: Attribute::Color,
                 value: self.document.first_color("#0000ff"),

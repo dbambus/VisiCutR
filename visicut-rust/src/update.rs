@@ -9,6 +9,7 @@ use std::time::Duration;
 pub const LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/dbambus/VisiCutR/releases/latest";
 /// Page with all releases, for the link when no single release is known.
+pub const REPOSITORY: &str = "https://github.com/dbambus/VisiCutR";
 pub const RELEASES_PAGE: &str = "https://github.com/dbambus/VisiCutR/releases";
 /// Pause between two automatic checks.
 pub const INTERVAL_SECS: u64 = 14 * 24 * 60 * 60;

@@ -941,5 +941,10 @@
   "Material entfernen": "Supprimer le matériau",
   "Stärke aller Profile dieser Zeile": "Épaisseur de tous les profils de ce groupe",
   "Stärke hinzufügen": "Ajouter une épaisseur",
-  "Verfahren für diese Stärke hinzufügen": "Ajouter un procédé pour cette épaisseur"
+  "Verfahren für diese Stärke hinzufügen": "Ajouter un procédé pour cette épaisseur",
+  "GNU LGPL v3 oder neuer": "GNU LGPL v3 ou ultérieure",
+  "Info": "À propos",
+  "Lizenz": "Licence",
+  "Programm": "Application",
+  "Rust-Neuentwicklung auf Grundlage von VisiCut (Thomas Oster und Mitwirkende, LGPL). Ohne Gewähr; Aufträge vor dem Starten am Gerät prüfen.": "Réimplémentation en Rust basée sur VisiCut (Thomas Oster et contributeurs, LGPL). Sans garantie ; vérifier les tâches sur la machine avant de les lancer."
 }

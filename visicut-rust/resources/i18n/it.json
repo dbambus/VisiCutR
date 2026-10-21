@@ -941,5 +941,10 @@
   "Material entfernen": "Rimuovi materiale",
   "Stärke aller Profile dieser Zeile": "Spessore di tutti i profili di questo gruppo",
   "Stärke hinzufügen": "Aggiungi spessore",
-  "Verfahren für diese Stärke hinzufügen": "Aggiungi una lavorazione per questo spessore"
+  "Verfahren für diese Stärke hinzufügen": "Aggiungi una lavorazione per questo spessore",
+  "GNU LGPL v3 oder neuer": "GNU LGPL v3 o successiva",
+  "Info": "Informazioni",
+  "Lizenz": "Licenza",
+  "Programm": "Applicazione",
+  "Rust-Neuentwicklung auf Grundlage von VisiCut (Thomas Oster und Mitwirkende, LGPL). Ohne Gewähr; Aufträge vor dem Starten am Gerät prüfen.": "Reimplementazione in Rust basata su VisiCut (Thomas Oster e collaboratori, LGPL). Nessuna garanzia; controllare i lavori sulla macchina prima di avviarli."
 }

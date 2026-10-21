@@ -278,7 +278,7 @@ enum SettingsPage {
 }
 
 impl SettingsPage {
-    const ALL: [Self; 4] = [Self::Devices, Self::Materials, Self::Job, Self::General];
+    const ALL: [Self; 4] = [Self::General, Self::Devices, Self::Materials, Self::Job];
 
     /// Name in der linken Leiste und zugleich Überschrift der Seite.
     fn title(self) -> &'static str {

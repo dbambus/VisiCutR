@@ -1,3 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="70mm" height="50mm" viewBox="0 0 70 50">
-<defs><marker id="m" markerWidth="4" markerHeight="4" refX="2" refY="2"><circle cx="2" cy="2" r="1.5" fill="#f00"/></marker></defs><path d="M 5 25 L 35 10 L 65 25" marker-start="url(#m)" marker-end="url(#m)" fill="none" stroke="#ff0000" stroke-width="0.1"/>
-</svg>

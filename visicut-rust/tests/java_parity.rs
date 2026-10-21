@@ -27,20 +27,6 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Project {
             .unwrap_or_else(|| panic!("{}: {key} fehlt", dir.display()))
     };
     let number = |key: &str| -> f32 { get(key).parse().unwrap() };
-    // Without width_mm/height_mm both sides derive the size from the SVG
-    // (Rust like the app's import: usvg size at 96 DPI).
-    let svg_text = fs::read_to_string(dir.join(get("svg"))).unwrap();
-    let natural = || {
-        let preview = visicut_core::svg::render(&svg_text).unwrap();
-        (preview.width_mm, preview.height_mm)
-    };
-    let scale: f32 = case.get("scale").map_or(1.0, |s| s.parse().unwrap());
-    let width_mm = case
-        .get("width_mm")
-        .map_or_else(|| natural().0 * scale, |v| v.parse().unwrap());
-    let height_mm = case
-        .get("height_mm")
-        .map_or_else(|| natural().1 * scale, |v| v.parse().unwrap());
     let operation = match get("operation").as_str() {
         "cut" => Operation::Cut,
         "mark" => Operation::Mark,
@@ -53,8 +39,8 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Project {
         svg: fs::read_to_string(dir.join(get("svg"))).unwrap(),
         x_mm: number("x_mm"),
         y_mm: number("y_mm"),
-        width_mm,
-        height_mm,
+        width_mm: number("width_mm"),
+        height_mm: number("height_mm"),
         operation,
         power_percent: number("power"),
         speed_percent: number("speed"),
@@ -153,26 +139,8 @@ fn ltt_output_matches_java_byte_for_byte() {
     for dir in &dirs {
         let name = dir.file_name().unwrap().to_string_lossy().into_owned();
         let case = properties(&fs::read_to_string(dir.join("case.properties")).unwrap());
-        let java_error = fs::read_to_string(dir.join("expected.error")).ok();
-        let expected_file = match fs::read(dir.join("expected.ltt")) {
-            Ok(bytes) => bytes,
-            Err(_) => {
-                let prepared = ltt::prepare(&project(dir, &case));
-                let rust = match &prepared {
-                    Ok(p) => format!("Rust erzeugt {} Bytes", p.jobs[0].bytes.len()),
-                    Err(e) => format!("Rust lehnt ab: {e}"),
-                };
-                match java_error {
-                    Some(reason) => {
-                        failures.push(format!("{name}: Java lehnt ab: {}; {rust}", reason.trim()))
-                    }
-                    None => failures.push(format!(
-                        "{name}: expected.ltt fehlt, generate.sh ausführen; {rust}"
-                    )),
-                }
-                continue;
-            }
-        };
+        let expected_file = fs::read(dir.join("expected.ltt"))
+            .unwrap_or_else(|_| panic!("{name}: expected.ltt fehlt, generate.sh ausführen"));
         let prepared = match ltt::prepare(&project(dir, &case)) {
             Ok(prepared) => prepared,
             Err(e) => {

@@ -1,3 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="70mm" height="50mm" viewBox="0 0 70 50">
-<symbol id="s" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="none" stroke="#ff0000" stroke-width="0.1"/></symbol><use xlink:href="#s" x="5" y="5" width="20" height="20"/><use xlink:href="#s" x="40" y="10" width="10" height="30"/>
-</svg>

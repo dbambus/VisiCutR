@@ -45,9 +45,35 @@ public class LttParity
       System.exit(2);
     }
     LaserDevice device = LaserDeviceManager.getInstance().loadFromFile(new File(args[0]));
+    int failed = 0;
     for (int i = 1; i < args.length; i++)
     {
-      generate(device, new File(args[i]));
+      File dir = new File(args[i]);
+      try
+      {
+        generate(device, dir);
+      }
+      catch (Throwable t)
+      {
+        // A case Java cannot process: record the reason instead of stopping.
+        failed++;
+        new File(dir, "expected.ltt").delete();
+        StringBuilder reason = new StringBuilder();
+        for (Throwable cause = t; cause != null; cause = cause.getCause())
+        {
+          if (reason.length() > 0)
+          {
+            reason.append(" <- ");
+          }
+          reason.append(cause.getClass().getSimpleName()).append(": ").append(cause.getMessage());
+        }
+        java.nio.file.Files.writeString(new File(dir, "expected.error").toPath(), reason + "\n");
+        System.out.println(dir.getName() + ": JAVA ERROR " + reason);
+      }
+    }
+    if (failed > 0)
+    {
+      System.out.println(failed + " case(s) failed in Java");
     }
   }
 
@@ -135,7 +161,16 @@ public class LttParity
     PlfPart part = model.loadGraphicFile(new File(dir, c.getProperty("svg")), warnings);
     AffineTransform t = AffineTransform.getTranslateInstance(
       Double.parseDouble(c.getProperty("x_mm")), Double.parseDouble(c.getProperty("y_mm")));
+    // Optional "scale": the part is resized like in VisiCut's GUI (uniform).
+    double scale = Double.parseDouble(c.getProperty("scale", "1"));
+    if (scale != 1)
+    {
+      t.scale(scale, scale);
+    }
     t.concatenate(part.getGraphicObjects().getBasicTransform());
+    // Natural size of the import in mm, for cases that let both sides derive it.
+    java.awt.geom.Rectangle2D natural = part.getGraphicObjects().getBoundingBox();
+    System.out.println(dir.getName() + ": java import bounds " + natural);
     part.getGraphicObjects().setTransform(t);
     MappingSet mapping = new MappingSet();
     mapping.add(new Mapping(null, profile));
@@ -146,6 +181,7 @@ public class LttParity
     propmap.put(profile, props);
     String name = jobName(prefix, c.getProperty("name"));
     File out = new File(dir, "expected.ltt");
+    new File(dir, "expected.error").delete();
     model.saveJob(name, out, null, propmap);
     for (String w : warnings)
     {

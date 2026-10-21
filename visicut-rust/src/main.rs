@@ -1540,8 +1540,9 @@ impl VisiCutR {
 
     /// Einstellungen → Job: Schnittreihenfolge des Projekts.
     fn job_page(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.set_max_width(620.0);
+        // Volle Fensterbreite wie die übrigen Einstellungsseiten.
+        egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
+            ui.set_width(ui.available_width());
             form::section(ui, tr("Schnittreihenfolge"), |ui| {
                 form::caption(
                     ui,
@@ -1627,8 +1628,9 @@ impl VisiCutR {
 
     /// Einstellungen → Allgemein: Sprache, Update-Prüfung und Geräteliste übertragen.
     fn general_page(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.set_max_width(620.0);
+        // Volle Fensterbreite wie die übrigen Einstellungsseiten.
+        egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
+            ui.set_width(ui.available_width());
             form::section(ui, tr("Sprache"), |ui| {
                 let chosen = self
                     .settings

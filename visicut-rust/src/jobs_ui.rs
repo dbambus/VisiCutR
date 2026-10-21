@@ -978,8 +978,9 @@ impl JobUi {
                     crate::form::caption(
                         ui,
                         tr("\
-                            Vorlage wählen oder Bedingungen (Farbe, Linienstärke, Ebene, Typ, ID) \
-                         anpassen; „Rest“ erfasst alle übrigen Objekte."),
+                            Bedingungen (Farbe, Linienstärke, Ebene, Typ, ID) in den Schritten \
+                         anpassen; „Rest“ erfasst alle übrigen Objekte. Vorlage, Ignorierregeln \
+                         und Farbtoleranz: Einstellungen → Job."),
                     );
                 }
             }
@@ -991,13 +992,7 @@ impl JobUi {
                 });
             }
             AssignmentMode::Objects => self.steps(ui, project, dirty),
-            AssignmentMode::Rules => {
-                crate::form::section(ui, tr("Regeln"), |ui| self.rules_header(ui, project, dirty));
-                crate::form::section(ui, tr("Ignorieren"), |ui| {
-                    self.ignore_rules(ui, project, dirty);
-                });
-                self.steps(ui, project, dirty);
-            }
+            AssignmentMode::Rules => self.steps(ui, project, dirty),
         }
     }
 
@@ -1107,26 +1102,14 @@ impl JobUi {
         self.hovered_object = row_hover.or(self.canvas_hover);
     }
 
-    fn rules_header(&mut self, ui: &mut egui::Ui, project: &mut Project, dirty: &mut bool) {
-        ui.horizontal(|ui| {
-            ui.menu_button(tr("Vorlage übernehmen"), |ui| {
-                for p in mapping::predefined() {
-                    if ui.button(p.name).clicked() {
-                        apply_predefined(self.active(), project, &p);
-                        *dirty = true;
-                    }
+    /// Einstellungen → Job, „Regeln“: Vorlage und Farbtoleranz.
+    pub fn rules_settings(&mut self, ui: &mut egui::Ui, project: &mut Project, dirty: &mut bool) {
+        ui.menu_button(tr("Vorlage übernehmen"), |ui| {
+            for p in mapping::predefined() {
+                if ui.button(p.name).clicked() {
+                    apply_predefined(self.active(), project, &p);
+                    *dirty = true;
                 }
-            });
-            // Weitere Schritte über „➕“ im Schrittkopf; ohne Schritt hier der erste.
-            if !project.steps.iter().any(is_rule)
-                && ui.button(tr("➕ Schritt hinzufügen")).clicked()
-            {
-                let step = JobStep {
-                    filters: Some(Vec::new()),
-                    ..default_step(self.active(), project, Operation::Cut)
-                };
-                project.steps.push(step);
-                *dirty = true;
             }
         });
         crate::form::caption(
@@ -1136,6 +1119,24 @@ impl JobUi {
              Ein Objekt kann mehrere Schritte durchlaufen; „Rest“ erfasst alles, \
              was sonst nicht bearbeitet oder ignoriert wird."),
         );
+        ui.add_space(6.0);
+        *dirty |= ui
+            .checkbox(&mut project.similar_colors, tr("Ähnliche Farben zuordnen"))
+            .changed();
+        egui::Frame::new()
+            .inner_margin(egui::Margin {
+                left: 24,
+                ..Default::default()
+            })
+            .show(ui, |ui| {
+                crate::form::caption(
+                    ui,
+                    tr("\
+                        Farbregeln erfassen auch Farben mit fast gleichem Farbton, z. B. \
+                     #ed1c24 als Rot, #00a651 als Grün und #2e3192 als Blau nach einer \
+                     Umwandlung von CMYK nach RGB; Grautöne nach Helligkeit."),
+                );
+            });
     }
 
     fn steps(&mut self, ui: &mut egui::Ui, project: &mut Project, dirty: &mut bool) {
@@ -1292,7 +1293,8 @@ impl JobUi {
         }
     }
 
-    fn ignore_rules(&mut self, ui: &mut egui::Ui, project: &mut Project, dirty: &mut bool) {
+    /// Einstellungen → Job, „Ignorieren“: Objekte, die kein Schritt bearbeitet.
+    pub fn ignore_rules(&mut self, ui: &mut egui::Ui, project: &mut Project, dirty: &mut bool) {
         let mut remove = None;
         for (i, list) in project.ignore_filters.iter_mut().enumerate() {
             let removed = crate::form::row(ui, tr!("Regel {number}", number = i + 1), |ui| {

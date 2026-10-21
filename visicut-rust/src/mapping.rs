@@ -98,6 +98,12 @@ impl Filter {
     /// attributes match if any value is equal; missing values match only
     /// inverted filters.
     pub fn matches(&self, object: &ObjectAttributes) -> bool {
+        self.matches_with(object, false)
+    }
+
+    /// [`Self::matches`]; with `similar` colours also match colours close to
+    /// the wanted one (see [`similar_colors`]).
+    pub fn matches_with(&self, object: &ObjectAttributes, similar: bool) -> bool {
         let values = object.values(self.attribute);
         let result = if self.attribute == Attribute::StrokeWidth {
             let (Some(first), Ok(limit)) = (values.first(), self.value.trim().parse::<f64>())
@@ -113,6 +119,12 @@ impl Filter {
         } else {
             let wanted = normalise(self.attribute, &self.value);
             values.contains(&wanted)
+                || (similar
+                    && matches!(
+                        self.attribute,
+                        Attribute::Color | Attribute::StrokeColor | Attribute::FillColor
+                    )
+                    && values.iter().any(|v| similar_colors(v, &wanted)))
         };
         result != self.inverted
     }
@@ -141,6 +153,48 @@ fn normalise(attribute: Attribute, value: &str) -> String {
             svgtypes_color(value).unwrap_or_else(|| value.to_lowercase())
         }
         _ => value.trim().to_string(),
+    }
+}
+
+/// Hue, saturation and value (0…360°, 0…1, 0…1) of `#rrggbb`.
+fn hsv(color: &str) -> Option<[f64; 3]> {
+    let hex = color.strip_prefix('#').filter(|h| h.len() == 6)?;
+    let channel = |i: usize| {
+        u8::from_str_radix(&hex[i..i + 2], 16)
+            .ok()
+            .map(|v| v as f64 / 255.0)
+    };
+    let (r, g, b) = (channel(0)?, channel(2)?, channel(4)?);
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let delta = max - min;
+    let hue = if delta == 0.0 {
+        0.0
+    } else if max == r {
+        60.0 * ((g - b) / delta).rem_euclid(6.0)
+    } else if max == g {
+        60.0 * ((b - r) / delta + 2.0)
+    } else {
+        60.0 * ((r - g) / delta + 4.0)
+    };
+    Some([hue, if max > 0.0 { delta / max } else { 0.0 }, max])
+}
+
+/// Colours that count as the same for rules with tolerance: equal hue (within
+/// 35°) for clearly coloured values, similar brightness for grey ones. Pure
+/// red, green and blue thus also match their usual CMYK conversions such as
+/// `#ed1c24`, `#00a651` and `#2e3192`.
+pub fn similar_colors(a: &str, b: &str) -> bool {
+    let (Some([ha, sa, va]), Some([hb, sb, vb])) = (hsv(a), hsv(b)) else {
+        return false;
+    };
+    let colourful = |s: f64, v: f64| s >= 0.4 && v >= 0.25;
+    if colourful(sa, va) && colourful(sb, vb) {
+        let d = (ha - hb).abs();
+        d.min(360.0 - d) <= 35.0
+    } else if sa < 0.2 && sb < 0.2 {
+        (va - vb).abs() <= 0.15
+    } else {
+        false
     }
 }
 
@@ -309,7 +363,11 @@ pub fn resolve(project: &Project) -> Result<Vec<Vec<usize>>, String> {
     };
     let matching = |filters: &[Filter]| -> Vec<usize> {
         (0..count)
-            .filter(|i| filters.iter().all(|f| f.matches(&objects[*i])))
+            .filter(|i| {
+                filters
+                    .iter()
+                    .all(|f| f.matches_with(&objects[*i], project.similar_colors))
+            })
             .collect()
     };
     let mut claimed = vec![false; count];
@@ -527,5 +585,76 @@ mod tests {
         assert!(values(SVG).unwrap().iter().any(
             |(a, v)| *a == Attribute::Color && v.iter().any(|(c, n)| c == "#ff0000" && *n == 1)
         ));
+    }
+
+    #[test]
+    fn similar_colors_catch_cmyk_conversions_but_keep_colours_apart() {
+        for (pure, converted) in [
+            ("#ff0000", "#ed1c24"),
+            ("#ff0000", "#e30613"),
+            ("#00ff00", "#00a651"),
+            ("#00ff00", "#009640"),
+            ("#0000ff", "#2e3192"),
+            ("#0000ff", "#312783"),
+            ("#000000", "#231f20"),
+        ] {
+            assert!(similar_colors(pure, converted), "{pure} {converted}");
+        }
+        for (a, b) in [
+            ("#ff0000", "#00ff00"),
+            ("#ff0000", "#0000ff"),
+            ("#00ff00", "#0000ff"),
+            ("#ff0000", "#ffff00"),
+            ("#ff0000", "#000000"),
+            ("#ff0000", "#ffcccc"),
+            ("#000000", "#ffffff"),
+            ("#ff0000", "none"),
+        ] {
+            assert!(!similar_colors(a, b), "{a} {b}");
+        }
+        // Mit Toleranz greift die Farbvorlage auch nach CMYK-Umwandlung.
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="0 0 100 100">
+            <path d="M0 0H10" stroke="#ed1c24" fill="none"/>
+            <path d="M0 10H10" stroke="#00a651" fill="none"/>
+            <path d="M0 20H10" stroke="#2e3192" fill="none"/></svg>"##;
+        let mut project = Project {
+            svg: svg.into(),
+            ..Default::default()
+        };
+        for (operation, filters, rest) in &predefined()[0].rules {
+            project.steps.push(JobStep {
+                filters: filters.clone(),
+                rest: *rest,
+                ..JobStep::new(*operation)
+            });
+        }
+        let by_operation = |project: &Project| -> Vec<(Operation, Vec<usize>)> {
+            project
+                .steps
+                .iter()
+                .map(|s| s.operation)
+                .zip(resolve(project).unwrap())
+                .collect()
+        };
+        assert!(project.similar_colors);
+        let tolerant = by_operation(&project);
+        assert!(
+            tolerant.contains(&(Operation::Cut, vec![0])),
+            "{tolerant:?}"
+        );
+        assert!(
+            tolerant.contains(&(Operation::Mark, vec![1])),
+            "{tolerant:?}"
+        );
+        assert!(
+            tolerant.contains(&(Operation::Engrave, vec![2])),
+            "{tolerant:?}"
+        );
+        project.similar_colors = false;
+        assert!(
+            by_operation(&project)
+                .iter()
+                .all(|(_, objects)| objects.is_empty())
+        );
     }
 }

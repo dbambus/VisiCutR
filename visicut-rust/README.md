@@ -375,7 +375,17 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
   und auf Restmaterial markieren (je Marker ein 10-mm-Kreuz mit
   Zählstrichen wie in VisiCut). Danach ein Foto aufnehmen, die nummerierten
   Marker auf die Kreuze ziehen und übernehmen. Mindestens vier Punkte, nicht
-  auf einer Linie.
+  auf einer Linie. Neue Kalibrierungen nutzen ein Raster aus 5 × 3 Kreuzen.
+  „Kreuze erkennen“ setzt die Punkte auf die Kreuzmitten; mit vorhandener
+  Kalibrierung geschieht das nach dem Foto automatisch. Im Foto lässt sich
+  zoomen (Zwei-Finger-Zoom, ⌘/Strg + Mausrad) und mit den Pfeiltasten
+  feinjustieren.
+- **Objektiv**: Ab 6 Kreuzen bestimmt die Kalibrierung die radiale
+  Verzeichnung (k1, ab 10 Kreuzen auch k2). Das Profil „Raspberry Pi Camera
+  v2“ (IMX219, 3,04 mm) liefert Bildmitte, Brennweite und Startwert.
+- **Passmarken**: Runde Zielscheiben-Aufkleber (Ring mit Punkt) am Rahmen
+  werden beim Kalibrieren erkannt und gespeichert. Spätere Kamerabilder
+  werden daran nachgeführt, wenn sich die Kamera z. B. mit dem Deckel bewegt.
 - **Kameraserver**: `visicut-cameraserver` ersetzt `tools/cameraserver` und
   beantwortet jede HTTP-Anfrage mit einem frischen Foto eines
   Aufnahmebefehls, z. B.

@@ -24,6 +24,24 @@ pub struct CameraCalibration {
     /// later pictures are re-aligned on them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub marker_points: Vec<[f64; 2]>,
+    /// Radial lens distortion of the camera; view points are distorted
+    /// pixels, the homography works on undistorted ones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lens: Option<Lens>,
+}
+
+/// Radial lens distortion (Brown model without tangential terms) in camera
+/// pixels: `undistorted = center + d · (1 + k1·r² + k2·r⁴)` with `d` the
+/// offset of the distorted pixel from `center` and `r = |d| / focal`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Lens {
+    /// Lens profile the values started from („rpi-v2“, „generic“).
+    pub profile: String,
+    pub center: [f64; 2],
+    pub focal: f64,
+    pub k1: f64,
+    pub k2: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -310,6 +328,7 @@ pub fn from_visicut_xml(source: &str) -> Result<LaserDevice, String> {
             reference_points: points(child(h, "referencePoints"))?,
             view_points: points(child(h, "viewPoints"))?,
             marker_points: Vec::new(),
+            lens: None,
         }),
         None => None,
     };

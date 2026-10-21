@@ -24,6 +24,8 @@ use visicut_core::{
 };
 
 const WARNING: Color32 = Color32::from_rgb(180, 75, 40);
+/// So lange bleibt der Hinweis nach dem Senden stehen.
+const SENT_NOTICE_DURATION: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Befehle aus Menü und Tastatur. `Modifiers::COMMAND` ist Strg unter
 /// Windows und Linux (⌘ unter macOS).
@@ -290,6 +292,9 @@ struct VisiCutRust {
     status: String,
     /// Deutlich sichtbarer Hinweis (Fehler, Importwarnungen) in einem Dialog.
     alert: Option<String>,
+    /// Hinweis nach dem Senden: schließt sich zu diesem Zeitpunkt von selbst,
+    /// solange der Dialog noch genau diesen Text zeigt.
+    alert_until: Option<(std::time::Instant, String)>,
     /// Zeichnung ragt über die Zeichenfläche: Auswahl steht aus.
     pending_import: Option<PendingImport>,
     /// Gewählte Behandlung beim laufenden Import: `Some(true)` ganze Zeichnung.
@@ -370,6 +375,7 @@ impl VisiCutRust {
             origin_bottom_left: None,
             status: tr("Datei öffnen, hierher ziehen oder das Beispiel öffnen").into(),
             alert: None,
+            alert_until: None,
             pending_import: None,
             fit_policy: None,
             project_path: None,
@@ -1041,6 +1047,7 @@ impl VisiCutRust {
         self.project.rotary_axis = false;
         (self.project.x_mm, self.project.y_mm) = (0.0, 0.0);
         self.project.operation = Operation::Mark;
+        self.page = Page::Prepare;
         self.status = tr(
             "Kalibrierseite geöffnet: Material und Markier-Parameter prüfen, senden, danach Foto aufnehmen.",
         )
@@ -1485,6 +1492,18 @@ impl VisiCutRust {
                         .show(ui, |ui| form::caption(ui, jobs_ui::cut_order_help(order)));
                     ui.add_space(2.0);
                 }
+            });
+            // Regeln und Ignorieren gehören wie die Reihenfolge zum Projekt; die
+            // Schritte selbst stehen unter „Vorbereiten“.
+            form::section(ui, tr("Regeln"), |ui| {
+                ui.add_enabled_ui(!self.busy(), |ui| {
+                    self.jobs.rules_settings(ui, &mut self.project, &mut self.dirty);
+                });
+            });
+            form::section(ui, tr("Ignorieren"), |ui| {
+                ui.add_enabled_ui(!self.busy(), |ui| {
+                    self.jobs.ignore_rules(ui, &mut self.project, &mut self.dirty);
+                });
             });
             // Früher in der Objektzuordnung; gehört wie die Reihenfolge zum Projekt.
             form::section(ui, tr("Doppelte Linien"), |ui| {
@@ -3103,6 +3122,14 @@ impl VisiCutRust {
             }
         }
         // Hinweise zuletzt, damit sie über anderen Dialogen liegen.
+        let left = self
+            .alert_until
+            .as_ref()
+            .filter(|(_, text)| self.alert.as_ref() == Some(text))
+            .map(|(until, _)| until.saturating_duration_since(std::time::Instant::now()));
+        if left.is_some_and(|left| left.is_zero()) {
+            self.alert = None;
+        }
         if let Some(text) = &self.alert {
             let mut close = false;
             let modal = egui::Modal::new(egui::Id::new("alert")).show(ctx, |ui| {
@@ -3115,7 +3142,14 @@ impl VisiCutRust {
                     .max_height(320.0)
                     .show(ui, |ui| ui.label(text));
                 ui.add_space(8.0);
-                close = ui.button(tr("OK")).clicked();
+                ui.horizontal(|ui| {
+                    close = ui.button(tr("OK")).clicked();
+                    if let Some(left) = left {
+                        let seconds = left.as_secs_f32().ceil() as u32;
+                        ui.weak(tr!("schließt in {seconds} s", seconds = seconds));
+                        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+                    }
+                });
             });
             if close || modal.should_close() {
                 self.alert = None;
@@ -3204,6 +3238,8 @@ impl VisiCutRust {
                     .job_sent_text
                     .replace("$jobname", &names.join(", "));
                 if !text.trim().is_empty() {
+                    let until = std::time::Instant::now() + SENT_NOTICE_DURATION;
+                    self.alert_until = Some((until, text.clone()));
                     self.alert = Some(text);
                 }
             }
@@ -3498,12 +3534,28 @@ impl eframe::App for VisiCutRust {
     }
 }
 
+/// VisiCut-Symbol für Fenster und Taskleiste (das der Java-Oberfläche).
+fn window_icon() -> Option<egui::IconData> {
+    let png =
+        include_bytes!("../../src/main/resources/de/thomas_oster/visicut/gui/resources/icon.png");
+    let image = image::load_from_memory(png).ok()?.into_rgba8();
+    Some(egui::IconData {
+        width: image.width(),
+        height: image.height(),
+        rgba: image.into_raw(),
+    })
+}
+
 fn main() -> eframe::Result {
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1240.0, 820.0])
+        .with_min_inner_size([900.0, 620.0])
+        .with_drag_and_drop(true);
+    if let Some(icon) = window_icon() {
+        viewport = viewport.with_icon(icon);
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1240.0, 820.0])
-            .with_min_inner_size([900.0, 620.0])
-            .with_drag_and_drop(true),
+        viewport,
         ..Default::default()
     };
     eframe::run_native(
@@ -3517,6 +3569,13 @@ fn main() -> eframe::Result {
 mod tests {
     use super::*;
     use visicut_core::project::Part;
+
+    #[test]
+    fn window_icon_is_the_visicut_icon() {
+        let icon = window_icon().expect("VisiCut-Symbol lesbar");
+        assert_eq!((icon.width, icon.height), (128, 128));
+        assert_eq!(icon.rgba.len(), 128 * 128 * 4);
+    }
 
     #[test]
     fn part_summary_follows_list_order() {

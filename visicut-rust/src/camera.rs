@@ -1,6 +1,7 @@
 //! Camera background for the bed: port of VisiCut's Homography.java.
 //! A homography maps bed positions (mm) to camera pixels; the corrected image
 //! samples the camera picture for every bed position.
+pub use crate::device::Lens;
 use crate::device::{CameraCalibration, LaserDevice};
 use crate::{i18n::tr, tr};
 use image::RgbaImage;
@@ -101,7 +102,7 @@ pub fn fetch_with(
     Ok(bytes)
 }
 
-fn transform(h: &Matrix, p: [f64; 2]) -> [f64; 2] {
+pub fn transform(h: &Matrix, p: [f64; 2]) -> [f64; 2] {
     let w = h[2][0] * p[0] + h[2][1] * p[1] + h[2][2];
     [
         (h[0][0] * p[0] + h[0][1] * p[1] + h[0][2]) / w,
@@ -273,17 +274,201 @@ pub fn homography(calibration: &CameraCalibration) -> Result<Matrix, String> {
     Ok(result.map(|row| row.map(|v| v / scale)))
 }
 
+/// Undistortion factor of the Raspberry Pi Camera v2 standard lens, measured
+/// on the FAU laser camera (r relative to the focal length); the crosses of a
+/// calibration refine it for each camera.
+const RPI_V2_K1: f64 = -0.11;
+
+impl Lens {
+    /// Raspberry Pi Camera v2 (Sony IMX219, 3280 × 2464 px of 1.12 µm, lens
+    /// 3.04 mm) delivering pictures of `size`: the ISP scales the full sensor
+    /// and crops it centred to the picture's aspect ratio.
+    pub fn raspberry_pi_v2(size: [f64; 2]) -> Self {
+        let scale = (size[0] / 3280.0).max(size[1] / 2464.0);
+        Self {
+            profile: "rpi-v2".into(),
+            center: [size[0] / 2.0, size[1] / 2.0],
+            focal: 3.04 / 0.00112 * scale,
+            k1: RPI_V2_K1,
+            k2: 0.0,
+        }
+    }
+
+    /// Unknown camera: centre of the picture, no distortion until the
+    /// calibration crosses determine it.
+    pub fn generic(size: [f64; 2]) -> Self {
+        Self {
+            profile: "generic".into(),
+            center: [size[0] / 2.0, size[1] / 2.0],
+            focal: size[0].max(size[1]),
+            k1: 0.0,
+            k2: 0.0,
+        }
+    }
+
+    fn factor(&self, d: [f64; 2]) -> f64 {
+        let r2 = (d[0] * d[0] + d[1] * d[1]) / (self.focal * self.focal);
+        1.0 + self.k1 * r2 + self.k2 * r2 * r2
+    }
+
+    /// Ideal (pinhole) position of a camera pixel.
+    pub fn undistort(&self, p: [f64; 2]) -> [f64; 2] {
+        let d = [p[0] - self.center[0], p[1] - self.center[1]];
+        let f = self.factor(d);
+        [self.center[0] + d[0] * f, self.center[1] + d[1] * f]
+    }
+
+    /// Camera pixel showing an ideal position (inverse of [`Self::undistort`]).
+    pub fn distort(&self, u: [f64; 2]) -> [f64; 2] {
+        let du = [u[0] - self.center[0], u[1] - self.center[1]];
+        let mut d = du;
+        for _ in 0..20 {
+            let f = self.factor(d);
+            if f.abs() < 1e-6 {
+                break;
+            }
+            let next = [du[0] / f, du[1] / f];
+            let step = (next[0] - d[0]).abs() + (next[1] - d[1]).abs();
+            d = next;
+            if step < 1e-3 {
+                break;
+            }
+        }
+        [self.center[0] + d[0], self.center[1] + d[1]]
+    }
+}
+
+/// Bed (mm) to camera pixels: homography on undistorted pixels, then the lens.
+#[derive(Clone, Debug)]
+pub struct Mapping {
+    pub h: Matrix,
+    pub lens: Option<Lens>,
+}
+
+impl Mapping {
+    pub fn to_pixel(&self, bed: [f64; 2]) -> [f64; 2] {
+        let u = transform(&self.h, bed);
+        self.lens.as_ref().map_or(u, |lens| lens.distort(u))
+    }
+
+    fn undistort(&self, p: [f64; 2]) -> [f64; 2] {
+        self.lens.as_ref().map_or(p, |lens| lens.undistort(p))
+    }
+
+    pub fn to_bed(&self, pixel: [f64; 2]) -> Option<[f64; 2]> {
+        Some(transform(&invert(&self.h)?, self.undistort(pixel)))
+    }
+}
+
+fn invert(m: &Matrix) -> Option<Matrix> {
+    let c = |r: usize, s: usize| {
+        let (r1, r2, s1, s2) = ((r + 1) % 3, (r + 2) % 3, (s + 1) % 3, (s + 2) % 3);
+        m[r1][s1] * m[r2][s2] - m[r1][s2] * m[r2][s1]
+    };
+    let det = m[0][0] * c(0, 0) + m[0][1] * c(0, 1) + m[0][2] * c(0, 2);
+    (det.abs() > 1e-300).then(|| std::array::from_fn(|i| std::array::from_fn(|j| c(j, i) / det)))
+}
+
+/// Bed-to-pixel mapping of a calibration, with its lens if it has one.
+pub fn mapping(calibration: &CameraCalibration) -> Result<Mapping, String> {
+    let lens = calibration.lens.clone();
+    let view = calibration
+        .view_points
+        .iter()
+        .map(|p| lens.as_ref().map_or(*p, |lens| lens.undistort(*p)))
+        .collect();
+    let h = homography(&CameraCalibration {
+        reference_points: calibration.reference_points.clone(),
+        view_points: view,
+        ..Default::default()
+    })?;
+    Ok(Mapping { h, lens })
+}
+
+/// Distance (pixels) between every view point and where the calibration maps
+/// its reference point.
+pub fn residuals(calibration: &CameraCalibration) -> Result<Vec<f64>, String> {
+    let mapping = mapping(calibration)?;
+    Ok(calibration
+        .reference_points
+        .iter()
+        .zip(&calibration.view_points)
+        .map(|(r, v)| {
+            let p = mapping.to_pixel(*r);
+            (p[0] - v[0]).hypot(p[1] - v[1])
+        })
+        .collect())
+}
+
+/// Lens of `calibration`, starting from the profile `start`: from 6 points the
+/// crosses determine k1, from 10 also k2 (least squares in camera pixels).
+pub fn fit_lens(calibration: &CameraCalibration, start: Lens) -> Lens {
+    let n = calibration
+        .reference_points
+        .len()
+        .min(calibration.view_points.len());
+    let cost = |lens: &Lens| {
+        let mut c = calibration.clone();
+        c.lens = Some(lens.clone());
+        residuals(&c).map_or(f64::MAX, |r| r.iter().map(|d| d * d).sum())
+    };
+    // Grob absuchen, dann mit Goldenem Schnitt verfeinern.
+    let search = |lens: &mut Lens, k2: bool| {
+        let get = |l: &Lens| if k2 { l.k2 } else { l.k1 };
+        let set = |l: &mut Lens, v: f64| if k2 { l.k2 = v } else { l.k1 = v };
+        let at = |l: &Lens, v: f64| {
+            let mut l = l.clone();
+            set(&mut l, v);
+            cost(&l)
+        };
+        let mut best = (cost(lens), get(lens));
+        for i in -50..=50 {
+            let v = i as f64 * 0.01;
+            let c = at(lens, v);
+            if c < best.0 {
+                best = (c, v);
+            }
+        }
+        let (mut a, mut b) = (best.1 - 0.01, best.1 + 0.01);
+        let g = (5f64.sqrt() - 1.0) / 2.0;
+        for _ in 0..40 {
+            let (x1, x2) = (b - g * (b - a), a + g * (b - a));
+            if at(lens, x1) < at(lens, x2) {
+                b = x2;
+            } else {
+                a = x1;
+            }
+        }
+        let v = (a + b) / 2.0;
+        if at(lens, v) < best.0 {
+            best.1 = v;
+        }
+        set(lens, best.1);
+    };
+    let mut lens = start;
+    if n >= 6 {
+        search(&mut lens, false);
+    }
+    if n >= 10 {
+        for _ in 0..6 {
+            search(&mut lens, true);
+            search(&mut lens, false);
+        }
+    }
+    lens
+}
+
 /// Projects the camera picture onto the bed. Like VisiCut, the output scale is
 /// the larger of the camera's x/y resolution on the bed, capped at `max_width`.
 pub fn correct(
     input: &RgbaImage,
-    h: &Matrix,
+    mapping: &Mapping,
     bed_width_mm: f64,
     bed_height_mm: f64,
     max_width: u32,
 ) -> RgbaImage {
-    let top = transform(h, [0.0, 0.0]);
-    let bottom = transform(h, [bed_width_mm, bed_height_mm]);
+    let top = mapping.to_pixel([0.0, 0.0]);
+    let bottom = mapping.to_pixel([bed_width_mm, bed_height_mm]);
     let scale = ((top[0] - bottom[0]).abs() / bed_width_mm)
         .max((top[1] - bottom[1]).abs() / bed_height_mm)
         .min(max_width as f64 / bed_width_mm)
@@ -291,7 +476,7 @@ pub fn correct(
     let width = (bed_width_mm * scale) as u32;
     let height = (bed_height_mm * scale) as u32;
     RgbaImage::from_fn(width.max(1), height.max(1), |x, y| {
-        let p = transform(h, [(x as f64 + 0.5) / scale, (y as f64 + 0.5) / scale]);
+        let p = mapping.to_pixel([(x as f64 + 0.5) / scale, (y as f64 + 0.5) / scale]);
         if p[0] >= 0.0 && p[1] >= 0.0 && p[0] < input.width() as f64 && p[1] < input.height() as f64
         {
             *input.get_pixel(p[0] as u32, p[1] as u32)
@@ -501,18 +686,136 @@ pub fn find_markers(image: &RgbaImage) -> Vec<[f64; 2]> {
     markers
 }
 
+/// Grauwerte eines Fotos für [`find_cross`].
+pub struct Gray {
+    width: usize,
+    height: usize,
+    values: Vec<f32>,
+}
+
+impl Gray {
+    pub fn new(image: &RgbaImage) -> Self {
+        Self {
+            width: image.width() as usize,
+            height: image.height() as usize,
+            values: image
+                .pixels()
+                .map(|p| 0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32)
+                .collect(),
+        }
+    }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    fn at(&self, x: f64, y: f64) -> Option<f32> {
+        (x >= 0.0 && y >= 0.0 && (x as usize) < self.width && (y as usize) < self.height)
+            .then(|| self.values[y as usize * self.width + x as usize])
+    }
+}
+
+/// Contrast of the weakest of the four arms of a cross at `(x, y)`: how much
+/// darker each arm is than the strips beside it, along most of its length
+/// (lower third of the samples). Lines, corners and rows of tick marks lack
+/// at least one continuous arm and score low.
+fn cross_score(gray: &Gray, x: f64, y: f64, arm: f64, side: f64) -> f32 {
+    let mut worst = f32::MAX;
+    let mut contrast = Vec::with_capacity(arm as usize);
+    for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+        contrast.clear();
+        let mut t = 3.0;
+        while t <= arm {
+            let (px, py) = (x + dx * t, y + dy * t);
+            let (Some(a), Some(b), Some(c)) = (
+                gray.at(px, py),
+                gray.at(px - dy * side, py - dx * side),
+                gray.at(px + dy * side, py + dx * side),
+            ) else {
+                return 0.0;
+            };
+            contrast.push((b + c) / 2.0 - a);
+            t += 1.0;
+        }
+        if contrast.is_empty() {
+            return 0.0;
+        }
+        contrast.sort_by(f32::total_cmp);
+        worst = worst.min(contrast[contrast.len() / 3]);
+    }
+    worst
+}
+
+/// Finds the centre of a marked calibration cross near `around` (pixels).
+/// `arm` is half the cross length and `radius` the search distance, both in
+/// pixels. Returns the sub-pixel centre, or `None` without a clear cross.
+pub fn find_cross(gray: &Gray, around: [f64; 2], radius: f64, arm: f64) -> Option<[f64; 2]> {
+    let side = (arm / 4.0).clamp(3.0, 8.0);
+    let arm = arm * 0.9;
+    let r = radius.round() as i64;
+    let scores: Vec<(f32, [f64; 2])> = (-r..=r)
+        .flat_map(|dy| (-r..=r).map(move |dx| (dx, dy)))
+        .map(|(dx, dy)| {
+            let (x, y) = (around[0].round() + dx as f64, around[1].round() + dy as f64);
+            (cross_score(gray, x, y, arm, side), [x, y])
+        })
+        .collect();
+    let best = scores
+        .iter()
+        .cloned()
+        .fold((0.0f32, [0.0; 2]), |a, b| if b.0 > a.0 { b } else { a });
+    // Blass gelaserte Kreuze haben wenig Kontrast: es zählt, dass das Kreuz
+    // sich klar vom Zweitbesten abseits davon abhebt.
+    let second = scores
+        .iter()
+        .filter(|(_, p)| (p[0] - best.1[0]).abs().max((p[1] - best.1[1]).abs()) > 1.5 * arm)
+        .map(|(s, _)| *s)
+        .fold(0.0f32, f32::max);
+    if best.0 < 3.0 || best.0 < 1.8 * second {
+        return None;
+    }
+    // Feinlage: Schwerpunkt der Dunkelheit quer zu den Armen.
+    let [x, y] = best.1;
+    let (mut sx, mut wx, mut sy, mut wy) = (0.0, 0.0, 0.0, 0.0);
+    let mut t = 3.0;
+    while t <= arm {
+        for sign in [-1.0, 1.0] {
+            for k in -side as i64..=side as i64 {
+                let k = k as f64;
+                let base_v = (gray.at(x - side - 2.0, y + sign * t)?
+                    + gray.at(x + side + 2.0, y + sign * t)?)
+                    / 2.0;
+                let w = (base_v - gray.at(x + k, y + sign * t)?).max(0.0) as f64;
+                sx += (x + k) * w;
+                wx += w;
+                let base_h = (gray.at(x + sign * t, y - side - 2.0)?
+                    + gray.at(x + sign * t, y + side + 2.0)?)
+                    / 2.0;
+                let w = (base_h - gray.at(x + sign * t, y + k)?).max(0.0) as f64;
+                sy += (y + k) * w;
+                wy += w;
+            }
+        }
+        t += 1.0;
+    }
+    (wx > 0.0 && wy > 0.0).then(|| [sx / wx + 0.5, sy / wy + 0.5])
+}
+
 /// Bed positions (mm) of markers seen at `pixels` in the calibration photo,
 /// so later pictures can be re-aligned on them.
 pub fn markers_on_bed(
     pixels: &[[f64; 2]],
     calibration: &CameraCalibration,
 ) -> Result<Vec<[f64; 2]>, String> {
-    let inverse = homography(&CameraCalibration {
-        reference_points: calibration.view_points.clone(),
-        view_points: calibration.reference_points.clone(),
-        marker_points: Vec::new(),
-    })?;
-    Ok(pixels.iter().map(|p| transform(&inverse, *p)).collect())
+    let mapping = mapping(calibration)?;
+    pixels
+        .iter()
+        .map(|p| {
+            mapping.to_bed(*p).ok_or_else(|| {
+                tr("Kalibrierpunkte sind degeneriert (z. B. drei auf einer Linie)").into()
+            })
+        })
+        .collect()
 }
 
 /// Affine (3 points) or similarity (2 points) transform mapping `from` onto `to`.
@@ -562,23 +865,23 @@ fn fit_affine(from: &[[f64; 2]], to: &[[f64; 2]]) -> Option<Matrix> {
     }
 }
 
-/// Homography for this picture: the calibration, re-aligned on the markers
+/// Mapping for this picture: the calibration, re-aligned on the markers
 /// found in it when the calibration knows their bed positions (the camera
 /// moves a little whenever the lid is closed). Returns how many matched.
-pub fn tracked_homography(
+pub fn tracked_mapping(
     calibration: &CameraCalibration,
     picture: &RgbaImage,
-) -> Result<(Matrix, usize), String> {
-    let h = homography(calibration)?;
+) -> Result<(Mapping, usize), String> {
+    let base = mapping(calibration)?;
     if calibration.marker_points.len() < 2 {
-        return Ok((h, 0));
+        return Ok((base, 0));
     }
     let found = find_markers(picture);
     let tolerance = 0.08 * picture.width().max(picture.height()) as f64;
     let mut used = vec![false; found.len()];
     let (mut bed, mut expected, mut seen) = (Vec::new(), Vec::new(), Vec::new());
     for marker in &calibration.marker_points {
-        let p = transform(&h, *marker);
+        let p = base.to_pixel(*marker);
         let nearest = found
             .iter()
             .enumerate()
@@ -589,23 +892,52 @@ pub fn tracked_homography(
         if let Some((i, _)) = nearest {
             used[i] = true;
             bed.push(*marker);
-            expected.push(p);
-            seen.push(found[i]);
+            // Nachführen auf unverzerrten Pixeln.
+            expected.push(transform(&base.h, *marker));
+            seen.push(base.undistort(found[i]));
         }
+    }
+    // Ab 5 Marken die schlechteste verwerfen, solange sie nicht passt (z. B.
+    // eine Marke auf dem Portal, das seit der Kalibrierung verfahren ist).
+    let tolerance = 0.004 * picture.width().max(picture.height()) as f64;
+    while seen.len() >= 5 {
+        let Ok(h) = homography(&CameraCalibration {
+            reference_points: bed.clone(),
+            view_points: seen.clone(),
+            ..Default::default()
+        }) else {
+            break;
+        };
+        let (worst, error) = bed
+            .iter()
+            .zip(&seen)
+            .map(|(b, s)| {
+                let p = transform(&h, *b);
+                (p[0] - s[0]).hypot(p[1] - s[1])
+            })
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .unwrap();
+        if error <= tolerance {
+            break;
+        }
+        bed.remove(worst);
+        expected.remove(worst);
+        seen.remove(worst);
     }
     let tracked = match seen.len() {
         0 | 1 => None,
-        2 | 3 => fit_affine(&expected, &seen).map(|a| multiply(&a, &h)),
+        2 | 3 => fit_affine(&expected, &seen).map(|a| multiply(&a, &base.h)),
         _ => homography(&CameraCalibration {
             reference_points: bed,
             view_points: seen.clone(),
-            marker_points: Vec::new(),
+            ..Default::default()
         })
         .ok(),
     };
     Ok(match tracked {
-        Some(m) => (m, seen.len()),
-        None => (h, 0),
+        Some(h) => (Mapping { h, lens: base.lens }, seen.len()),
+        None => (base, 0),
     })
 }
 
@@ -620,8 +952,14 @@ pub fn background_image(
         .as_ref()
         .ok_or(tr("Kamera ist noch nicht kalibriert"))?;
     let picture = capture(device)?;
-    let (h, _) = tracked_homography(calibration, &picture)?;
-    Ok(correct(&picture, &h, bed_width_mm, bed_height_mm, 2400))
+    let (mapping, _) = tracked_mapping(calibration, &picture)?;
+    Ok(correct(
+        &picture,
+        &mapping,
+        bed_width_mm,
+        bed_height_mm,
+        2400,
+    ))
 }
 
 /// Bed-aligned camera background as PNG.
@@ -691,6 +1029,45 @@ mod tests {
     }
 
     #[test]
+    fn finds_cross_centre_but_not_ticks_or_paper_corners() {
+        cross_on_paper(120.0);
+        // Blass gelasert, kaum Kontrast zum grauen Papier.
+        cross_on_paper(18.0);
+    }
+
+    fn cross_on_paper(depth: f64) {
+        // Papier (hell) mit Ecke bei (60, 60), Kreuz um (150.3, 120.6), Striche darunter.
+        let (cx, cy) = (150.3, 120.6);
+        let picture = RgbaImage::from_fn(300, 220, |x, y| {
+            let (x, y) = (x as f64 + 0.5, y as f64 + 0.5);
+            let mut v = if x < 60.0 || y < 60.0 { 40.0 } else { 220.0 };
+            let line = |d: f64| (1.0 - d.abs()).max(0.0);
+            if (x - cx).abs() < 12.0 {
+                v -= depth * line(y - cy);
+            }
+            if (y - cy).abs() < 12.0 {
+                v -= depth * line(x - cx);
+            }
+            if (y - cy - 24.0).abs() < 5.0
+                && [cx - 4.0, cx, cx + 4.0].iter().any(|t| (x - t).abs() < 1.0)
+            {
+                v -= depth;
+            }
+            let v = v.clamp(0.0, 255.0) as u8;
+            image::Rgba([v, v, v, 255])
+        });
+        let gray = Gray::new(&picture);
+        let found = find_cross(&gray, [cx + 30.0, cy + 25.0], 50.0, 11.5).unwrap();
+        assert!(
+            (found[0] - cx).abs() < 0.3 && (found[1] - cy).abs() < 0.3,
+            "{found:?}"
+        );
+        // Nur Papierecke und Striche in Reichweite: nichts.
+        assert_eq!(find_cross(&gray, [60.0, 60.0], 20.0, 11.5), None);
+        assert_eq!(find_cross(&gray, [cx, cy + 26.0], 6.0, 11.5), None);
+    }
+
+    #[test]
     fn finds_markers_and_tracks_a_moved_camera() {
         let centers = [
             [200.0, 150.0],
@@ -717,6 +1094,7 @@ mod tests {
             reference_points: vec![[0.0, 0.0], [1000.0, 0.0], [1000.0, 600.0], [0.0, 600.0]],
             view_points: vec![[0.0, 0.0], [1500.0, 0.0], [1500.0, 900.0], [0.0, 900.0]],
             marker_points: Vec::new(),
+            lens: None,
         };
         calibration.marker_points = markers_on_bed(&centers, &calibration).unwrap();
         assert!((calibration.marker_points[0][0] - 200.0 / 1.5).abs() < 1e-6);
@@ -726,18 +1104,94 @@ mod tests {
         for keep in [4, 3, 2] {
             let mut partial = calibration.clone();
             partial.marker_points.truncate(keep);
-            let (h, matched) = tracked_homography(&partial, &picture).unwrap();
+            let (m, matched) = tracked_mapping(&partial, &picture).unwrap();
             assert_eq!(matched, keep);
-            let p = transform(&h, [500.0, 300.0]);
+            let p = m.to_pixel([500.0, 300.0]);
             assert!(
                 (p[0] - 790.0).abs() < 1.5 && (p[1] - 475.0).abs() < 1.5,
                 "{keep}: {p:?}"
             );
         }
         // Ohne Passmarken im Bild bleibt die Kalibrierung.
-        let (h, matched) = tracked_homography(&calibration, &picture_with_markers(&[])).unwrap();
-        let p = transform(&h, [500.0, 300.0]);
+        let (m, matched) = tracked_mapping(&calibration, &picture_with_markers(&[])).unwrap();
+        let p = m.to_pixel([500.0, 300.0]);
         assert!(matched == 0 && (p[0] - 750.0).abs() < 1e-6 && (p[1] - 450.0).abs() < 1e-6);
+        // Eine fünfte Marke, die sich anders bewegt hat (z. B. auf dem Portal),
+        // wird verworfen.
+        let mut five = calibration.clone();
+        five.marker_points
+            .push(markers_on_bed(&[[750.0, 80.0]], &calibration).unwrap()[0]);
+        let mut moved_five = moved.clone();
+        moved_five.push([750.0 + 40.0 + 60.0, 80.0 + 25.0]);
+        let (m, matched) = tracked_mapping(&five, &picture_with_markers(&moved_five)).unwrap();
+        let p = m.to_pixel([500.0, 300.0]);
+        assert_eq!(matched, 4);
+        assert!(
+            (p[0] - 790.0).abs() < 1.5 && (p[1] - 475.0).abs() < 1.5,
+            "{p:?}"
+        );
+    }
+
+    #[test]
+    fn lens_profile_and_fit_remove_radial_distortion() {
+        let size = [3000.0, 2100.0];
+        let pi = Lens::raspberry_pi_v2(size);
+        assert!((pi.focal - 2482.6).abs() < 1.0, "{}", pi.focal);
+        assert_eq!(pi.center, [1500.0, 1050.0]);
+        let truth = Lens {
+            k1: -0.15,
+            k2: 0.03,
+            ..pi.clone()
+        };
+        for p in [
+            [10.0, 20.0],
+            [1500.0, 1050.0],
+            [2990.0, 2090.0],
+            [700.0, 1900.0],
+        ] {
+            let back = truth.undistort(truth.distort(p));
+            assert!(
+                (back[0] - p[0]).abs() < 1e-2 && (back[1] - p[1]).abs() < 1e-2,
+                "{p:?} {back:?}"
+            );
+        }
+        // Kamerabild eines 5 × 3-Rasters durch die verzeichnende Linse.
+        let h: Matrix = [[2.3, 0.05, 350.0], [-0.04, 2.35, 380.0], [1e-5, 2e-5, 1.0]];
+        let reference: Vec<[f64; 2]> = [50.0, 300.0, 550.0]
+            .iter()
+            .flat_map(|y| [50.0, 275.0, 500.0, 725.0, 950.0].map(|x| [x, *y]))
+            .collect();
+        let view = reference
+            .iter()
+            .map(|r| truth.distort(transform(&h, *r)))
+            .collect();
+        let mut calibration = CameraCalibration {
+            reference_points: reference,
+            view_points: view,
+            ..Default::default()
+        };
+        let without = residuals(&calibration)
+            .unwrap()
+            .into_iter()
+            .fold(0.0, f64::max);
+        calibration.lens = Some(fit_lens(&calibration, Lens::raspberry_pi_v2(size)));
+        let with = residuals(&calibration)
+            .unwrap()
+            .into_iter()
+            .fold(0.0, f64::max);
+        assert!(without > 5.0 && with < 0.2, "{without} {with}");
+        // Die Abbildung trifft auch Punkte zwischen den Kreuzen.
+        let m = mapping(&calibration).unwrap();
+        let (p, q) = (
+            m.to_pixel([160.0, 420.0]),
+            truth.distort(transform(&h, [160.0, 420.0])),
+        );
+        assert!((p[0] - q[0]).hypot(p[1] - q[1]) < 0.3, "{p:?} {q:?}");
+        let bed = m.to_bed(q).unwrap();
+        assert!(
+            (bed[0] - 160.0).abs() < 0.15 && (bed[1] - 420.0).abs() < 0.15,
+            "{bed:?}"
+        );
     }
 
     fn fau() -> CameraCalibration {
@@ -781,6 +1235,7 @@ mod tests {
             reference_points: vec![[0.0, 0.0], [100.0, 0.0], [100.0, 50.0], [0.0, 50.0]],
             view_points: vec![[10.0, 20.0], [210.0, 25.0], [205.0, 130.0], [12.0, 120.0]],
             marker_points: Vec::new(),
+            lens: None,
         };
         let h = homography(&calibration).unwrap();
         for (r, v) in calibration
@@ -793,7 +1248,7 @@ mod tests {
         }
         let mut camera = RgbaImage::from_pixel(220, 140, image::Rgba([0, 0, 0, 255]));
         camera.put_pixel(110, 72, image::Rgba([255, 0, 0, 255]));
-        let bed = correct(&camera, &h, 100.0, 50.0, 400);
+        let bed = correct(&camera, &Mapping { h, lens: None }, 100.0, 50.0, 400);
         assert!(bed.width() >= 190 && bed.width() <= 400);
         assert!(bed.pixels().any(|p| p.0 == [255, 0, 0, 255]));
         assert!(decode(&encode_png(&bed).unwrap()).is_ok());
@@ -805,12 +1260,14 @@ mod tests {
             reference_points: vec![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
             view_points: vec![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
             marker_points: Vec::new(),
+            lens: None,
         };
         assert!(homography(&line).unwrap_err().contains("Linie"));
         let legacy = CameraCalibration {
             reference_points: vec![[200.0, 120.0], [800.0, 480.0]],
             view_points: vec![[100.0, 60.0], [400.0, 240.0]],
             marker_points: Vec::new(),
+            lens: None,
         };
         let h = homography(&legacy).unwrap();
         assert_eq!(transform(&h, [500.0, 300.0]), [250.0, 150.0]);
@@ -905,6 +1362,7 @@ mod tests {
                 reference_points: vec![[0.0, 0.0], [1000.0, 600.0]],
                 view_points: vec![[0.0, 0.0], [40.0, 30.0]],
                 marker_points: Vec::new(),
+                lens: None,
             }),
             ..Default::default()
         };

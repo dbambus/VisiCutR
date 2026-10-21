@@ -43,6 +43,10 @@ pub struct Project {
     /// (default on; files without the field get the default).
     #[serde(default = "default_true")]
     pub remove_duplicate_lines: bool,
+    /// Colour rules also match similar colours (e.g. after a CMYK to RGB
+    /// conversion); default on, files without the field get the default.
+    #[serde(default = "default_true")]
+    pub similar_colors: bool,
     /// Machine-specific settings, copied from the selected device.
     #[serde(default)]
     pub machine: MachineSettings,
@@ -326,6 +330,8 @@ struct ProjectFile {
     cut_order: CutOrder,
     #[serde(default = "default_true")]
     remove_duplicate_lines: bool,
+    #[serde(default = "default_true")]
+    similar_colors: bool,
     #[serde(default)]
     machine: MachineSettings,
     #[serde(default)]
@@ -380,6 +386,7 @@ impl TryFrom<ProjectFile> for Project {
             ignore_filters: file.ignore_filters,
             cut_order: file.cut_order,
             remove_duplicate_lines: file.remove_duplicate_lines,
+            similar_colors: file.similar_colors,
             machine: file.machine,
             part_name: file.part_name,
             active_part: file.active_part.min(file.parts.len()),
@@ -461,6 +468,7 @@ impl Default for Project {
             ignore_filters: Vec::new(),
             cut_order: CutOrder::default(),
             remove_duplicate_lines: true,
+            similar_colors: true,
             machine: MachineSettings::default(),
             part_name: String::new(),
             active_part: 0,
@@ -653,6 +661,7 @@ impl Project {
             ignore_filters: Vec::new(),
             cut_order: self.cut_order,
             remove_duplicate_lines: self.remove_duplicate_lines,
+            similar_colors: self.similar_colors,
             machine: self.machine.clone(),
             part_name: String::new(),
             active_part: 0,

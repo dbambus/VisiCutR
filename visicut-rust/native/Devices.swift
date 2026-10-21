@@ -57,6 +57,16 @@ struct CameraCalibration: Codable, Equatable {
     var view_points: [[Double]]
     /// Passmarken in mm (aus der Rust-Oberfläche); Kamerabilder werden daran nachgeführt.
     var marker_points: [[Double]]? = nil
+    /// Linsenverzeichnung (aus der Rust-Oberfläche).
+    var lens: CameraLens? = nil
+}
+
+struct CameraLens: Codable, Equatable {
+    var profile: String
+    var center: [Double]
+    var focal: Double
+    var k1: Double
+    var k2: Double
 }
 
 struct LaserDevice: Codable, Equatable {
@@ -706,6 +716,7 @@ struct CameraCalibrationView: View {
             // Neue Kalibrierung: alte Passmarken-Positionen passen nicht mehr.
             var calibration = calibration
             calibration.marker_points = nil
+            calibration.lens = nil
             _ = try RustCore.call("homography", values: ["calibration": RustCore.json(calibration)])
             apply(calibration)
             dismiss()

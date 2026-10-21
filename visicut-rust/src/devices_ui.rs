@@ -1500,180 +1500,201 @@ fn calibration_window(
         Some(Err(e)) => c.problem = Some(e),
         None => {}
     }
+    // Eigenes Fenster des Betriebssystems (frei verschiebbar, auch auf einen
+    // anderen Bildschirm); ohne Unterstützung dafür innerhalb des Hauptfensters.
+    let title = tr!("Kamera kalibrieren · {device}", device = c.device.name);
     let mut open = true;
-    egui::Window::new(tr!("Kamera kalibrieren · {device}", device = c.device.name))
-        .id(egui::Id::new(("camera_calibration", &c.device.name)))
-        .open(&mut open)
-        .default_size([980.0, 600.0])
-        .collapsible(false)
-        .show(ctx, |ui| {
-            ui.horizontal_top(|ui| {
-                let space = Vec2::new(
-                    (ui.available_width() - PANEL_WIDTH - 12.0).max(200.0),
-                    // Platz für die Knopfzeile darunter.
-                    (ui.available_height() - ui.spacing().interact_size.y - 18.0).max(420.0),
-                );
-                let (rect, response) = ui.allocate_exact_size(space, Sense::click_and_drag());
-                let painter = ui.painter().with_clip_rect(rect);
-                painter.rect_filled(rect, 0.0, Color32::from_gray(235));
-                if let Some((texture, size)) = &c.picture {
-                    let size = *size;
-                    let fit = (rect.width() / size.x).min(rect.height() / size.y);
-                    // Zoomen: Zwei-Finger-Zoom oder ⌘/Strg + Mausrad um den Mauszeiger,
-                    // Verschieben: Scrollen oder mit rechter/mittlerer Maustaste ziehen.
-                    if response.hovered() {
-                        let (factor, scroll) =
-                            ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta));
-                        let pointer = response.hover_pos().unwrap_or(rect.center());
-                        let before = c.center.unwrap_or(size / 2.0);
-                        let anchor = before + (pointer - rect.center()) / (fit * c.zoom);
-                        c.zoom = (c.zoom * factor).clamp(1.0, 20.0);
-                        c.center = Some(
-                            anchor
-                                - (pointer - rect.center()) / (fit * c.zoom)
-                                - scroll / (fit * c.zoom),
-                        );
-                    }
-                    if response.dragged_by(egui::PointerButton::Secondary)
-                        || response.dragged_by(egui::PointerButton::Middle)
-                    {
-                        c.center = Some(
-                            c.center.unwrap_or(size / 2.0) - response.drag_delta() / (fit * c.zoom),
-                        );
-                    }
-                    let scale = fit * c.zoom;
-                    // Nicht über den Bildrand hinaus verschieben.
-                    let half = rect.size() / (2.0 * scale);
-                    let center = c.center.unwrap_or(size / 2.0);
-                    let center = Vec2::new(
-                        if half.x * 2.0 >= size.x {
-                            size.x / 2.0
-                        } else {
-                            center.x.clamp(half.x, size.x - half.x)
-                        },
-                        if half.y * 2.0 >= size.y {
-                            size.y / 2.0
-                        } else {
-                            center.y.clamp(half.y, size.y - half.y)
-                        },
-                    );
-                    c.center = Some(center);
-                    let image = Rect::from_min_size(rect.center() - center * scale, size * scale);
-                    painter.image(
-                        texture.id(),
-                        image,
-                        Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                        Color32::WHITE,
-                    );
-                    let to_screen =
-                        |p: [f64; 2]| image.min + Vec2::new(p[0] as f32, p[1] as f32) * scale;
-                    let primary =
-                        response.clicked() || response.dragged_by(egui::PointerButton::Primary);
-                    if let (Some(pointer), true) = (response.interact_pointer_pos(), primary) {
-                        if response.drag_started_by(egui::PointerButton::Primary)
-                            || response.clicked()
-                        {
-                            // Grab the nearest marker, otherwise move the selected one.
-                            if let Some((i, _)) = c
-                                .points
-                                .view_points
-                                .iter()
-                                .enumerate()
-                                .map(|(i, p)| (i, to_screen(*p).distance(pointer)))
-                                .filter(|(_, d)| *d < 16.0)
-                                .min_by(|a, b| a.1.total_cmp(&b.1))
-                            {
-                                c.selected = i;
-                            }
-                        }
-                        if let Some(p) = c.points.view_points.get_mut(c.selected) {
-                            let local = (pointer - image.min) / scale;
-                            *p = [
-                                local.x.clamp(0.0, size.x) as f64,
-                                local.y.clamp(0.0, size.y) as f64,
-                            ];
-                        }
-                    }
-                    if response.drag_stopped() || response.clicked() {
-                        c.quality = None;
-                    }
-                    // Pfeiltasten: gewählten Marker um einen Bildschirmpunkt verschieben (⇧: zehn).
-                    if response.hovered() && !ctx.wants_keyboard_input() {
-                        let step = ui.input(|i| {
-                            let n = if i.modifiers.shift { 10.0 } else { 1.0 };
-                            let mut d = Vec2::ZERO;
-                            for (key, dir) in [
-                                (egui::Key::ArrowLeft, -Vec2::X),
-                                (egui::Key::ArrowRight, Vec2::X),
-                                (egui::Key::ArrowUp, -Vec2::Y),
-                                (egui::Key::ArrowDown, Vec2::Y),
-                            ] {
-                                if i.key_pressed(key) {
-                                    d += dir * n;
-                                }
-                            }
-                            d / scale
-                        });
-                        if step != Vec2::ZERO
-                            && let Some(p) = c.points.view_points.get_mut(c.selected)
-                        {
-                            *p = [
-                                (p[0] + step.x as f64).clamp(0.0, size.x as f64),
-                                (p[1] + step.y as f64).clamp(0.0, size.y as f64),
-                            ];
-                        }
-                    }
-                    for p in &c.markers {
-                        painter.circle_stroke(
-                            to_screen(*p),
-                            18.0,
-                            Stroke::new(2.5, Color32::from_rgb(40, 180, 90)),
-                        );
-                    }
-                    for (i, p) in c.points.view_points.iter().enumerate() {
-                        let center = to_screen(*p);
-                        let color = if i == c.selected {
-                            Color32::from_rgb(40, 120, 230)
-                        } else {
-                            Color32::YELLOW
-                        };
-                        painter.circle_stroke(center, 12.0, Stroke::new(2.0, color));
-                        painter.line_segment(
-                            [center - Vec2::X * 12.0, center + Vec2::X * 12.0],
-                            Stroke::new(1.0, color),
-                        );
-                        painter.line_segment(
-                            [center - Vec2::Y * 12.0, center + Vec2::Y * 12.0],
-                            Stroke::new(1.0, color),
-                        );
-                        painter.text(
-                            center + Vec2::new(16.0, -16.0),
-                            egui::Align2::LEFT_BOTTOM,
-                            (i + 1).to_string(),
-                            egui::FontId::proportional(14.0),
-                            color,
-                        );
-                    }
-                } else {
-                    painter.text(
-                        rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        if c.loading.is_some() {
-                            tr("Foto wird aufgenommen …")
-                        } else {
-                            tr("Kein Kamerabild")
-                        },
-                        egui::FontId::proportional(16.0),
-                        Color32::from_gray(120),
-                    );
+    ctx.show_viewport_immediate(
+        egui::ViewportId::from_hash_of(("camera_calibration", &c.device.name)),
+        egui::ViewportBuilder::default()
+            .with_title(title.clone())
+            .with_inner_size([1000.0, 660.0])
+            .with_min_inner_size([760.0, 480.0]),
+        |ctx, class| {
+            if class == egui::ViewportClass::Embedded {
+                egui::Window::new(title.clone())
+                    .id(egui::Id::new(("camera_calibration", &c.device.name)))
+                    .open(&mut open)
+                    .default_size([980.0, 600.0])
+                    .collapsible(false)
+                    .show(ctx, |ui| calibration_body(ui, c, close, apply, action));
+            } else {
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| calibration_body(ui, c, close, apply, action));
+                if ctx.input(|i| i.viewport().close_requested()) {
+                    open = false;
                 }
-                ui.vertical(|ui| {
-                    ui.set_width(PANEL_WIDTH);
-                    calibration_panel(ui, c, space.y);
-                });
-            });
-            ui.add_space(6.0);
-            calibration_toolbar(ui, c, close, apply, action);
-        });
+            }
+        },
+    );
     *close |= !open;
+}
+
+/// Inhalt des Kalibrierdialogs: Foto mit Markern, Spalte rechts, Knopfzeile.
+fn calibration_body(
+    ui: &mut egui::Ui,
+    c: &mut Calibration,
+    close: &mut bool,
+    apply: &mut Option<CameraCalibration>,
+    action: &mut Option<Action>,
+) {
+    ui.horizontal_top(|ui| {
+        let space = Vec2::new(
+            (ui.available_width() - PANEL_WIDTH - 12.0).max(200.0),
+            // Platz für die Knopfzeile darunter.
+            (ui.available_height() - ui.spacing().interact_size.y - 18.0).max(420.0),
+        );
+        let (rect, response) = ui.allocate_exact_size(space, Sense::click_and_drag());
+        let painter = ui.painter().with_clip_rect(rect);
+        painter.rect_filled(rect, 0.0, Color32::from_gray(235));
+        if let Some((texture, size)) = &c.picture {
+            let size = *size;
+            let fit = (rect.width() / size.x).min(rect.height() / size.y);
+            // Zoomen: Zwei-Finger-Zoom oder ⌘/Strg + Mausrad um den Mauszeiger,
+            // Verschieben: Scrollen oder mit rechter/mittlerer Maustaste ziehen.
+            if response.hovered() {
+                let (factor, scroll) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta));
+                let pointer = response.hover_pos().unwrap_or(rect.center());
+                let before = c.center.unwrap_or(size / 2.0);
+                let anchor = before + (pointer - rect.center()) / (fit * c.zoom);
+                c.zoom = (c.zoom * factor).clamp(1.0, 20.0);
+                c.center = Some(
+                    anchor - (pointer - rect.center()) / (fit * c.zoom) - scroll / (fit * c.zoom),
+                );
+            }
+            if response.dragged_by(egui::PointerButton::Secondary)
+                || response.dragged_by(egui::PointerButton::Middle)
+            {
+                c.center =
+                    Some(c.center.unwrap_or(size / 2.0) - response.drag_delta() / (fit * c.zoom));
+            }
+            let scale = fit * c.zoom;
+            // Nicht über den Bildrand hinaus verschieben.
+            let half = rect.size() / (2.0 * scale);
+            let center = c.center.unwrap_or(size / 2.0);
+            let center = Vec2::new(
+                if half.x * 2.0 >= size.x {
+                    size.x / 2.0
+                } else {
+                    center.x.clamp(half.x, size.x - half.x)
+                },
+                if half.y * 2.0 >= size.y {
+                    size.y / 2.0
+                } else {
+                    center.y.clamp(half.y, size.y - half.y)
+                },
+            );
+            c.center = Some(center);
+            let image = Rect::from_min_size(rect.center() - center * scale, size * scale);
+            painter.image(
+                texture.id(),
+                image,
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                Color32::WHITE,
+            );
+            let to_screen = |p: [f64; 2]| image.min + Vec2::new(p[0] as f32, p[1] as f32) * scale;
+            let primary = response.clicked() || response.dragged_by(egui::PointerButton::Primary);
+            if let (Some(pointer), true) = (response.interact_pointer_pos(), primary) {
+                if response.drag_started_by(egui::PointerButton::Primary) || response.clicked() {
+                    // Grab the nearest marker, otherwise move the selected one.
+                    if let Some((i, _)) = c
+                        .points
+                        .view_points
+                        .iter()
+                        .enumerate()
+                        .map(|(i, p)| (i, to_screen(*p).distance(pointer)))
+                        .filter(|(_, d)| *d < 16.0)
+                        .min_by(|a, b| a.1.total_cmp(&b.1))
+                    {
+                        c.selected = i;
+                    }
+                }
+                if let Some(p) = c.points.view_points.get_mut(c.selected) {
+                    let local = (pointer - image.min) / scale;
+                    *p = [
+                        local.x.clamp(0.0, size.x) as f64,
+                        local.y.clamp(0.0, size.y) as f64,
+                    ];
+                }
+            }
+            if response.drag_stopped() || response.clicked() {
+                c.quality = None;
+            }
+            // Pfeiltasten: gewählten Marker um einen Bildschirmpunkt verschieben (⇧: zehn).
+            if response.hovered() && !ui.ctx().wants_keyboard_input() {
+                let step = ui.input(|i| {
+                    let n = if i.modifiers.shift { 10.0 } else { 1.0 };
+                    let mut d = Vec2::ZERO;
+                    for (key, dir) in [
+                        (egui::Key::ArrowLeft, -Vec2::X),
+                        (egui::Key::ArrowRight, Vec2::X),
+                        (egui::Key::ArrowUp, -Vec2::Y),
+                        (egui::Key::ArrowDown, Vec2::Y),
+                    ] {
+                        if i.key_pressed(key) {
+                            d += dir * n;
+                        }
+                    }
+                    d / scale
+                });
+                if step != Vec2::ZERO
+                    && let Some(p) = c.points.view_points.get_mut(c.selected)
+                {
+                    *p = [
+                        (p[0] + step.x as f64).clamp(0.0, size.x as f64),
+                        (p[1] + step.y as f64).clamp(0.0, size.y as f64),
+                    ];
+                }
+            }
+            for p in &c.markers {
+                painter.circle_stroke(
+                    to_screen(*p),
+                    18.0,
+                    Stroke::new(2.5, Color32::from_rgb(40, 180, 90)),
+                );
+            }
+            for (i, p) in c.points.view_points.iter().enumerate() {
+                let center = to_screen(*p);
+                let color = if i == c.selected {
+                    Color32::from_rgb(40, 120, 230)
+                } else {
+                    Color32::YELLOW
+                };
+                painter.circle_stroke(center, 12.0, Stroke::new(2.0, color));
+                painter.line_segment(
+                    [center - Vec2::X * 12.0, center + Vec2::X * 12.0],
+                    Stroke::new(1.0, color),
+                );
+                painter.line_segment(
+                    [center - Vec2::Y * 12.0, center + Vec2::Y * 12.0],
+                    Stroke::new(1.0, color),
+                );
+                painter.text(
+                    center + Vec2::new(16.0, -16.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    (i + 1).to_string(),
+                    egui::FontId::proportional(14.0),
+                    color,
+                );
+            }
+        } else {
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                if c.loading.is_some() {
+                    tr("Foto wird aufgenommen …")
+                } else {
+                    tr("Kein Kamerabild")
+                },
+                egui::FontId::proportional(16.0),
+                Color32::from_gray(120),
+            );
+        }
+        ui.vertical(|ui| {
+            ui.set_width(PANEL_WIDTH);
+            calibration_panel(ui, c, space.y);
+        });
+    });
+    ui.add_space(6.0);
+    calibration_toolbar(ui, c, close, apply, action);
 }

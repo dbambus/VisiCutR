@@ -31,6 +31,10 @@ sys-locale = "0.3"
 ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }
 zip = { version = "9.0.0", default-features = false, features = ["deflate"] }
 
+# Windows: VisiCut-Symbol und Versionsangaben in die .exe einbetten (build.rs).
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
 [profile.release]
 lto = "thin"
 strip = true

@@ -12,6 +12,8 @@ on:
       - ".github/workflows/rust-desktop.yml"
       - "COPYING*"
       - "distribute/mac/MacIcon.icns"
+      - "distribute/windows/VisiCut.ico"
+      - "src/main/resources/de/thomas_oster/visicut/gui/resources/icon.png"
   workflow_dispatch:
 
 permissions:

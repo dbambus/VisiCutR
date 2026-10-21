@@ -252,7 +252,6 @@
   "Löcher": "Holes",
   "Löcher passen nicht auf das Schild": "Holes do not fit on the sign",
   "Löschen": "Delete",
-  "Marker auf dem Bett (mm)": "Marker on the bed (mm)",
   "Markieren": "Mark",
   "Markieren (blau)": "Mark (blue)",
   "Maschine": "Machine",
@@ -306,8 +305,6 @@
   "Profil entfernen": "Remove profile",
   "Projekt geöffnet": "Project opened",
   "Projekt mit eingebetteter SVG gesichert": "Project saved with embedded SVG",
-  "Punkt +": "Point +",
-  "Punkt −": "Point −",
   "Rahmen (markiert, 0 = ohne)": "Frame (marked, 0 = none)",
   "Rahmenabstand ist zu groß für das Schild": "Frame margin is too large for the sign",
   "Rampe des Controllers bei verbundenen Kurven (experimentell)": "Controller ramp for connected curves (experimental)",
@@ -946,5 +943,11 @@
   "Programm": "Application",
   "Rust-Neuentwicklung auf Grundlage von VisiCut (Thomas Oster und Mitwirkende, LGPL). Ohne Gewähr; Aufträge vor dem Starten am Gerät prüfen.": "Rust reimplementation based on VisiCut (Thomas Oster and contributors, LGPL). No warranty; check jobs on the machine before starting them.",
   "Software-Add-ins": "Software add-ins",
-  "Erweiterungen für Zeichenprogramme: Sie schicken die Zeichnung direkt an VisiCutR, ohne Speichern und Öffnen.": "Extensions for drawing programs: they send the drawing straight to VisiCutR, without saving and opening."
+  "Erweiterungen für Zeichenprogramme: Sie schicken die Zeichnung direkt an VisiCutR, ohne Speichern und Öffnen.": "Extensions for drawing programs: they send the drawing straight to VisiCutR, without saving and opening.",
+  "Anordnung": "Layout",
+  "Bedienung": "How to use",
+  "Gewählten Punkt entfernen": "Remove selected point",
+  "Kalibrierpunkte": "Calibration points",
+  "Punkt hinzufügen": "Add point",
+  "Status": "Status"
 }

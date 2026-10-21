@@ -252,7 +252,6 @@
   "Löcher": "Trous",
   "Löcher passen nicht auf das Schild": "Les trous ne tiennent pas sur la plaque",
   "Löschen": "Supprimer",
-  "Marker auf dem Bett (mm)": "Repères sur le plateau (mm)",
   "Markieren": "Marquer",
   "Markieren (blau)": "Marquer (bleu)",
   "Maschine": "Machine",
@@ -306,8 +305,6 @@
   "Profil entfernen": "Supprimer le profil",
   "Projekt geöffnet": "Projet ouvert",
   "Projekt mit eingebetteter SVG gesichert": "Projet enregistré avec SVG intégré",
-  "Punkt +": "Point +",
-  "Punkt −": "Point −",
   "Rahmen (markiert, 0 = ohne)": "Cadre (marqué, 0 = sans)",
   "Rahmenabstand ist zu groß für das Schild": "Marge du cadre trop grande pour la plaque",
   "Rampe des Controllers bei verbundenen Kurven (experimentell)": "Rampe du contrôleur pour courbes enchaînées (expérimental)",
@@ -946,5 +943,11 @@
   "Programm": "Application",
   "Rust-Neuentwicklung auf Grundlage von VisiCut (Thomas Oster und Mitwirkende, LGPL). Ohne Gewähr; Aufträge vor dem Starten am Gerät prüfen.": "Réimplémentation en Rust basée sur VisiCut (Thomas Oster et contributeurs, LGPL). Sans garantie ; vérifier les tâches sur la machine avant de les lancer.",
   "Software-Add-ins": "Extensions logicielles",
-  "Erweiterungen für Zeichenprogramme: Sie schicken die Zeichnung direkt an VisiCutR, ohne Speichern und Öffnen.": "Extensions pour logiciels de dessin : elles envoient le dessin directement à VisiCutR, sans enregistrer ni ouvrir."
+  "Erweiterungen für Zeichenprogramme: Sie schicken die Zeichnung direkt an VisiCutR, ohne Speichern und Öffnen.": "Extensions pour logiciels de dessin : elles envoient le dessin directement à VisiCutR, sans enregistrer ni ouvrir.",
+  "Anordnung": "Disposition",
+  "Bedienung": "Utilisation",
+  "Gewählten Punkt entfernen": "Supprimer le point sélectionné",
+  "Kalibrierpunkte": "Points d'étalonnage",
+  "Punkt hinzufügen": "Ajouter un point",
+  "Status": "État"
 }

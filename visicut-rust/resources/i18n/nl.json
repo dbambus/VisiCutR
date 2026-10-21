@@ -252,7 +252,6 @@
   "Löcher": "Gaten",
   "Löcher passen nicht auf das Schild": "Gaten passen niet op het naambordje",
   "Löschen": "Verwijderen",
-  "Marker auf dem Bett (mm)": "Markers op het bed (mm)",
   "Markieren": "Markeren",
   "Markieren (blau)": "Markeren (blauw)",
   "Maschine": "Machine",
@@ -306,8 +305,6 @@
   "Profil entfernen": "Profiel verwijderen",
   "Projekt geöffnet": "Project geopend",
   "Projekt mit eingebetteter SVG gesichert": "Project met ingebedde SVG opgeslagen",
-  "Punkt +": "Punt +",
-  "Punkt −": "Punt −",
   "Rahmen (markiert, 0 = ohne)": "Kader (gemarkeerd, 0 = geen)",
   "Rahmenabstand ist zu groß für das Schild": "Kaderafstand is te groot voor het naambordje",
   "Rampe des Controllers bei verbundenen Kurven (experimentell)": "Versnellingshelling van de controller bij aaneengesloten curves (experimenteel)",
@@ -946,5 +943,11 @@
   "Programm": "Programma",
   "Rust-Neuentwicklung auf Grundlage von VisiCut (Thomas Oster und Mitwirkende, LGPL). Ohne Gewähr; Aufträge vor dem Starten am Gerät prüfen.": "Rust-herimplementatie op basis van VisiCut (Thomas Oster en bijdragers, LGPL). Zonder garantie; controleer opdrachten op de machine voordat je ze start.",
   "Software-Add-ins": "Software-add-ins",
-  "Erweiterungen für Zeichenprogramme: Sie schicken die Zeichnung direkt an VisiCutR, ohne Speichern und Öffnen.": "Uitbreidingen voor tekenprogramma's: ze sturen de tekening direct naar VisiCutR, zonder opslaan en openen."
+  "Erweiterungen für Zeichenprogramme: Sie schicken die Zeichnung direkt an VisiCutR, ohne Speichern und Öffnen.": "Uitbreidingen voor tekenprogramma's: ze sturen de tekening direct naar VisiCutR, zonder opslaan en openen.",
+  "Anordnung": "Indeling",
+  "Bedienung": "Bediening",
+  "Gewählten Punkt entfernen": "Geselecteerd punt verwijderen",
+  "Kalibrierpunkte": "Kalibratiepunten",
+  "Punkt hinzufügen": "Punt toevoegen",
+  "Status": "Status"
 }

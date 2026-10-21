@@ -1232,6 +1232,204 @@ fn detect_crosses(c: &mut Calibration) {
     update_quality(c);
 }
 
+/// Breite der Spalte rechts neben dem Foto im Kalibrierdialog.
+const PANEL_WIDTH: f32 = 290.0;
+
+/// Spalte rechts im Kalibrierdialog: Objektiv, Kalibrierpunkte, Status und
+/// Bedienhinweise, gestaltet wie die Einstellungsseiten.
+fn calibration_panel(ui: &mut egui::Ui, c: &mut Calibration, height: f32) {
+    use crate::object_bar::{Icon, list_button, list_footer};
+    egui::ScrollArea::vertical()
+        .id_salt("calibration_panel")
+        .auto_shrink([false, false])
+        .max_height(height)
+        .show(ui, |ui| {
+            crate::form::section(ui, tr("Objektiv"), |ui| {
+                let before = c.lens;
+                crate::form::Dropdown::from_id_salt("calibration_lens")
+                    .width(ui.available_width())
+                    .selected_text(c.lens.label())
+                    .show_ui(ui, |ui| {
+                        for choice in [LensChoice::RaspberryPiV2, LensChoice::Generic, LensChoice::Off] {
+                            ui.selectable_value(&mut c.lens, choice, choice.label());
+                        }
+                    })
+                    .response
+                    .on_hover_text(tr("Die Verzeichnung des Objektivs wird ab 6 Kreuzen aus den Kreuzen bestimmt (ab 10 genauer); das Profil liefert Bildmitte, Brennweite und Startwert."));
+                if c.lens != before {
+                    update_quality(c);
+                }
+            });
+            crate::form::section(ui, tr("Kalibrierpunkte"), |ui| {
+                let current = [Grid::Fine, Grid::Coarse]
+                    .into_iter()
+                    .find(|g| g.points() == c.points.reference_points);
+                let mut chosen = current;
+                crate::form::row(ui, tr("Anordnung"), |ui| {
+                    crate::form::Dropdown::from_id_salt("calibration_grid")
+                        .width(130.0)
+                        .selected_text(current.map_or(tr("Eigene Punkte"), Grid::label))
+                        .show_ui(ui, |ui| {
+                            for grid in [Grid::Fine, Grid::Coarse] {
+                                ui.selectable_value(&mut chosen, Some(grid), grid.label());
+                            }
+                        })
+                        .response
+                        .on_hover_text(tr("5 × 3: 15 Kreuze gleichmäßig über das Bett, genauer und für die Linsenkorrektur. 3 × 2: 6 Kreuze wie bisher. Nach dem Wechsel die Kalibrierseite neu öffnen und markieren."));
+                });
+                if let Some(grid) = chosen.filter(|g| Some(*g) != current) {
+                    set_grid(c, grid);
+                }
+                ui.add_space(4.0);
+                let height = ui.spacing().interact_size.y;
+                egui::Grid::new("calibration_points")
+                    .num_columns(3)
+                    .spacing([8.0, 4.0])
+                    .show(ui, |ui| {
+                        for title in ["", "X (mm)", "Y (mm)"] {
+                            ui.label(egui::RichText::new(title).color(Color32::from_gray(110)));
+                        }
+                        ui.end_row();
+                        for (i, r) in c.points.reference_points.iter_mut().enumerate() {
+                            let number = egui::RichText::new((i + 1).to_string());
+                            if ui
+                                .add_sized([30.0, height], egui::Button::selectable(c.selected == i, number))
+                                .clicked()
+                            {
+                                c.selected = i;
+                                if let Some(p) = c.points.view_points.get(i) {
+                                    c.center = Some(Vec2::new(p[0] as f32, p[1] as f32));
+                                }
+                            }
+                            ui.add_sized([72.0, height], egui::DragValue::new(&mut r[0]).range(0.0..=1000.0));
+                            ui.add_sized([72.0, height], egui::DragValue::new(&mut r[1]).range(0.0..=600.0));
+                            ui.end_row();
+                        }
+                    });
+                ui.add_space(4.0);
+                let has_picture = c.picture.is_some();
+                let removable = c.points.reference_points.len() > 2;
+                list_footer(ui, 120.0, |ui| {
+                    if list_button(ui, Icon::Plus, has_picture, tr("Punkt hinzufügen"))
+                        && let Some((_, size)) = &c.picture
+                    {
+                        c.points.reference_points.push([500.0, 300.0]);
+                        c.points.view_points.push([size.x as f64 / 2.0, size.y as f64 / 2.0]);
+                        c.selected = c.points.reference_points.len() - 1;
+                    }
+                    if list_button(ui, Icon::Minus, removable, tr("Gewählten Punkt entfernen")) {
+                        c.points.reference_points.remove(c.selected);
+                        if c.selected < c.points.view_points.len() {
+                            c.points.view_points.remove(c.selected);
+                        }
+                        c.selected = c.selected.saturating_sub(1);
+                    }
+                });
+            });
+            if c.picture.is_some() || c.problem.is_some() {
+                crate::form::section(ui, tr("Status"), |ui| {
+                    if c.picture.is_some() {
+                        crate::form::caption(ui, match c.markers.len() {
+                            0 => tr("Keine Passmarken erkannt: das Kamerabild wird nur über die Kalibrierung ausgerichtet.").to_owned(),
+                            1 => tr("1 Passmarke erkannt (grün); für die Nachführung sind mindestens 2 nötig.").to_owned(),
+                            n => tr!("{count} Passmarken erkannt (grün): spätere Bilder werden daran nachgeführt.", count = n),
+                        });
+                    }
+                    if let Some((found, total)) = c.crosses {
+                        crate::form::caption(ui, tr!("Kreuze erkannt: {found} von {total}", found = found, total = total));
+                    }
+                    if let Some(quality) = &c.quality {
+                        crate::form::caption(ui, quality.clone());
+                    }
+                    if let Some(problem) = &c.problem {
+                        ui.colored_label(Color32::from_rgb(180, 75, 40), problem);
+                    }
+                });
+            }
+            crate::form::section(ui, tr("Bedienung"), |ui| {
+                crate::form::caption(ui, tr("1. Kalibrierseite öffnen und markieren.\n2. Foto aufnehmen.\n3. Marker auf die Kreuze ziehen (Nummer = Anzahl Striche).\nMindestens 4 Punkte."));
+                crate::form::caption(ui, tr("Zoomen: zwei Finger oder ⌘/Strg + Mausrad. Verschieben: scrollen oder mit rechter Maustaste ziehen. Pfeiltasten: Punkt fein verschieben (⇧: weiter)."));
+            });
+        });
+}
+
+/// Knopfzeile unter dem Foto: Foto und Kreuze links, Ansicht in der Mitte,
+/// Kalibrierseite und „Übernehmen“ rechts.
+fn calibration_toolbar(
+    ui: &mut egui::Ui,
+    c: &mut Calibration,
+    close: &mut bool,
+    apply: &mut Option<CameraCalibration>,
+    action: &mut Option<Action>,
+) {
+    use crate::object_bar::{Icon, list_button};
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(c.loading.is_none(), egui::Button::new(tr("Foto aufnehmen")))
+            .clicked()
+        {
+            let device = c.device.clone();
+            c.problem = None;
+            c.loading = Some(spawn(move || camera::capture(&device)));
+        }
+        if ui
+            .add_enabled(c.gray.is_some(), egui::Button::new(tr("Kreuze erkennen")))
+            .on_hover_text(tr("Setzt jeden Punkt genau auf die Mitte des gelaserten Kreuzes in seiner Nähe. Punkte vorher grob in die Nähe ziehen."))
+            .clicked()
+        {
+            detect_crosses(c);
+        }
+        ui.separator();
+        if list_button(ui, Icon::Minus, c.zoom > 1.0, tr("Verkleinern")) {
+            c.zoom = (c.zoom / 1.5).max(1.0);
+        }
+        ui.add_sized([52.0, ui.spacing().interact_size.y], egui::Label::new(format!("{:.0} %", c.zoom * 100.0)));
+        if list_button(ui, Icon::Plus, c.zoom < 20.0, tr("Vergrößern")) {
+            c.zoom = (c.zoom * 1.5).min(20.0);
+        }
+        if ui
+            .add_enabled(c.picture.is_some(), egui::Button::new(tr("Auf Punkt")))
+            .on_hover_text(tr("Gewählten Punkt vergrößert in die Mitte holen"))
+            .clicked()
+            && let Some(p) = c.points.view_points.get(c.selected)
+        {
+            c.zoom = c.zoom.max(6.0);
+            c.center = Some(Vec2::new(p[0] as f32, p[1] as f32));
+        }
+        if ui
+            .add_enabled(c.zoom > 1.0, egui::Button::new(tr("Ganzes Foto")))
+            .clicked()
+        {
+            c.zoom = 1.0;
+            c.center = None;
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let ready = c.points.view_points.len() == c.points.reference_points.len();
+            if ui
+                .add_enabled(ready, crate::form::primary_button(tr("Übernehmen")))
+                .clicked()
+            {
+                let result = fitted(c)
+                    .ok_or_else(|| tr("Kalibrierpunkte liegen alle auf einer Linie").to_owned())
+                    .and_then(|mut points| {
+                        points.marker_points = camera::markers_on_bed(&c.markers, &points)?;
+                        Ok(points)
+                    });
+                match result {
+                    Ok(points) => {
+                        *apply = Some(points);
+                        *close = true;
+                    }
+                    Err(e) => c.problem = Some(e),
+                }
+            }
+            if ui.button(tr("Kalibrierseite als Projekt öffnen")).clicked() {
+                *action = Some(Action::CalibrationPage(c.points.reference_points.clone()));
+            }
+        });
+    });
+}
+
 fn calibration_window(
     ctx: &egui::Context,
     c: &mut Calibration,
@@ -1277,12 +1475,14 @@ fn calibration_window(
     egui::Window::new(tr!("Kamera kalibrieren · {device}", device = c.device.name))
         .id(egui::Id::new(("camera_calibration", &c.device.name)))
         .open(&mut open)
-        .default_size([900.0, 560.0])
+        .default_size([980.0, 600.0])
+        .collapsible(false)
         .show(ctx, |ui| {
             ui.horizontal_top(|ui| {
                 let space = Vec2::new(
-                    (ui.available_width() - 220.0).max(200.0),
-                    (ui.available_height() - 40.0).max(460.0),
+                    (ui.available_width() - PANEL_WIDTH - 12.0).max(200.0),
+                    // Platz für die Knopfzeile darunter.
+                    (ui.available_height() - ui.spacing().interact_size.y - 18.0).max(420.0),
                 );
                 let (rect, response) = ui.allocate_exact_size(space, Sense::click_and_drag());
                 let painter = ui.painter().with_clip_rect(rect);
@@ -1293,35 +1493,63 @@ fn calibration_window(
                     // Zoomen: Zwei-Finger-Zoom oder ⌘/Strg + Mausrad um den Mauszeiger,
                     // Verschieben: Scrollen oder mit rechter/mittlerer Maustaste ziehen.
                     if response.hovered() {
-                        let (factor, scroll) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta));
+                        let (factor, scroll) =
+                            ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta));
                         let pointer = response.hover_pos().unwrap_or(rect.center());
                         let before = c.center.unwrap_or(size / 2.0);
                         let anchor = before + (pointer - rect.center()) / (fit * c.zoom);
                         c.zoom = (c.zoom * factor).clamp(1.0, 20.0);
-                        c.center = Some(anchor - (pointer - rect.center()) / (fit * c.zoom) - scroll / (fit * c.zoom));
+                        c.center = Some(
+                            anchor
+                                - (pointer - rect.center()) / (fit * c.zoom)
+                                - scroll / (fit * c.zoom),
+                        );
                     }
                     if response.dragged_by(egui::PointerButton::Secondary)
                         || response.dragged_by(egui::PointerButton::Middle)
                     {
-                        c.center = Some(c.center.unwrap_or(size / 2.0) - response.drag_delta() / (fit * c.zoom));
+                        c.center = Some(
+                            c.center.unwrap_or(size / 2.0) - response.drag_delta() / (fit * c.zoom),
+                        );
                     }
                     let scale = fit * c.zoom;
                     // Nicht über den Bildrand hinaus verschieben.
                     let half = rect.size() / (2.0 * scale);
                     let center = c.center.unwrap_or(size / 2.0);
                     let center = Vec2::new(
-                        if half.x * 2.0 >= size.x { size.x / 2.0 } else { center.x.clamp(half.x, size.x - half.x) },
-                        if half.y * 2.0 >= size.y { size.y / 2.0 } else { center.y.clamp(half.y, size.y - half.y) },
+                        if half.x * 2.0 >= size.x {
+                            size.x / 2.0
+                        } else {
+                            center.x.clamp(half.x, size.x - half.x)
+                        },
+                        if half.y * 2.0 >= size.y {
+                            size.y / 2.0
+                        } else {
+                            center.y.clamp(half.y, size.y - half.y)
+                        },
                     );
                     c.center = Some(center);
                     let image = Rect::from_min_size(rect.center() - center * scale, size * scale);
-                    painter.image(texture.id(), image, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
-                    let to_screen = |p: [f64; 2]| image.min + Vec2::new(p[0] as f32, p[1] as f32) * scale;
-                    let primary = response.clicked() || response.dragged_by(egui::PointerButton::Primary);
+                    painter.image(
+                        texture.id(),
+                        image,
+                        Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                    let to_screen =
+                        |p: [f64; 2]| image.min + Vec2::new(p[0] as f32, p[1] as f32) * scale;
+                    let primary =
+                        response.clicked() || response.dragged_by(egui::PointerButton::Primary);
                     if let (Some(pointer), true) = (response.interact_pointer_pos(), primary) {
-                        if response.drag_started_by(egui::PointerButton::Primary) || response.clicked() {
+                        if response.drag_started_by(egui::PointerButton::Primary)
+                            || response.clicked()
+                        {
                             // Grab the nearest marker, otherwise move the selected one.
-                            if let Some((i, _)) = c.points.view_points.iter().enumerate()
+                            if let Some((i, _)) = c
+                                .points
+                                .view_points
+                                .iter()
+                                .enumerate()
                                 .map(|(i, p)| (i, to_screen(*p).distance(pointer)))
                                 .filter(|(_, d)| *d < 16.0)
                                 .min_by(|a, b| a.1.total_cmp(&b.1))
@@ -1331,7 +1559,10 @@ fn calibration_window(
                         }
                         if let Some(p) = c.points.view_points.get_mut(c.selected) {
                             let local = (pointer - image.min) / scale;
-                            *p = [local.x.clamp(0.0, size.x) as f64, local.y.clamp(0.0, size.y) as f64];
+                            *p = [
+                                local.x.clamp(0.0, size.x) as f64,
+                                local.y.clamp(0.0, size.y) as f64,
+                            ];
                         }
                     }
                     if response.drag_stopped() || response.clicked() {
@@ -1364,155 +1595,56 @@ fn calibration_window(
                         }
                     }
                     for p in &c.markers {
-                        painter.circle_stroke(to_screen(*p), 18.0, Stroke::new(2.5, Color32::from_rgb(40, 180, 90)));
+                        painter.circle_stroke(
+                            to_screen(*p),
+                            18.0,
+                            Stroke::new(2.5, Color32::from_rgb(40, 180, 90)),
+                        );
                     }
                     for (i, p) in c.points.view_points.iter().enumerate() {
                         let center = to_screen(*p);
-                        let color = if i == c.selected { Color32::from_rgb(40, 120, 230) } else { Color32::YELLOW };
+                        let color = if i == c.selected {
+                            Color32::from_rgb(40, 120, 230)
+                        } else {
+                            Color32::YELLOW
+                        };
                         painter.circle_stroke(center, 12.0, Stroke::new(2.0, color));
-                        painter.line_segment([center - Vec2::X * 12.0, center + Vec2::X * 12.0], Stroke::new(1.0, color));
-                        painter.line_segment([center - Vec2::Y * 12.0, center + Vec2::Y * 12.0], Stroke::new(1.0, color));
-                        painter.text(center + Vec2::new(16.0, -16.0), egui::Align2::LEFT_BOTTOM, (i + 1).to_string(),
-                            egui::FontId::proportional(14.0), color);
+                        painter.line_segment(
+                            [center - Vec2::X * 12.0, center + Vec2::X * 12.0],
+                            Stroke::new(1.0, color),
+                        );
+                        painter.line_segment(
+                            [center - Vec2::Y * 12.0, center + Vec2::Y * 12.0],
+                            Stroke::new(1.0, color),
+                        );
+                        painter.text(
+                            center + Vec2::new(16.0, -16.0),
+                            egui::Align2::LEFT_BOTTOM,
+                            (i + 1).to_string(),
+                            egui::FontId::proportional(14.0),
+                            color,
+                        );
                     }
                 } else {
-                    painter.text(rect.center(), egui::Align2::CENTER_CENTER,
-                        if c.loading.is_some() { tr("Foto wird aufgenommen …") } else { tr("Kein Kamerabild") },
-                        egui::FontId::proportional(16.0), Color32::from_gray(120));
+                    painter.text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        if c.loading.is_some() {
+                            tr("Foto wird aufgenommen …")
+                        } else {
+                            tr("Kein Kamerabild")
+                        },
+                        egui::FontId::proportional(16.0),
+                        Color32::from_gray(120),
+                    );
                 }
                 ui.vertical(|ui| {
-                    ui.label(tr("Objektiv"));
-                    let before = c.lens;
-                    egui::ComboBox::from_id_salt("calibration_lens")
-                        .selected_text(c.lens.label())
-                        .show_ui(ui, |ui| {
-                            for choice in [LensChoice::RaspberryPiV2, LensChoice::Generic, LensChoice::Off] {
-                                ui.selectable_value(&mut c.lens, choice, choice.label());
-                            }
-                        })
-                        .response
-                        .on_hover_text(tr("Die Verzeichnung des Objektivs wird ab 6 Kreuzen aus den Kreuzen bestimmt (ab 10 genauer); das Profil liefert Bildmitte, Brennweite und Startwert."));
-                    if c.lens != before {
-                        update_quality(c);
-                    }
-                    ui.add_space(4.0);
-                    ui.label(tr("Marker auf dem Bett (mm)"));
-                    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-                        for (i, r) in c.points.reference_points.iter_mut().enumerate() {
-                            ui.horizontal(|ui| {
-                                if ui.selectable_value(&mut c.selected, i, (i + 1).to_string()).clicked()
-                                    && let Some(p) = c.points.view_points.get(i)
-                                {
-                                    c.center = Some(Vec2::new(p[0] as f32, p[1] as f32));
-                                }
-                                ui.add(egui::DragValue::new(&mut r[0]).range(0.0..=1000.0));
-                                ui.add(egui::DragValue::new(&mut r[1]).range(0.0..=600.0));
-                            });
-                        }
-                    });
-                    let current = [Grid::Fine, Grid::Coarse].into_iter().find(|g| g.points() == c.points.reference_points);
-                    let mut chosen = current;
-                    egui::ComboBox::from_id_salt("calibration_grid")
-                        .selected_text(current.map_or(tr("Eigene Punkte"), Grid::label))
-                        .show_ui(ui, |ui| {
-                            for grid in [Grid::Fine, Grid::Coarse] {
-                                ui.selectable_value(&mut chosen, Some(grid), grid.label());
-                            }
-                        })
-                        .response
-                        .on_hover_text(tr("5 × 3: 15 Kreuze gleichmäßig über das Bett, genauer und für die Linsenkorrektur. 3 × 2: 6 Kreuze wie bisher. Nach dem Wechsel die Kalibrierseite neu öffnen und markieren."));
-                    if let Some(grid) = chosen.filter(|g| Some(*g) != current) {
-                        set_grid(c, grid);
-                    }
-                    ui.horizontal(|ui| {
-                        if ui.add_enabled(c.picture.is_some(), egui::Button::new(tr("Punkt +"))).clicked() {
-                            let size = c.picture.as_ref().unwrap().1;
-                            c.points.reference_points.push([500.0, 300.0]);
-                            c.points.view_points.push([size.x as f64 / 2.0, size.y as f64 / 2.0]);
-                            c.selected = c.points.reference_points.len() - 1;
-                        }
-                        if ui.add_enabled(c.points.reference_points.len() > 2, egui::Button::new(tr("Punkt −"))).clicked() {
-                            c.points.reference_points.remove(c.selected);
-                            if c.selected < c.points.view_points.len() {
-                                c.points.view_points.remove(c.selected);
-                            }
-                            c.selected = c.selected.saturating_sub(1);
-                        }
-                    });
-                    ui.small(tr("1. Kalibrierseite öffnen und markieren.\n2. Foto aufnehmen.\n3. Marker auf die Kreuze ziehen (Nummer = Anzahl Striche).\nMindestens 4 Punkte."));
-                    ui.small(tr("Zoomen: zwei Finger oder ⌘/Strg + Mausrad. Verschieben: scrollen oder mit rechter Maustaste ziehen. Pfeiltasten: Punkt fein verschieben (⇧: weiter)."));
-                    if c.picture.is_some() {
-                        ui.small(match c.markers.len() {
-                            0 => tr("Keine Passmarken erkannt: das Kamerabild wird nur über die Kalibrierung ausgerichtet.").into(),
-                            1 => tr("1 Passmarke erkannt (grün); für die Nachführung sind mindestens 2 nötig.").into(),
-                            n => tr!("{count} Passmarken erkannt (grün): spätere Bilder werden daran nachgeführt.", count = n),
-                        });
-                    }
-                    if let Some((found, total)) = c.crosses {
-                        ui.small(tr!("Kreuze erkannt: {found} von {total}", found = found, total = total));
-                    }
-                    if let Some(quality) = &c.quality {
-                        ui.small(quality);
-                    }
-                    if let Some(problem) = &c.problem {
-                        ui.colored_label(Color32::from_rgb(180, 75, 40), problem);
-                    }
+                    ui.set_width(PANEL_WIDTH);
+                    calibration_panel(ui, c, space.y);
                 });
             });
-            ui.horizontal(|ui| {
-                if ui.add_enabled(c.loading.is_none(), egui::Button::new(tr("Foto aufnehmen"))).clicked() {
-                    let device = c.device.clone();
-                    c.problem = None;
-                    c.loading = Some(spawn(move || camera::capture(&device)));
-                }
-                if ui
-                    .add_enabled(c.gray.is_some(), egui::Button::new(tr("Kreuze erkennen")))
-                    .on_hover_text(tr("Setzt jeden Punkt genau auf die Mitte des gelaserten Kreuzes in seiner Nähe. Punkte vorher grob in die Nähe ziehen."))
-                    .clicked()
-                {
-                    detect_crosses(c);
-                }
-                ui.separator();
-                if ui.add_enabled(c.zoom > 1.0, egui::Button::new("−")).on_hover_text(tr("Verkleinern")).clicked() {
-                    c.zoom = (c.zoom / 1.5).max(1.0);
-                }
-                ui.label(format!("{:.0} %", c.zoom * 100.0));
-                if ui.add_enabled(c.zoom < 20.0, egui::Button::new("+")).on_hover_text(tr("Vergrößern")).clicked() {
-                    c.zoom = (c.zoom * 1.5).min(20.0);
-                }
-                if ui
-                    .add_enabled(c.picture.is_some(), egui::Button::new(tr("Auf Punkt")))
-                    .on_hover_text(tr("Gewählten Punkt vergrößert in die Mitte holen"))
-                    .clicked()
-                    && let Some(p) = c.points.view_points.get(c.selected)
-                {
-                    c.zoom = c.zoom.max(6.0);
-                    c.center = Some(Vec2::new(p[0] as f32, p[1] as f32));
-                }
-                if ui.add_enabled(c.zoom > 1.0, egui::Button::new(tr("Ganzes Foto"))).clicked() {
-                    c.zoom = 1.0;
-                    c.center = None;
-                }
-                ui.separator();
-                if ui.button(tr("Kalibrierseite als Projekt öffnen")).clicked() {
-                    *action = Some(Action::CalibrationPage(c.points.reference_points.clone()));
-                }
-                if ui.add_enabled(c.points.view_points.len() == c.points.reference_points.len(), egui::Button::new(tr("Übernehmen"))).clicked() {
-                    let result = fitted(c)
-                        .ok_or_else(|| tr("Kalibrierpunkte liegen alle auf einer Linie").to_owned())
-                        .and_then(|mut points| {
-                            points.marker_points = camera::markers_on_bed(&c.markers, &points)?;
-                            Ok(points)
-                        });
-                    match result {
-                        Ok(points) => {
-                            *apply = Some(points);
-                            *close = true;
-                        }
-                        Err(e) => c.problem = Some(e),
-                    }
-                }
-            });
+            ui.add_space(6.0);
+            calibration_toolbar(ui, c, close, apply, action);
         });
     *close |= !open;
 }

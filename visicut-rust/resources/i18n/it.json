@@ -252,7 +252,6 @@
   "Löcher": "Fori",
   "Löcher passen nicht auf das Schild": "I fori non entrano nella targhetta",
   "Löschen": "Elimina",
-  "Marker auf dem Bett (mm)": "Marcatori sul piano (mm)",
   "Markieren": "Marca",
   "Markieren (blau)": "Marca (blu)",
   "Maschine": "Macchina",
@@ -306,8 +305,6 @@
   "Profil entfernen": "Rimuovi profilo",
   "Projekt geöffnet": "Progetto aperto",
   "Projekt mit eingebetteter SVG gesichert": "Progetto salvato con SVG incorporato",
-  "Punkt +": "Punto +",
-  "Punkt −": "Punto −",
   "Rahmen (markiert, 0 = ohne)": "Cornice (marcata, 0 = nessuna)",
   "Rahmenabstand ist zu groß für das Schild": "Distanza della cornice troppo grande per la targhetta",
   "Rampe des Controllers bei verbundenen Kurven (experimentell)": "Rampa del controller su curve collegate (sperimentale)",
@@ -946,5 +943,11 @@
   "Programm": "Applicazione",
   "Rust-Neuentwicklung auf Grundlage von VisiCut (Thomas Oster und Mitwirkende, LGPL). Ohne Gewähr; Aufträge vor dem Starten am Gerät prüfen.": "Reimplementazione in Rust basata su VisiCut (Thomas Oster e collaboratori, LGPL). Nessuna garanzia; controllare i lavori sulla macchina prima di avviarli.",
   "Software-Add-ins": "Add-in software",
-  "Erweiterungen für Zeichenprogramme: Sie schicken die Zeichnung direkt an VisiCutR, ohne Speichern und Öffnen.": "Estensioni per programmi di disegno: inviano il disegno direttamente a VisiCutR, senza salvare e aprire."
+  "Erweiterungen für Zeichenprogramme: Sie schicken die Zeichnung direkt an VisiCutR, ohne Speichern und Öffnen.": "Estensioni per programmi di disegno: inviano il disegno direttamente a VisiCutR, senza salvare e aprire.",
+  "Anordnung": "Disposizione",
+  "Bedienung": "Uso",
+  "Gewählten Punkt entfernen": "Rimuovi il punto selezionato",
+  "Kalibrierpunkte": "Punti di calibrazione",
+  "Punkt hinzufügen": "Aggiungi punto",
+  "Status": "Stato"
 }

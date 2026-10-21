@@ -1789,7 +1789,10 @@ impl JobUi {
                             return;
                         };
                         let top = ui.cursor().top();
-                        ui.text_edit_singleline(&mut material.name);
+                        ui.horizontal(|ui| {
+                            ui.label(tr("Name"));
+                            ui.text_edit_singleline(&mut material.name);
+                        });
                         ui.small(tr("\
                             Leistung und Geschwindigkeit in Prozent wie am LTT. Je Stärke ist \
                              ein Profil pro Verfahren möglich; 0 % Leistung gilt als \

@@ -62,7 +62,18 @@ Wiederholung nach Fehlern.
   Tangentialkurven), höchstens zehn Halbierungen. Wie VisiCuts
   `ShapeConverter` entfallen Linienenden, deren abgeschnittenes Pixel dem des
   letzten Punkts gleicht; die Schließlinie bleibt immer. Konturpunkte sind
-  `f64` wie in Java. Die Pfade werden wie im Java-Treiber (`curveOrLine`) an
+  `f64` wie in Java: Die Transformationen vom SVG-Nutzerraum nach mm
+  (viewBox-Maßstab aus Breite/Höhe in mm, Gruppen- und Elementtransformationen)
+  werden in `f64` angewandt, nicht mit den `f32`-Matrizen von usvg/tiny-skia,
+  deren Rundung einzelne Punkte über 500-DPI-Pixelgrenzen schob. Folgt auf `Z`
+  ein Zeichenbefehl ohne `M`, läuft die Kontur wie in Java2D ohne Abheben vom
+  Startpunkt weiter. Konturen mit `stroke-width` 0 (Haarlinien mancher
+  CAD-Exporte) werden wie in VisiCut geschnitten. Die Dokumentgröße folgt
+  VisiCuts `determineResolution`: absolute Einheiten mit viewBox sind exakt,
+  Nutzereinheiten (px, einheitenlos, fehlende oder Prozentgröße, keine
+  viewBox) zählen mit 90 DPI, ab Inkscape 0.92 mit 96 DPI, bei
+  Illustrator-Exporten mit 72 DPI. Der Gerätename wird wie in Java je
+  UTF-16-Einheit gekürzt. Die Pfade werden wie im Java-Treiber (`curveOrLine`) an
   Ecken geteilt. Flache Abschnitte gehen
   als verbundene Tangentialkurve (`PJ … PE <Tempo> PR … PF`) mit
   Geschwindigkeitsplanung bis 2000 mm/s² hinaus (`curve`,

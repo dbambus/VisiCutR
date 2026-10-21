@@ -16,6 +16,157 @@ const CURVE_FLATNESS_PX: f64 = 0.2;
 /// Subdivision limit of Java's `FlatteningPathIterator`.
 const CURVE_LIMIT: u32 = 10;
 
+/// Affine matrix `[a, b, c, d, e, f]` as in SVG `matrix()`, in f64. Java maps
+/// SVG coordinates to millimetres in double; usvg/tiny-skia work in f32, whose
+/// rounding moves single points across 500-DPI pixel boundaries
+/// (tests/java_parity), so the transforms are applied here in f64.
+type Affine = [f64; 6];
+
+fn affine_of(t: tiny_skia::Transform) -> Affine {
+    [
+        f64::from(t.sx),
+        f64::from(t.ky),
+        f64::from(t.kx),
+        f64::from(t.sy),
+        f64::from(t.tx),
+        f64::from(t.ty),
+    ]
+}
+
+/// `outer` applied after `inner`.
+fn affine_mul(outer: Affine, inner: Affine) -> Affine {
+    let [a, b, c, d, e, f] = outer;
+    let [g, h, i, j, k, l] = inner;
+    [
+        a * g + c * h,
+        b * g + d * h,
+        a * i + c * j,
+        b * i + d * j,
+        a * k + c * l + e,
+        b * k + d * l + f,
+    ]
+}
+
+fn affine_apply(t: Affine, x: f64, y: f64) -> [f64; 2] {
+    [t[0] * x + t[2] * y + t[4], t[1] * x + t[3] * y + t[5]]
+}
+
+fn affine_near(a: Affine, b: Affine) -> bool {
+    a.iter()
+        .zip(b)
+        .all(|(x, y)| (x - y).abs() <= 1e-3 + 1e-5 * x.abs().max(y.abs()))
+}
+
+/// The transform usvg derives from the root `viewBox` and `preserveAspectRatio`
+/// (`view_box_to_transform`), computed in f64 from the attributes and the
+/// part's size in mm, so that equal aspect ratios give exactly equal scales
+/// like Java's `Helper.getTransform` (usvg compares two f32 pixel sizes). usvg
+/// stores its f32 version in the first group below the root; `visit` swaps it
+/// for this one, expressed in the same pixel units.
+fn view_box_transform(source: &str, size: usvg::Size, project: &Project) -> Option<Affine> {
+    let document = usvg::roxmltree::Document::parse_with_options(
+        source,
+        usvg::roxmltree::ParsingOptions {
+            allow_dtd: true,
+            ..Default::default()
+        },
+    )
+    .ok()?;
+    let root = document.root_element();
+    let numbers: Vec<f64> = root
+        .attribute("viewBox")?
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|t| !t.is_empty())
+        .map(|t| t.parse().ok())
+        .collect::<Option<_>>()?;
+    let [vx, vy, vw, vh] = numbers[..] else {
+        return None;
+    };
+    if vw <= 0.0 || vh <= 0.0 {
+        return None;
+    }
+    let (w, h) = (f64::from(project.width_mm), f64::from(project.height_mm));
+    if w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    let aspect = root
+        .attribute("preserveAspectRatio")
+        .unwrap_or("xMidYMid meet");
+    let mut words = aspect.split_whitespace().filter(|w| *w != "defer");
+    let align = words.next().unwrap_or("xMidYMid");
+    let slice = words.next() == Some("slice");
+    let (mut sx, mut sy) = (w / vw, h / vh);
+    if align != "none" {
+        // Sizes that only differ by f32 rounding (38.1 mm is not exact) mean
+        // equal scales and no centring, as in Java's independent x/y scales.
+        let s = if (sx - sy).abs() <= 1e-6 * sx.abs() {
+            sx
+        } else if slice {
+            sx.max(sy)
+        } else {
+            sx.min(sy)
+        };
+        (sx, sy) = (s, s);
+    }
+    let (x, y) = (-vx * sx, -vy * sy);
+    let (dw, dh) = (w - vw * sx, h - vh * sy);
+    let (tx, ty) = match align {
+        "none" | "xMinYMin" => (x, y),
+        "xMidYMin" => (x + dw / 2.0, y),
+        "xMaxYMin" => (x + dw, y),
+        "xMinYMid" => (x, y + dh / 2.0),
+        "xMaxYMid" => (x + dw, y + dh / 2.0),
+        "xMinYMax" => (x, y + dh),
+        "xMidYMax" => (x + dw / 2.0, y + dh),
+        "xMaxYMax" => (x + dw, y + dh),
+        _ => (x + dw / 2.0, y + dh / 2.0),
+    };
+    // Back to usvg's pixel units; `flatten_path` divides them out again.
+    let (kx, ky) = (f64::from(size.width()) / w, f64::from(size.height()) / h);
+    Some([sx * kx, 0.0, 0.0, sy * ky, tx * kx, ty * ky])
+}
+
+/// A copy of the document in which `stroke-width` 0 becomes a hairline, so
+/// usvg keeps the stroke: VisiCut cuts such contours (the hairline convention
+/// of some CAD and Corel exports), and so does the PDF import (0 w).
+fn keep_zero_width_strokes(svg: &str) -> String {
+    let mut out = String::with_capacity(svg.len());
+    let mut rest = svg;
+    while let Some(i) = rest.find("stroke-width") {
+        let (head, tail) = rest.split_at(i + "stroke-width".len());
+        out.push_str(head);
+        rest = tail;
+        let bytes = tail.as_bytes();
+        let mut j = 0;
+        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        if j >= bytes.len() || !matches!(bytes[j], b'=' | b':') {
+            continue;
+        }
+        j += 1;
+        while j < bytes.len()
+            && (bytes[j].is_ascii_whitespace() || matches!(bytes[j], b'"' | b'\''))
+        {
+            j += 1;
+        }
+        let start = j;
+        while j < bytes.len()
+            && (bytes[j].is_ascii_digit() || matches!(bytes[j], b'.' | b'-' | b'+' | b'e' | b'E'))
+        {
+            j += 1;
+        }
+        let token = &tail[start..j];
+        if !token.is_empty() && token.parse::<f64>().is_ok_and(|v| v == 0.0) {
+            out.push_str(&tail[..start]);
+            out.push_str("0.001");
+            rest = &tail[j..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 pub fn contours(project: &Project) -> Result<Vec<Contour>, String> {
     contours_with_fonts(project, crate::svg::fonts())
 }
@@ -212,7 +363,7 @@ fn collect_areas(
                     _ => FillRule::NonZero,
                 };
                 add(
-                    flatten_path(path.data(), path.abs_transform(), project, size),
+                    flatten_path(path.data(), affine_of(path.abs_transform()), project, size),
                     rule,
                 );
             }
@@ -226,7 +377,7 @@ fn collect_areas(
                 if let Some(rect) = rect {
                     let data = tiny_skia::PathBuilder::from_rect(rect);
                     add(
-                        flatten_path(&data, image.abs_transform(), project, size),
+                        flatten_path(&data, affine_of(image.abs_transform()), project, size),
                         FillRule::NonZero,
                     );
                 }
@@ -265,10 +416,12 @@ fn contours_with_fonts(
         font_resolver: outline_fonts(&missing),
         ..crate::svg::options()
     };
-    let mut tree = usvg::Tree::from_str(&project.svg, &options).map_err(|e| e.to_string())?;
+    let source = keep_zero_width_strokes(&project.svg);
+    let mut tree = usvg::Tree::from_str(&source, &options).map_err(|e| e.to_string())?;
     if let Some(problem) = missing.lock().map_err(|e| e.to_string())?.first() {
         return Err(problem.clone());
     }
+    let view_box = view_box_transform(&source, tree.size(), project);
     if contains_text(tree.root()) {
         // usvg keeps glyph outlines relative to their <text> element (the flattened
         // paths carry an identity transform); writing the tree back out places them
@@ -277,7 +430,15 @@ fn contours_with_fonts(
         tree = usvg::Tree::from_str(&flattened, &options).map_err(|e| e.to_string())?;
     }
     let mut result = Vec::new();
-    visit(tree.root(), project, tree.size(), &[], &mut result)?;
+    visit(
+        tree.root(),
+        project,
+        tree.size(),
+        &[],
+        affine_of(tree.root().transform()),
+        view_box,
+        &mut result,
+    )?;
     if result.is_empty() {
         return Err(tr("Keine schneidbaren Vektorpfade in der SVG").into());
     }
@@ -629,7 +790,7 @@ fn clip_shapes(
             usvg::Node::Path(path) if path.is_visible() => {
                 let rings: Vec<Contour> = flatten_path(
                     path.data(),
-                    base.pre_concat(path.abs_transform()),
+                    affine_of(base.pre_concat(path.abs_transform())),
                     project,
                     size,
                 )
@@ -664,6 +825,8 @@ fn visit(
     project: &Project,
     size: usvg::Size,
     clips: &[Clip],
+    transform: Affine,
+    view_box: Option<Affine>,
     result: &mut Vec<Contour>,
 ) -> Result<(), String> {
     reject_effects(group)?;
@@ -682,7 +845,23 @@ fn visit(
     }
     for node in group.children() {
         match node {
-            usvg::Node::Group(group) => visit(group, project, size, clips, result)?,
+            usvg::Node::Group(group) => {
+                let mut own = affine_of(group.transform());
+                if let Some(exact) = view_box
+                    && affine_near(own, exact)
+                {
+                    own = exact;
+                }
+                visit(
+                    group,
+                    project,
+                    size,
+                    clips,
+                    affine_mul(transform, own),
+                    view_box,
+                    result,
+                )?
+            }
             usvg::Node::Path(path) if path.is_visible() => {
                 if path.fill().is_none_or(|fill| fill.opacity().get() == 0.0)
                     && path
@@ -691,7 +870,7 @@ fn visit(
                 {
                     continue;
                 }
-                let subpaths = flatten_path(path.data(), path.abs_transform(), project, size);
+                let subpaths = flatten_path(path.data(), transform, project, size);
                 // Like Java's SVGShape/DashedShape: the dash pattern is applied in the path's
                 // user space, so it scales with the element's transform and the viewBox.
                 let dash = path.stroke().and_then(|stroke| {
@@ -733,10 +912,10 @@ fn visit(
 }
 
 /// Flattens the subpaths of a path into mm contours, each with its closed flag.
-/// `transform` maps the path's coordinates to user units of the whole document.
+/// `transform` maps the path's coordinates to pixels of the whole document.
 fn flatten_path(
     data: &tiny_skia::Path,
-    transform: tiny_skia::Transform,
+    transform: Affine,
     project: &Project,
     size: usvg::Size,
 ) -> Vec<(Contour, bool)> {
@@ -746,11 +925,10 @@ fn flatten_path(
         f64::from(project.height_mm) / f64::from(size.height()),
     );
     let map = |point: tiny_skia::Point| {
-        let mut point = point;
-        transform.map_point(&mut point);
+        let [x, y] = affine_apply(transform, f64::from(point.x), f64::from(point.y));
         [
-            sx * f64::from(point.x) + f64::from(project.x_mm),
-            sy * f64::from(point.y) + f64::from(project.y_mm),
+            sx * x + f64::from(project.x_mm),
+            sy * y + f64::from(project.y_mm),
         ]
     };
     let mut subpaths = Vec::new();
@@ -758,28 +936,43 @@ fn flatten_path(
     let mut closed = false;
     let mut current = [0.0; 2];
     let mut start = [0.0; 2];
+    let mut start_point = tiny_skia::Point::zero();
+    let mut after_close = false;
     for segment in data.segments() {
         if !matches!(segment, tiny_skia::PathSegment::MoveTo(_)) {
             closed = false;
         }
         match segment {
             tiny_skia::PathSegment::MoveTo(point) => {
+                // tiny-skia inserts a MoveTo to the subpath start when drawing
+                // goes on after Close; Java2D (and so VisiCut) keeps cutting
+                // from that point without lifting the laser.
+                if after_close && point == start_point {
+                    after_close = false;
+                    current = start;
+                    continue;
+                }
+                after_close = false;
                 subpaths.push((std::mem::take(&mut contour), closed));
                 closed = false;
                 current = map(point);
                 start = current;
+                start_point = point;
                 contour.push(current);
             }
             tiny_skia::PathSegment::LineTo(point) => {
+                after_close = false;
                 current = map(point);
                 contour.push(current);
             }
             tiny_skia::PathSegment::QuadTo(a, end) => {
+                after_close = false;
                 let end = map(end);
                 flatten_curve(&[current, map(a), end], &mut contour);
                 current = end;
             }
             tiny_skia::PathSegment::CubicTo(a, b, end) => {
+                after_close = false;
                 let end = map(end);
                 flatten_curve(&[current, map(a), map(b), end], &mut contour);
                 current = end;
@@ -788,6 +981,7 @@ fn flatten_path(
                 contour.push(start);
                 current = start;
                 closed = true;
+                after_close = true;
             }
         }
     }
@@ -1210,6 +1404,35 @@ mod tests {
         assert!(max_y <= 30.5 && max_y > 29.0, "y max {max_y}");
         assert!(min_y > 10.0 && min_y < 25.0, "y min {min_y}");
         assert!(paths.iter().any(|p| p.iter().all(|q| q[0] >= 90.0)));
+    }
+
+    #[test]
+    fn keeps_cutting_after_close_and_zero_width_strokes() {
+        let project = Project { svg: r##"<svg xmlns="http://www.w3.org/2000/svg" width="70mm" height="50mm" viewBox="0 0 70 50"><path d="M 5 5 L 25 5 L 25 20 Z L 40 40" fill="none" stroke="#f00"/><rect x="50" y="5" width="10" height="10" fill="none" stroke="#f00" stroke-width="0"/><rect x="50" y="30" width="10" height="10" style="fill:none;stroke:#f00;stroke-width:0.0"/></svg>"##.into(), x_mm: 0.0, y_mm: 0.0, width_mm: 70.0, height_mm: 50.0, ..Default::default() };
+        let paths = contours(&project).unwrap();
+        // Java2D continues the contour after Z without lifting: one path of five points.
+        assert_eq!(paths.len(), 3, "{paths:?}");
+        assert_eq!(paths[0].len(), 5);
+        let near = |p: Point, q: [f64; 2]| (p[0] - q[0]).abs() < 1e-9 && (p[1] - q[1]).abs() < 1e-9;
+        assert!(near(paths[0][3], [5.0, 5.0]), "{:?}", paths[0]);
+        assert!(near(paths[0][4], [40.0, 40.0]), "{:?}", paths[0]);
+        // Hairline strokes of width 0 are cut like in VisiCut.
+        assert!(near(paths[1][0], [50.0, 5.0]), "{:?}", paths[1]);
+        assert!(near(paths[2][0], [50.0, 30.0]), "{:?}", paths[2]);
+        assert_eq!(
+            keep_zero_width_strokes("a stroke-width:0.5 b stroke-width=\"0px\" c"),
+            "a stroke-width:0.5 b stroke-width=\"0.001px\" c"
+        );
+    }
+
+    #[test]
+    fn maps_user_units_to_mm_exactly() {
+        // 1 user unit = 1 mm: the coordinates must come out exact in f64, not
+        // with the f32 rounding of usvg's viewBox transform.
+        let project = Project { svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="70mm" height="50mm" viewBox="0 0 70 50"><g transform="translate(3 4)"><rect x="10" y="20" width="30" height="10"/></g></svg>"#.into(), x_mm: 100.0, y_mm: 200.0, width_mm: 70.0, height_mm: 50.0, ..Default::default() };
+        let paths = contours(&project).unwrap();
+        assert_eq!(paths[0][0], [113.0, 224.0]);
+        assert_eq!(paths[0][2], [143.0, 234.0]);
     }
 
     #[test]

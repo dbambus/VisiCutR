@@ -579,17 +579,18 @@ pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, 
     })
 }
 
+/// Like VisiCut's job name: one output character per UTF-16 unit, so an
+/// emoji counts twice; anything but ASCII letters, digits, `-` and `_`
+/// becomes `_`.
 fn device_job_name(prefix: &str, name: &str) -> String {
     format!("{prefix}_{name}")
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
+        .encode_utf16()
         .take(15)
+        .map(|unit| {
+            char::from_u32(u32::from(unit))
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                .unwrap_or('_')
+        })
         .collect()
 }
 
@@ -1320,9 +1321,10 @@ fn raster_code(
         start_x -= left as i32 * per_byte;
         let mut data = vec![0; left];
         data.extend_from_slice(&row[first..=last]);
-        let right_bytes = overscan_bytes.min(
-            ((max_x - spare - per_byte - start_x - data.len() as i32 * per_byte) / per_byte).max(0),
-        ) as usize;
+        // Java adds bytes while the end stays below max_x - per_byte, so the
+        // last one may reach past that line (rounding up, not down).
+        let room = max_x - spare - per_byte - start_x - data.len() as i32 * per_byte;
+        let right_bytes = overscan_bytes.min((room.max(0) + per_byte - 1) / per_byte) as usize;
         data.resize(data.len() + right_bytes, 0);
         let pixels = data.len() as i32 * per_byte;
         if start_x < spare || start_x + pixels > max_x - spare {
@@ -2206,6 +2208,16 @@ mod tests {
         let mut p = mixed();
         p.steps[1].speed_percent = 0.0;
         assert!(prepare(&p).is_err());
+    }
+
+    #[test]
+    fn job_names_count_utf16_units_like_java() {
+        assert_eq!(device_job_name("Cut", "A😀B"), "Cut_A__B");
+        assert_eq!(device_job_name("Cut", "Ärger Straße"), "Cut__rger_Stra_");
+        assert_eq!(
+            device_job_name("Engrav", "ein sehr langer name"),
+            "Engrav_ein_sehr"
+        );
     }
 
     #[test]

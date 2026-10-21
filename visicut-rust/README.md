@@ -129,8 +129,12 @@ legt das Skript Menüeintrag, MIME-Typen (`application/x-visicutr-project`,
    SVG geladen und in das Projekt eingebettet; Webadressen werden nicht
    abgerufen, fehlende Bilder werden als Hinweis gemeldet.
    Rasterbilder (PNG, JPEG, BMP, GIF) erhalten ihre Größe aus der
-   Auflösung in der Datei, sonst 72 DPI wie in VisiCut; G-Code (`.nc`,
+   Auflösung in der Datei (auf ganze DPI gerundet, 2835 px/m sind 72 DPI),
+   sonst 72 DPI wie in VisiCut; G-Code (`.nc`,
    `.gcode`) wird als roter Pfad an seiner Position in mm übernommen.
+   SVG-Dateien ohne viewBox oder mit Größe in px bekommen ihre Größe wie in
+   VisiCut: 90 DPI, ab Inkscape 0.92 (Kopfzeile) 96 DPI, bei
+   Illustrator-Exporten 72 DPI; Dateien mit mm-Größe und viewBox sind exakt.
    **PDF** wird ohne Zusatzprogramme direkt gelesen (Seite 1; bei mehreren
    Seiten erscheint ein Hinweis). Pfade bleiben Vektoren mit ihren Füll- und
    Linienfarben und Linienstärken, Text wird als Glyphenkontur übernommen,

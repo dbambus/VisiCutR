@@ -18,12 +18,15 @@ const ANGLE_TOLERANCE_SHORT: f64 = 40.0 * std::f64::consts::PI / 180.0;
 const ANGLE_TOLERANCE_LONG: f64 = 10.0 * std::f64::consts::PI / 180.0;
 const CIRCLE_MAX_RADIUS_MM: f64 = 101.0;
 
+/// `Util.px2mm`: inches first, then millimetres, in the same order as Java so
+/// that limits such as the circle radius compare the same bits.
 fn px_to_mm(px: f64) -> f64 {
-    px * 25.4 / RASTER_DPI
+    px / RASTER_DPI * 25.4
 }
 
+/// `Util.mm2px`.
 fn mm_to_px(mm: f64) -> f64 {
-    mm * RASTER_DPI / 25.4
+    mm / 25.4 * RASTER_DPI
 }
 
 fn percent_to_mm_s(percent: f64) -> f64 {

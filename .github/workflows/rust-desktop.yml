@@ -84,6 +84,7 @@ jobs:
           fi
 
       - name: Decide release optimisation
+        id: lto
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -104,6 +105,7 @@ jobs:
             fi
           fi
           echo "Release-Build mit LTO: $lto"
+          echo "lto=$lto" >> "$GITHUB_OUTPUT"
           if [[ "$lto" == false ]]; then
             echo "CARGO_PROFILE_RELEASE_LTO=false" >> "$GITHUB_ENV"
           fi
@@ -127,7 +129,19 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Test Rust core and portable application
-        run: cargo test --locked --all-targets
+        env:
+          LTO: ${{ steps.lto.outputs.lto }}
+        run: |
+          # Ohne LTO laufen die Tests im Release-Profil: der folgende
+          # Release-Build verwendet dieselben kompilierten Abhängigkeiten,
+          # ein eigener Debug-Build entfällt. Mit LTO (Veröffentlichung)
+          # wie bisher im Debug-Profil, sonst würde jedes Testprogramm mit
+          # LTO gelinkt.
+          if [[ "$LTO" == true ]]; then
+            cargo test --locked --all-targets
+          else
+            cargo test --locked --release --all-targets
+          fi
 
       - name: Build portable desktop application
         run: cargo build --locked --release --bins

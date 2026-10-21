@@ -97,8 +97,9 @@ Wiederholung nach Fehlern.
   werden, wo genau ein anderes Ende innerhalb von 0,9 px (Manhattan-Abstand)
   liegt, auch über Durchgänge hinweg (eine doppelt geschnittene Linie wird
   Hin- und Rückweg). Danach folgt die stabile Sortierung nach
-  Begrenzungsrahmen: unterer Rand aufsteigend, oberer absteigend, rechter
-  aufsteigend, linker absteigend. Löcher kommen so vor dem Außenumriss, und
+  Begrenzungsrahmen: unterer Rand aufsteigend, rechter aufsteigend, oberer
+  absteigend, linker absteigend (Java sortiert viermal stabil, der letzte
+  Lauf hat Vorrang). Löcher kommen so vor dem Außenumriss, und
   die Durchgänge einer Kontur folgen direkt aufeinander. Gleiche Rahmen werden
   nicht unterschieden. Ein Teil wird mit einem Encoder erzeugt; Leistung und
   Geschwindigkeit gehen wie im Treiber nur bei Änderung hinaus.

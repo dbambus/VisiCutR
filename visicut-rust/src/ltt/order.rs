@@ -97,8 +97,8 @@ impl SetKey {
 }
 
 /// Java `InnerFirstVectorOptimizer.optimize`: joins open paths of equal
-/// properties, then sorts stably by bounding box (max y ascending, min y
-/// descending, max x ascending, min x descending), so a path comes before
+/// properties, then sorts stably by bounding box (max y ascending, max x
+/// ascending, min y descending, min x descending), so a path comes before
 /// every path whose box strictly contains its own.
 pub fn inner_first(elements: Vec<Element>, keys: &[SetKey]) -> Vec<Element> {
     let mut result = Vec::with_capacity(elements.len());
@@ -109,9 +109,11 @@ pub fn inner_first(elements: Vec<Element>, keys: &[SetKey]) -> Vec<Element> {
     let mut order: Vec<usize> = (0..result.len()).collect();
     order.sort_by(|&i, &j| {
         let (a, b) = (boxes[i], boxes[j]);
+        // Java sorts four times stably (xmin desc, ymin desc, xmax asc, ymax
+        // asc), so the last sort has the highest priority.
         a[3].total_cmp(&b[3])
-            .then((-a[1]).total_cmp(&-b[1]))
             .then(a[2].total_cmp(&b[2]))
+            .then((-a[1]).total_cmp(&-b[1]))
             .then((-a[0]).total_cmp(&-b[0]))
     });
     let mut slots: Vec<Option<Element>> = result.into_iter().map(Some).collect();

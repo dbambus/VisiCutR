@@ -37,6 +37,13 @@ Temp-Ordner und liest keine Benutzereinstellungen.
 | `dither` | Klassenname aus `liblasercut.dithering`, z. B. `FloydSteinberg` |
 | `invert`, `color_shift`, `unidirectional`, `bottom_up` | Rasteroptionen |
 | `compare=header` | nur bis zur ersten Rasterzeile vergleichen (Grund im Kommentar) |
+| `scale` | Teil einheitlich skalieren wie in der VisiCut-Oberfläche (Rust: `width_mm`/`height_mm` entsprechend setzen) |
+| `deviation` | dokumentierte Abweichung mit Grund: wird gemeldet, lässt den Test nicht scheitern; der Test weist darauf hin, wenn der Fall wieder byte-gleich ist |
+
+Ohne `width_mm`/`height_mm` bestimmen beide Seiten die Größe selbst aus der SVG
+(Java: `determineResolution`, Rust: usvg mit 96 DPI). Kann Java einen Fall nicht
+verarbeiten, schreibt `generate.sh` den Grund nach `expected.error` statt
+`expected.ltt`; der Test meldet das als Abweichung.
 
 Abweichungen meldet der Test mit dem ersten abweichenden Byte und legt die
 Rust-Ausgabe unter `target/tmp/<fall>.ltt` ab.
@@ -53,3 +60,5 @@ Rust-Ausgabe unter `target/tmp/<fall>.ltt` ab.
   Seiten den Rasterbereich gleich abschneiden.
 - „Zufall“ ist in Java ungeseedet und wird nicht verglichen.
 - Bewusste Abweichungen von Java stehen in `PROTOCOL.md`.
+- Das Audit vom 2026-10-21 (`AUDIT-2026-10-21.md`) vergleicht 190 Grenzfälle und
+  begründet jede Abweichung; die Gründe stehen auch als `deviation=` in den Fällen.

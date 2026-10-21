@@ -403,7 +403,6 @@
   "VisiCutR-Projekt sichern": "Salva progetto VisiCutR",
   "Von unten nach oben": "Dal basso verso l'alto",
   "Vorhandene LTT-Dateien ersetzen?": "Sostituire i file LTT esistenti?",
-  "Vorlage übernehmen": "Applica modello",
   "Vorschau & Zeit berechnen": "Calcola anteprima & tempo",
   "Vorschau & Zeit …": "Anteprima & tempo …",
   "Vorschau konnte nicht erstellt werden": "Impossibile creare l'anteprima",
@@ -886,7 +885,6 @@
   "Aus VisiCut importieren …": "Importa da VisiCut …",
   "Die Vorlage braucht einen Namen": "Il modello deve avere un nome",
   "Die Vorlage enthält keine Regel": "Il modello non contiene regole",
-  "Eigene Vorlagen": "Modelli personali",
   "Eine Vorlage enthält die Regel-Schritte mit Bedingungen und Verfahren sowie die Ignorierregeln, aber keine Leistung oder Geschwindigkeit: Diese kommen weiter aus dem Materialprofil.": "Un modello contiene i passaggi a regole con condizioni e procedimenti e le regole Ignora, ma non potenza né velocità: queste continuano a provenire dal profilo del materiale.",
   "Es gibt schon eine Vorlage „{name}“": "Esiste già un modello “{name}”",
   "Importiert: {names}": "Importato: {names}",
@@ -907,7 +905,6 @@
   "Zuordnung „{name}“ nicht übernommen: {error}": "Assegnazione “{name}” non applicata: {error}",
   "Zuordnungen (mappings/*.xml) aus VisiCut-Einstellungen oder einem .vcsettings-Archiv": "Assegnazioni (mappings/*.xml) dalle impostazioni VisiCut o da un archivio .vcsettings",
   "Zuordnungsvorlagen {path} sind beschädigt: {error}": "I modelli di assegnazione {path} sono danneggiati: {error}",
-  "{name} (Standard)": "{name} (predefinito)",
   "Dateitypen": "Tipi di file",
   "Zugeordnet": "Associato",
   "diesem Programm": "a questo programma",
@@ -949,5 +946,9 @@
   "Kalibrierpunkte": "Punti di calibrazione",
   "Punkt hinzufügen": "Aggiungi punto",
   "Status": "Stato",
-  "Punkte wieder auf die Anordnung „{grid}“ setzen": "Riporta i punti alla disposizione «{grid}»"
+  "Punkte wieder auf die Anordnung „{grid}“ setzen": "Riporta i punti alla disposizione «{grid}»",
+  "Regeln dieser Vorlage in das Projekt übernehmen": "Applica al progetto le regole di questo modello",
+  "Regeln und Vorlagen": "Regole e modelli",
+  "Standard": "Predefinito",
+  "Vorlage": "Modello"
 }

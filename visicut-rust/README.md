@@ -173,7 +173,8 @@ legt das Skript Menüeintrag, MIME-Typen (`application/x-visicutr-project`,
    Füllfarbe, Linienstärke, Gruppe/Ebene, Typ oder ID; ein Restschritt nimmt
    alles Übrige, Ignorierregeln schließen Objekte aus. Vorlagen enthalten die
    FAU-Zuordnungen („rot schneiden, grün markieren, blau ignorieren, Rest
-   gravieren“). Unter **Einstellungen → Job → Eigene Vorlagen** lassen sich
+   gravieren“). Unter **Einstellungen → Job → Regeln und Vorlagen** stehen alle Vorlagen
+   in einer Liste (übernehmen, Standard wählen); dort lassen sich
    die Regel-Schritte (Bedingungen, Verfahren, Rest) samt Ignorierregeln unter
    einem Namen sichern, umbenennen, löschen und als **Standard für neue
    Projekte** festlegen; Leistung und Geschwindigkeit kommen weiter aus dem

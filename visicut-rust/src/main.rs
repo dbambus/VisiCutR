@@ -1586,14 +1586,9 @@ impl VisiCutR {
             });
             // Regeln und Ignorieren gehören wie die Reihenfolge zum Projekt; die
             // Schritte selbst stehen unter „Vorbereiten“.
-            form::section(ui, tr("Regeln"), |ui| {
+            form::section(ui, tr("Regeln und Vorlagen"), |ui| {
                 ui.add_enabled_ui(!self.busy(), |ui| {
                     self.jobs.rules_settings(ui, &mut self.project, &mut self.dirty);
-                });
-            });
-            form::section(ui, tr("Eigene Vorlagen"), |ui| {
-                ui.add_enabled_ui(!self.busy(), |ui| {
-                    self.jobs.own_templates(ui, &self.project);
                 });
             });
             form::section(ui, tr("Ignorieren"), |ui| {

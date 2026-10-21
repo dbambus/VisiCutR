@@ -403,7 +403,6 @@
   "VisiCutR-Projekt sichern": "Enregistrer le projet VisiCutR",
   "Von unten nach oben": "De bas en haut",
   "Vorhandene LTT-Dateien ersetzen?": "Remplacer les fichiers LTT existants ?",
-  "Vorlage übernehmen": "Appliquer le modèle",
   "Vorschau & Zeit berechnen": "Calculer l'aperçu & le temps",
   "Vorschau & Zeit …": "Aperçu & temps …",
   "Vorschau konnte nicht erstellt werden": "Impossible de créer l'aperçu",
@@ -886,7 +885,6 @@
   "Aus VisiCut importieren …": "Importer depuis VisiCut …",
   "Die Vorlage braucht einen Namen": "Le modèle doit avoir un nom",
   "Die Vorlage enthält keine Regel": "Le modèle ne contient aucune règle",
-  "Eigene Vorlagen": "Modèles personnels",
   "Eine Vorlage enthält die Regel-Schritte mit Bedingungen und Verfahren sowie die Ignorierregeln, aber keine Leistung oder Geschwindigkeit: Diese kommen weiter aus dem Materialprofil.": "Un modèle contient les étapes à règles avec leurs conditions et procédés ainsi que les règles d'exclusion, mais ni puissance ni vitesse : celles-ci proviennent toujours du profil de matériau.",
   "Es gibt schon eine Vorlage „{name}“": "Un modèle « {name} » existe déjà",
   "Importiert: {names}": "Importé : {names}",
@@ -907,7 +905,6 @@
   "Zuordnung „{name}“ nicht übernommen: {error}": "Affectation « {name} » non reprise : {error}",
   "Zuordnungen (mappings/*.xml) aus VisiCut-Einstellungen oder einem .vcsettings-Archiv": "Affectations (mappings/*.xml) issues des paramètres VisiCut ou d'une archive .vcsettings",
   "Zuordnungsvorlagen {path} sind beschädigt: {error}": "Les modèles d'affectation {path} sont endommagés : {error}",
-  "{name} (Standard)": "{name} (par défaut)",
   "Dateitypen": "Types de fichiers",
   "Zugeordnet": "Associé",
   "diesem Programm": "à ce programme",
@@ -949,5 +946,9 @@
   "Kalibrierpunkte": "Points d'étalonnage",
   "Punkt hinzufügen": "Ajouter un point",
   "Status": "État",
-  "Punkte wieder auf die Anordnung „{grid}“ setzen": "Remettre les points dans la disposition « {grid} »"
+  "Punkte wieder auf die Anordnung „{grid}“ setzen": "Remettre les points dans la disposition « {grid} »",
+  "Regeln dieser Vorlage in das Projekt übernehmen": "Appliquer les règles de ce modèle au projet",
+  "Regeln und Vorlagen": "Règles et modèles",
+  "Standard": "Par défaut",
+  "Vorlage": "Modèle"
 }

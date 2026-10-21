@@ -1305,24 +1305,10 @@ impl JobUi {
         self.hovered_object = row_hover.or(self.canvas_hover);
     }
 
-    /// Einstellungen → Job, „Regeln“: Vorlagen und Farbtoleranz.
+    /// Einstellungen → Job, „Regeln und Vorlagen“: alle Vorlagen in einer
+    /// Liste (Standard, übernehmen, eigene umbenennen oder löschen), darunter
+    /// Sichern der aktuellen Regeln, Import aus VisiCut und Farbtoleranz.
     pub fn rules_settings(&mut self, ui: &mut egui::Ui, project: &mut Project, dirty: &mut bool) {
-        let builtin = mapping::predefined().len();
-        ui.menu_button(tr("Vorlage übernehmen"), |ui| {
-            for (i, (reference, template)) in self.templates.all().iter().enumerate() {
-                if i == builtin {
-                    ui.separator();
-                }
-                let mut title = template.name.clone();
-                if self.templates.is_default(reference) {
-                    title = tr!("{name} (Standard)", name = title);
-                }
-                if ui.button(title).clicked() {
-                    apply_predefined(self.active(), project, template);
-                    *dirty = true;
-                }
-            }
-        });
         crate::form::caption(
             ui,
             tr("\
@@ -1331,29 +1317,105 @@ impl JobUi {
              was sonst nicht bearbeitet oder ignoriert wird."),
         );
         ui.add_space(6.0);
-        *dirty |= ui
-            .checkbox(&mut project.similar_colors, tr("Ähnliche Farben zuordnen"))
-            .changed();
-        egui::Frame::new()
-            .inner_margin(egui::Margin {
-                left: 24,
-                ..Default::default()
-            })
-            .show(ui, |ui| {
-                crate::form::caption(
-                    ui,
-                    tr("\
-                        Farbregeln erfassen auch Farben mit fast gleichem Farbton, z. B. \
-                     #ed1c24 als Rot, #00a651 als Grün und #2e3192 als Blau nach einer \
-                     Umwandlung von CMYK nach RGB; Grautöne nach Helligkeit."),
-                );
-            });
-    }
-
-    /// Einstellungen → Job, „Eigene Vorlagen“: sichern, Standard für neue
-    /// Projekte, umbenennen, löschen und aus VisiCut importieren.
-    pub fn own_templates(&mut self, ui: &mut egui::Ui, project: &Project) {
         let templates = self.templates.all();
+        let mut action = None;
+        let mut apply = None;
+        let mut default = None;
+        egui::Grid::new("templates")
+            .num_columns(4)
+            .spacing([12.0, 4.0])
+            .show(ui, |ui| {
+                for title in [tr("Standard"), tr("Vorlage"), "", ""] {
+                    ui.label(egui::RichText::new(title).color(egui::Color32::from_gray(110)));
+                }
+                ui.end_row();
+                for (reference, template) in &templates {
+                    let selected = self.templates.is_default(reference);
+                    if ui
+                        .radio(selected, "")
+                        .on_hover_text(tr("Standard für neue Projekte"))
+                        .clicked()
+                        && !selected
+                    {
+                        default = Some(reference.clone());
+                    }
+                    let own = matches!(reference, mapping::TemplateRef::Own(_));
+                    match &mut self.renaming {
+                        Some((old, new)) if own && *old == template.name => {
+                            let edit = ui.add(egui::TextEdit::singleline(new).desired_width(260.0));
+                            let enter =
+                                edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            ui.horizontal(|ui| {
+                                if enter || ui.button("✔").on_hover_text(tr("Umbenennen")).clicked()
+                                {
+                                    action = Some(TemplateAction::Rename(old.clone(), new.clone()));
+                                }
+                                if ui.button("✖").on_hover_text(tr("Abbrechen")).clicked() {
+                                    action = Some(TemplateAction::CancelRename);
+                                }
+                            });
+                        }
+                        _ => {
+                            ui.label(&template.name);
+                            if ui
+                                .button(tr("Übernehmen"))
+                                .on_hover_text(tr(
+                                    "Regeln dieser Vorlage in das Projekt übernehmen",
+                                ))
+                                .clicked()
+                            {
+                                apply = Some(template.clone());
+                            }
+                        }
+                    }
+                    ui.horizontal(|ui| {
+                        if own && self.renaming.is_none() {
+                            if ui
+                                .add(egui::Button::new("✏").frame(false))
+                                .on_hover_text(tr("Vorlage umbenennen"))
+                                .clicked()
+                            {
+                                action = Some(TemplateAction::StartRename(template.name.clone()));
+                            }
+                            if ui
+                                .add(egui::Button::new("🗑").frame(false))
+                                .on_hover_text(tr("Vorlage löschen"))
+                                .clicked()
+                            {
+                                action = Some(TemplateAction::Remove(template.name.clone()));
+                            }
+                        }
+                    });
+                    ui.end_row();
+                }
+            });
+        if let Some(template) = apply {
+            apply_predefined(self.active(), project, &template);
+            *dirty = true;
+        }
+        if let Some(reference) = default {
+            self.templates.default = Some(reference);
+            self.finish_template_change(Ok(()), tr("Standardvorlage gesichert").into());
+        }
+        match action {
+            Some(TemplateAction::StartRename(name)) => self.renaming = Some((name.clone(), name)),
+            Some(TemplateAction::CancelRename) => self.renaming = None,
+            Some(TemplateAction::Rename(old, new)) => {
+                let result = self.templates.rename(&old, &new);
+                if result.is_ok() {
+                    self.renaming = None;
+                }
+                let message = tr!("Vorlage „{name}“ umbenannt", name = new.trim());
+                self.finish_template_change(result, message);
+            }
+            Some(TemplateAction::Remove(name)) => {
+                self.templates.remove(&name);
+                self.finish_template_change(Ok(()), tr!("Vorlage „{name}“ gelöscht", name = name));
+            }
+            None => {}
+        }
+        ui.add_space(8.0);
+        // Aktuelle Regeln als eigene Vorlage sichern oder aus VisiCut holen.
         let rules = assignment_mode(project) == AssignmentMode::Rules;
         let name = self.template_name.trim().to_string();
         let exists = self.templates.own.iter().any(|p| p.name == name);
@@ -1377,6 +1439,19 @@ impl JobUi {
                 let result = self.templates.store(template);
                 self.finish_template_change(result, tr!("Vorlage „{name}“ gesichert", name = name));
             }
+            if ui
+                .button(tr("Aus VisiCut importieren …"))
+                .on_hover_text(tr(
+                    "Zuordnungen (mappings/*.xml) aus VisiCut-Einstellungen oder einem \
+                     .vcsettings-Archiv",
+                ))
+                .clicked()
+                && let Some(paths) = rfd::FileDialog::new()
+                    .add_filter(tr("VisiCut-Zuordnungen"), &["xml", "vcsettings", "zip"])
+                    .pick_files()
+            {
+                self.import_templates(&paths);
+            }
         });
         crate::form::caption(
             ui,
@@ -1389,91 +1464,6 @@ impl JobUi {
                 tr("Zum Sichern einer Vorlage unter „Vorbereiten“ die Zuordnung „Regeln“ wählen.")
             },
         );
-        ui.add_space(4.0);
-        let default = templates
-            .iter()
-            .find(|(r, _)| self.templates.is_default(r))
-            .map(|(_, p)| p.name.clone())
-            .unwrap_or_default();
-        let mut chosen = None;
-        crate::form::row(ui, tr("Standard für neue Projekte"), |ui| {
-            crate::form::Dropdown::from_id_salt("default_template")
-                .selected_text(default)
-                .show_ui(ui, |ui| {
-                    for (reference, template) in &templates {
-                        let selected = self.templates.is_default(reference);
-                        if ui.selectable_label(selected, &template.name).clicked() && !selected {
-                            chosen = Some(reference.clone());
-                        }
-                    }
-                });
-        });
-        if let Some(reference) = chosen {
-            self.templates.default = Some(reference);
-            self.finish_template_change(Ok(()), tr("Standardvorlage gesichert").into());
-        }
-        let mut action = None;
-        for template in &self.templates.own {
-            ui.horizontal(|ui| match &mut self.renaming {
-                Some((old, new)) if *old == template.name => {
-                    let edit = ui.add(egui::TextEdit::singleline(new).desired_width(220.0));
-                    let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if enter || ui.button("✔").on_hover_text(tr("Umbenennen")).clicked() {
-                        action = Some(TemplateAction::Rename(old.clone(), new.clone()));
-                    }
-                    if ui.button("✖").on_hover_text(tr("Abbrechen")).clicked() {
-                        action = Some(TemplateAction::CancelRename);
-                    }
-                }
-                _ => {
-                    ui.label(&template.name);
-                    if ui
-                        .add(egui::Button::new("✏").frame(false))
-                        .on_hover_text(tr("Vorlage umbenennen"))
-                        .clicked()
-                    {
-                        action = Some(TemplateAction::StartRename(template.name.clone()));
-                    }
-                    if ui
-                        .add(egui::Button::new("🗑").frame(false))
-                        .on_hover_text(tr("Vorlage löschen"))
-                        .clicked()
-                    {
-                        action = Some(TemplateAction::Remove(template.name.clone()));
-                    }
-                }
-            });
-        }
-        match action {
-            Some(TemplateAction::StartRename(name)) => self.renaming = Some((name.clone(), name)),
-            Some(TemplateAction::CancelRename) => self.renaming = None,
-            Some(TemplateAction::Rename(old, new)) => {
-                let result = self.templates.rename(&old, &new);
-                if result.is_ok() {
-                    self.renaming = None;
-                }
-                let message = tr!("Vorlage „{name}“ umbenannt", name = new.trim());
-                self.finish_template_change(result, message);
-            }
-            Some(TemplateAction::Remove(name)) => {
-                self.templates.remove(&name);
-                self.finish_template_change(Ok(()), tr!("Vorlage „{name}“ gelöscht", name = name));
-            }
-            None => {}
-        }
-        if ui
-            .button(tr("Aus VisiCut importieren …"))
-            .on_hover_text(tr(
-                "Zuordnungen (mappings/*.xml) aus VisiCut-Einstellungen oder einem \
-                 .vcsettings-Archiv",
-            ))
-            .clicked()
-            && let Some(paths) = rfd::FileDialog::new()
-                .add_filter(tr("VisiCut-Zuordnungen"), &["xml", "vcsettings", "zip"])
-                .pick_files()
-        {
-            self.import_templates(&paths);
-        }
         match &self.template_status {
             Some(Ok(message)) => crate::form::caption(ui, message.clone()),
             Some(Err(error)) => {
@@ -1481,6 +1471,24 @@ impl JobUi {
             }
             None => {}
         }
+        ui.add_space(8.0);
+        *dirty |= ui
+            .checkbox(&mut project.similar_colors, tr("Ähnliche Farben zuordnen"))
+            .changed();
+        egui::Frame::new()
+            .inner_margin(egui::Margin {
+                left: 24,
+                ..Default::default()
+            })
+            .show(ui, |ui| {
+                crate::form::caption(
+                    ui,
+                    tr("\
+                        Farbregeln erfassen auch Farben mit fast gleichem Farbton, z. B. \
+                     #ed1c24 als Rot, #00a651 als Grün und #2e3192 als Blau nach einer \
+                     Umwandlung von CMYK nach RGB; Grautöne nach Helligkeit."),
+                );
+            });
     }
 
     fn import_templates(&mut self, paths: &[std::path::PathBuf]) {

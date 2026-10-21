@@ -403,7 +403,6 @@
   "VisiCutR-Projekt sichern": "Save VisiCutR project",
   "Von unten nach oben": "Bottom to top",
   "Vorhandene LTT-Dateien ersetzen?": "Replace existing LTT files?",
-  "Vorlage übernehmen": "Apply template",
   "Vorschau & Zeit berechnen": "Calculate preview & time",
   "Vorschau & Zeit …": "Preview & time …",
   "Vorschau konnte nicht erstellt werden": "Preview could not be created",
@@ -886,7 +885,6 @@
   "Aus VisiCut importieren …": "Import from VisiCut …",
   "Die Vorlage braucht einen Namen": "The template needs a name",
   "Die Vorlage enthält keine Regel": "The template contains no rule",
-  "Eigene Vorlagen": "Own templates",
   "Eine Vorlage enthält die Regel-Schritte mit Bedingungen und Verfahren sowie die Ignorierregeln, aber keine Leistung oder Geschwindigkeit: Diese kommen weiter aus dem Materialprofil.": "A template contains the rule steps with conditions and operations as well as the ignore rules, but no power or speed: those still come from the material profile.",
   "Es gibt schon eine Vorlage „{name}“": "A template “{name}” already exists",
   "Importiert: {names}": "Imported: {names}",
@@ -907,7 +905,6 @@
   "Zuordnung „{name}“ nicht übernommen: {error}": "Mapping “{name}” not applied: {error}",
   "Zuordnungen (mappings/*.xml) aus VisiCut-Einstellungen oder einem .vcsettings-Archiv": "Mappings (mappings/*.xml) from VisiCut settings or a .vcsettings archive",
   "Zuordnungsvorlagen {path} sind beschädigt: {error}": "Mapping templates {path} are damaged: {error}",
-  "{name} (Standard)": "{name} (default)",
   "Dateitypen": "File types",
   "Zugeordnet": "Associated",
   "diesem Programm": "with this program",
@@ -949,5 +946,9 @@
   "Kalibrierpunkte": "Calibration points",
   "Punkt hinzufügen": "Add point",
   "Status": "Status",
-  "Punkte wieder auf die Anordnung „{grid}“ setzen": "Reset the points to the “{grid}” layout"
+  "Punkte wieder auf die Anordnung „{grid}“ setzen": "Reset the points to the “{grid}” layout",
+  "Regeln dieser Vorlage in das Projekt übernehmen": "Apply this template's rules to the project",
+  "Regeln und Vorlagen": "Rules and templates",
+  "Standard": "Default",
+  "Vorlage": "Template"
 }

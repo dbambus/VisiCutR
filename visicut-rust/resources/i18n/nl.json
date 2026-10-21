@@ -403,7 +403,6 @@
   "VisiCutR-Projekt sichern": "VisiCutR-project opslaan",
   "Von unten nach oben": "Van onder naar boven",
   "Vorhandene LTT-Dateien ersetzen?": "Bestaande LTT-bestanden vervangen?",
-  "Vorlage übernehmen": "Sjabloon toepassen",
   "Vorschau & Zeit berechnen": "Voorbeeld & tijd berekenen",
   "Vorschau & Zeit …": "Voorbeeld & tijd …",
   "Vorschau konnte nicht erstellt werden": "Voorbeeld kon niet worden gemaakt",
@@ -886,7 +885,6 @@
   "Aus VisiCut importieren …": "Importeren uit VisiCut …",
   "Die Vorlage braucht einen Namen": "Het sjabloon heeft een naam nodig",
   "Die Vorlage enthält keine Regel": "Het sjabloon bevat geen regel",
-  "Eigene Vorlagen": "Eigen sjablonen",
   "Eine Vorlage enthält die Regel-Schritte mit Bedingungen und Verfahren sowie die Ignorierregeln, aber keine Leistung oder Geschwindigkeit: Diese kommen weiter aus dem Materialprofil.": "Een sjabloon bevat de regelstappen met voorwaarden en bewerkingen en de negeerregels, maar geen vermogen of snelheid: die komen nog steeds uit het materiaalprofiel.",
   "Es gibt schon eine Vorlage „{name}“": "Er bestaat al een sjabloon „{name}”",
   "Importiert: {names}": "Geïmporteerd: {names}",
@@ -907,7 +905,6 @@
   "Zuordnung „{name}“ nicht übernommen: {error}": "Toewijzing „{name}” niet overgenomen: {error}",
   "Zuordnungen (mappings/*.xml) aus VisiCut-Einstellungen oder einem .vcsettings-Archiv": "Toewijzingen (mappings/*.xml) uit VisiCut-instellingen of een .vcsettings-archief",
   "Zuordnungsvorlagen {path} sind beschädigt: {error}": "Toewijzingssjablonen {path} zijn beschadigd: {error}",
-  "{name} (Standard)": "{name} (standaard)",
   "Dateitypen": "Bestandstypen",
   "Zugeordnet": "Gekoppeld",
   "diesem Programm": "aan dit programma",
@@ -949,5 +946,9 @@
   "Kalibrierpunkte": "Kalibratiepunten",
   "Punkt hinzufügen": "Punt toevoegen",
   "Status": "Status",
-  "Punkte wieder auf die Anordnung „{grid}“ setzen": "Punten terugzetten naar de indeling „{grid}”"
+  "Punkte wieder auf die Anordnung „{grid}“ setzen": "Punten terugzetten naar de indeling „{grid}”",
+  "Regeln dieser Vorlage in das Projekt übernehmen": "Regels van dit sjabloon in het project overnemen",
+  "Regeln und Vorlagen": "Regels en sjablonen",
+  "Standard": "Standaard",
+  "Vorlage": "Sjabloon"
 }

@@ -518,3 +518,17 @@ impl Dropdown {
         egui::InnerResponse::new(inner, response)
     }
 }
+
+/// Überschrift einer Einstellungsseite, darunter eine doppelte Linie über
+/// die ganze Breite.
+pub fn page_heading(ui: &mut egui::Ui, title: &str) {
+    ui.heading(title);
+    ui.add_space(4.0);
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 5.0), egui::Sense::hover());
+    let stroke = egui::Stroke::new(1.0, Color32::from_gray(150));
+    ui.painter().hline(rect.x_range(), rect.top() + 0.5, stroke);
+    ui.painter()
+        .hline(rect.x_range(), rect.bottom() - 0.5, stroke);
+    ui.add_space(8.0);
+}

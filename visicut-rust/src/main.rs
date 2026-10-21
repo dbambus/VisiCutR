@@ -277,6 +277,20 @@ enum SettingsPage {
     General,
 }
 
+impl SettingsPage {
+    const ALL: [Self; 4] = [Self::Devices, Self::Materials, Self::Job, Self::General];
+
+    /// Name in der linken Leiste und zugleich Überschrift der Seite.
+    fn title(self) -> &'static str {
+        match self {
+            Self::Devices => tr("Lasercutter"),
+            Self::Materials => tr("Materialien"),
+            Self::Job => tr("Job"),
+            Self::General => tr("Allgemein"),
+        }
+    }
+}
+
 struct VisiCutR {
     project: Project,
     page: Page,
@@ -1493,13 +1507,8 @@ impl VisiCutR {
                     .inner_margin(egui::Margin::symmetric(8, 10)),
             )
             .show(ctx, |ui| {
-                for (page, title) in [
-                    (SettingsPage::Devices, tr("Lasercutter")),
-                    (SettingsPage::Materials, tr("Materialien")),
-                    (SettingsPage::Job, tr("Job")),
-                    (SettingsPage::General, tr("Allgemein")),
-                ] {
-                    let text = egui::RichText::new(title).size(14.0);
+                for page in SettingsPage::ALL {
+                    let text = egui::RichText::new(page.title()).size(14.0);
                     if ui
                         .add_sized(
                             [ui.available_width(), 30.0],
@@ -1513,27 +1522,22 @@ impl VisiCutR {
             });
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(16.0))
-            .show(ctx, |ui| match self.settings_page {
-                SettingsPage::Devices => {
-                    ui.heading(tr("Lasercutter"));
-                    ui.add_space(6.0);
-                    self.devices
-                        .settings_page(ui, &mut self.project, &mut self.status);
+            .show(ctx, |ui| {
+                form::page_heading(ui, self.settings_page.title());
+                match self.settings_page {
+                    SettingsPage::Devices => {
+                        self.devices
+                            .settings_page(ui, &mut self.project, &mut self.status)
+                    }
+                    SettingsPage::Materials => self.jobs.library_page(ui, &mut self.status),
+                    SettingsPage::Job => self.job_page(ui),
+                    SettingsPage::General => self.general_page(ui),
                 }
-                SettingsPage::Materials => {
-                    ui.heading(tr("Materialbibliothek"));
-                    ui.add_space(6.0);
-                    self.jobs.library_page(ui, &mut self.status);
-                }
-                SettingsPage::Job => self.job_page(ui),
-                SettingsPage::General => self.general_page(ui),
             });
     }
 
     /// Einstellungen → Job: Schnittreihenfolge des Projekts.
     fn job_page(&mut self, ui: &mut egui::Ui) {
-        ui.heading(tr("Job"));
-        ui.add_space(6.0);
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.set_max_width(620.0);
             form::section(ui, tr("Schnittreihenfolge"), |ui| {
@@ -1621,8 +1625,6 @@ impl VisiCutR {
 
     /// Einstellungen → Allgemein: Sprache, Update-Prüfung und Geräteliste übertragen.
     fn general_page(&mut self, ui: &mut egui::Ui) {
-        ui.heading(tr("Allgemein"));
-        ui.add_space(6.0);
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.set_max_width(620.0);
             form::section(ui, tr("Sprache"), |ui| {

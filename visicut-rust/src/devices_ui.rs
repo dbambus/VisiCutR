@@ -496,48 +496,53 @@ impl DeviceUi {
         let searching = self.camera_search.is_some();
         let mut search = false;
         let found = std::mem::take(&mut self.camera_found);
+        // Die Geräteliste füllt die Seite, ihre Symbolleiste sitzt unten wie
+        // bei den Materialien (Platz für die Knopfzeile bleibt frei).
+        let spacing = ui.spacing().item_spacing.y;
+        let row = ui.spacing().interact_size.y;
+        let columns = (ui.available_height() - row - 6.0 * spacing - 8.0).max(240.0);
         egui::ScrollArea::vertical()
             .id_salt("device_manager")
             .show(ui, |ui| {
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
                         ui.set_width(170.0);
-                        for (i, device) in draft.devices.iter().enumerate() {
-                            let label = if i == draft.selected {
-                                tr!("{name} (aktiv)", name = device.name)
-                            } else {
-                                device.name.clone()
-                            };
-                            ui.selectable_value(&mut editing, i, label);
-                        }
-                        ui.horizontal(|ui| {
-                            if ui.button(tr("Kopie")).clicked() {
-                                let mut copy = draft.devices[editing].clone();
-                                let base = copy.name.clone();
-                                let mut n = 2;
-                                while draft.devices.iter().any(|d| d.name == copy.name) {
-                                    copy.name = format!("{base} ({n})");
-                                    n += 1;
+                        egui::ScrollArea::vertical()
+                            .id_salt("device_list")
+                            .auto_shrink([false, false])
+                            .max_height(columns - 28.0 - spacing)
+                            .show(ui, |ui| {
+                                for (i, device) in draft.devices.iter().enumerate() {
+                                    let label = if i == draft.selected {
+                                        tr!("{name} (aktiv)", name = device.name)
+                                    } else {
+                                        device.name.clone()
+                                    };
+                                    ui.selectable_value(&mut editing, i, label);
                                 }
-                                draft.devices.push(copy);
-                                editing = draft.devices.len() - 1;
+                            });
+                        use crate::object_bar::{Icon, list_button, list_footer};
+                        let removable = draft.devices.len() > 1;
+                        list_footer(ui, 170.0, |ui| {
+                            if list_button(ui, Icon::Duplicate, true, tr("Kopie des Lasercutters anlegen")) {
+                                editing = draft.duplicate(editing);
                             }
-                            if ui
-                                .add_enabled(
-                                    draft.devices.len() > 1,
-                                    egui::Button::new(tr("Entfernen")),
-                                )
-                                .clicked()
+                            if list_button(ui, Icon::Minus, removable, tr("Lasercutter entfernen"))
+                                && let Some(next) = draft.remove(editing)
                             {
-                                draft.devices.remove(editing);
-                                if draft.selected >= editing && draft.selected > 0 {
-                                    draft.selected -= 1;
-                                }
-                                editing = editing.min(draft.devices.len() - 1);
+                                editing = next;
                             }
                         });
                     });
-                    ui.separator();
+                    // Trennstrich so hoch wie die Liste; `separator()` nähme die ganze
+                    // Höhe und schöbe die Knopfzeile aus dem Bild.
+                    let (line, _) =
+                        ui.allocate_exact_size(egui::vec2(12.0, columns), Sense::hover());
+                    ui.painter().vline(
+                        line.center().x,
+                        line.y_range(),
+                        ui.visuals().widgets.noninteractive.bg_stroke,
+                    );
                     ui.vertical(|ui| {
                         let device = &mut draft.devices[editing];
                         // Ein Raster für alle Abschnitte: die Felder fluchten in

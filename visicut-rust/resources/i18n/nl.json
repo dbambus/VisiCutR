@@ -216,7 +216,6 @@
   "Keine VisiCut-Gerätedatei": "Geen VisiCut-apparaatbestand",
   "Keine auswählbaren Objekte in der SVG.": "Geen selecteerbare objecten in de SVG.",
   "Konturen markieren. Eigene Leistung einstellen.": "Contouren markeren. Eigen vermogen instellen.",
-  "Kopie": "Kopie",
   "Kopien im Raster": "Kopieën in raster",
   "Kopien im Raster …": "Kopieën in raster …",
   "Kursiv": "Cursief",
@@ -285,7 +284,6 @@
   "Motivhöhe muss positiv und höchstens 100000 sein": "Ontwerphoogte moet positief en hoogstens 100000 zijn",
   "Nach dem Entfernen doppelter Linien bleibt nichts zu schneiden": "Na het verwijderen van dubbele lijnen blijft er niets te snijden over",
   "Name": "Naam",
-  "Neu": "Nieuw",
   "Neues Projekt": "Nieuw project",
   "Neues Projekt. Datei öffnen, um zu beginnen.": "Nieuw project. Open een bestand om te beginnen.",
   "Nicht festgelegt": "Niet ingesteld",
@@ -938,5 +936,9 @@
   "Erweiterungsordner von Inkscape unbekannt": "Extensiemap van Inkscape onbekend",
   "Inkscape-Erweiterung installiert in {path}. Inkscape neu starten.": "Inkscape-extensie geïnstalleerd in {path}. Start Inkscape opnieuw.",
   "Inkscape-Erweiterung nicht installiert: {error}": "Inkscape-extensie niet geïnstalleerd: {error}",
-  "In Inkscape unter Erweiterungen → Lasercut Path: „Add to VisiCutR“ fügt die Zeichnung oder Auswahl als Teil hinzu, „Open in VisiCutR“ ersetzt das Projekt. Läuft VisiCutR schon, öffnet sich die Datei dort.": "In Inkscape onder Extensies → Lasercut Path: ‘Add to VisiCutR’ voegt de tekening of selectie toe als onderdeel, ‘Open in VisiCutR’ vervangt het project. Draait VisiCutR al, dan opent het bestand daar."
+  "In Inkscape unter Erweiterungen → Lasercut Path: „Add to VisiCutR“ fügt die Zeichnung oder Auswahl als Teil hinzu, „Open in VisiCutR“ ersetzt das Projekt. Läuft VisiCutR schon, öffnet sich die Datei dort.": "In Inkscape onder Extensies → Lasercut Path: ‘Add to VisiCutR’ voegt de tekening of selectie toe als onderdeel, ‘Open in VisiCutR’ vervangt het project. Draait VisiCutR al, dan opent het bestand daar.",
+  "Kopie des Lasercutters anlegen": "Lasersnijder dupliceren",
+  "Lasercutter entfernen": "Lasersnijder verwijderen",
+  "Material duplizieren": "Materiaal dupliceren",
+  "Material entfernen": "Materiaal verwijderen"
 }

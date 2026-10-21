@@ -316,6 +316,28 @@ pub fn duplicate_material(materials: &mut Vec<Material>, index: usize) -> usize 
     materials.len() - 1
 }
 
+/// Entfernt das Material `index`; liefert die danach gewählte Position
+/// (dieselbe, am Ende die davor).
+pub fn remove_material(materials: &mut Vec<Material>, index: usize) -> usize {
+    if index < materials.len() {
+        materials.remove(index);
+    }
+    index.min(materials.len().saturating_sub(1))
+}
+
+/// Neues Profil am Ende: Stärke des letzten (sonst 3 mm), Schneiden mit
+/// 100 % Leistung und 10 % Geschwindigkeit zum Anpassen.
+pub fn add_profile(material: &mut Material) {
+    let thickness = material.profiles.last().map_or(3.0, |p| p.thickness_mm);
+    material.profiles.push(MaterialProfile {
+        thickness_mm: thickness,
+        operation: Operation::Cut,
+        power_percent: 100.0,
+        speed_percent: 10.0,
+        source: None,
+    });
+}
+
 /// `#rrggbb` as a colour for swatches.
 pub fn parse_color(value: &str) -> Option<egui::Color32> {
     let hex = value.trim().strip_prefix('#')?;
@@ -1556,6 +1578,13 @@ impl JobUi {
         else {
             return;
         };
+        // Liste und Profile füllen die Seite; ihre Symbolleisten sitzen unten
+        // über den Knöpfen (Importieren … Sichern), Platz für diese bleibt frei.
+        let spacing = ui.spacing().item_spacing.y;
+        let row = ui.spacing().interact_size.y;
+        // Unten: Trennlinie und die Knopfzeile.
+        let columns = (ui.available_height() - row - 6.0 * spacing - 8.0).max(240.0);
+        let footer = 28.0 + spacing;
         egui::ScrollArea::vertical()
             .id_salt("material_library")
             .show(ui, |ui| {
@@ -1564,48 +1593,55 @@ impl JobUi {
                         ui.set_width(190.0);
                         egui::ScrollArea::vertical()
                             .id_salt("materials")
-                            .max_height(360.0)
+                            .auto_shrink([false, false])
+                            .max_height(columns - footer)
                             .show(ui, |ui| {
                                 for (i, m) in draft.iter().enumerate() {
                                     ui.selectable_value(&mut selected, i, &m.name);
                                 }
                             });
-                        ui.horizontal_wrapped(|ui| {
-                            if ui.button(tr("Neu")).clicked() {
+                        use crate::object_bar::{Icon, list_button, list_footer};
+                        let chosen = selected < draft.len();
+                        list_footer(ui, 190.0, |ui| {
+                            if list_button(ui, Icon::Plus, true, tr("Neues Material")) {
                                 selected = new_material(&mut draft);
                             }
-                            if ui
-                                .add_enabled(
-                                    selected < draft.len(),
-                                    egui::Button::new(tr("Duplizieren")),
-                                )
-                                .clicked()
+                            if list_button(ui, Icon::Duplicate, chosen, tr("Material duplizieren"))
                             {
                                 selected = duplicate_material(&mut draft, selected);
                             }
-                            if ui
-                                .add_enabled(
-                                    selected < draft.len(),
-                                    egui::Button::new(tr("Entfernen")),
-                                )
-                                .clicked()
-                            {
-                                draft.remove(selected);
-                                selected = selected.min(draft.len().saturating_sub(1));
+                            if list_button(ui, Icon::Minus, chosen, tr("Material entfernen")) {
+                                selected = remove_material(&mut draft, selected);
                             }
                         });
                     });
-                    ui.separator();
+                    // Trennstrich so hoch wie die Spalten; `separator()` nähme die
+                    // ganze verfügbare Höhe und schöbe die Knopfzeile hinaus.
+                    let (line, _) =
+                        ui.allocate_exact_size(egui::vec2(12.0, columns), egui::Sense::hover());
+                    ui.painter().vline(
+                        line.center().x,
+                        line.y_range(),
+                        ui.visuals().widgets.noninteractive.bg_stroke,
+                    );
                     ui.vertical(|ui| {
                         let Some(material) = draft.get_mut(selected) else {
                             ui.label(tr("Material auswählen"));
                             return;
                         };
+                        let top = ui.cursor().top();
                         ui.text_edit_singleline(&mut material.name);
+                        ui.small(tr("\
+                            Leistung und Geschwindigkeit in Prozent wie am LTT. Je Stärke ist \
+                             ein Profil pro Verfahren möglich; 0 % Leistung gilt als \
+                             „nicht übernehmbar“."));
                         let mut drop = None;
+                        // Die Symbolleiste schließt unten mit der der Materialliste ab.
+                        let used = ui.cursor().top() - top;
                         egui::ScrollArea::vertical()
                             .id_salt("profiles")
-                            .max_height(320.0)
+                            .auto_shrink([false, false])
+                            .max_height((columns - footer - used).max(80.0))
                             .show(ui, |ui| {
                                 egui::Grid::new("profiles").num_columns(5).show(ui, |ui| {
                                     ui.label(tr("Stärke"));
@@ -1654,21 +1690,17 @@ impl JobUi {
                         if let Some(j) = drop {
                             material.profiles.remove(j);
                         }
-                        if ui.button(tr("Profil hinzufügen")).clicked() {
-                            let thickness =
-                                material.profiles.last().map_or(3.0, |p| p.thickness_mm);
-                            material.profiles.push(MaterialProfile {
-                                thickness_mm: thickness,
-                                operation: Operation::Cut,
-                                power_percent: 100.0,
-                                speed_percent: 10.0,
-                                source: None,
-                            });
+                        let add = crate::object_bar::list_footer(ui, 72.0, |ui| {
+                            crate::object_bar::list_button(
+                                ui,
+                                crate::object_bar::Icon::Plus,
+                                true,
+                                tr("Profil hinzufügen"),
+                            )
+                        });
+                        if add {
+                            add_profile(material);
                         }
-                        ui.small(tr("\
-                            Leistung und Geschwindigkeit in Prozent wie am LTT. Je Stärke ist \
-                             ein Profil pro Verfahren möglich; 0 % Leistung gilt als \
-                             „nicht übernehmbar“."));
                     });
                 });
                 ui.separator();
@@ -2020,6 +2052,28 @@ mod tests {
         let other = new_material(&mut materials);
         assert_eq!(materials[new].name, "Neues Material");
         assert_eq!(materials[other].name, "Neues Material (2)");
+        assert!(materials[new].profiles.is_empty());
+        // Profile: das neue übernimmt die Stärke des letzten, sonst 3 mm.
+        add_profile(&mut materials[new]);
+        materials[new].profiles[0].thickness_mm = 6.0;
+        add_profile(&mut materials[new]);
+        let added = &materials[new].profiles[1];
+        assert_eq!((added.thickness_mm, added.operation), (6.0, Operation::Cut));
+        assert_eq!((added.power_percent, added.speed_percent), (100.0, 10.0));
+        // Gleiche Stärke und gleiches Verfahren wären beim Sichern doppelt.
+        materials[new].profiles[1].operation = Operation::Mark;
+        add_profile(&mut materials[other]);
+        assert_eq!(materials[other].profiles[0].thickness_mm, 3.0);
+        // Entfernen: die Auswahl bleibt an der Stelle, am Ende rückt sie vor.
+        let count = materials.len();
+        let at = remove_material(&mut materials, 1);
+        assert_eq!((at, materials.len()), (1, count - 1));
+        let last = materials.len() - 1;
+        assert_eq!(remove_material(&mut materials, last), last - 1);
+        assert_eq!(remove_material(&mut materials, 99), materials.len() - 1);
+        let mut empty = vec![materials[0].clone()];
+        assert_eq!(remove_material(&mut empty, 0), 0);
+        assert!(empty.is_empty());
         let library = Library {
             materials,
             ..library()

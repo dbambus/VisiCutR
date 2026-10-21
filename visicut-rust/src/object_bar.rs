@@ -25,6 +25,9 @@ pub enum Icon {
     Redo,
     /// Datei-Menü in der dunklen Leiste.
     Home,
+    /// Listen: Eintrag hinzufügen bzw. entfernen.
+    Plus,
+    Minus,
 }
 
 const SIZE: f32 = 34.0;
@@ -112,6 +115,50 @@ pub fn button(
         response
     };
     response.on_hover_text(hover)
+}
+
+/// Knopfzeile am unteren Rand einer Liste: einzelne Symbolknöpfe
+/// (Hinzufügen, Duplizieren, Entfernen) nebeneinander, gesetzt mit
+/// [`list_button`]; `width` hält die Zeile so breit wie die Liste.
+pub fn list_footer<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.horizontal(|ui| {
+        ui.set_width(width);
+        ui.spacing_mut().item_spacing.x = 6.0;
+        add(ui)
+    })
+    .inner
+}
+
+/// Eigener kleiner Symbolknopf mit Rahmen wie die übrigen Knöpfe.
+pub fn list_button(ui: &mut egui::Ui, icon: Icon, enabled: bool, hover: &str) -> bool {
+    let sense = if enabled {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(32.0, 26.0), sense);
+    if ui.is_rect_visible(rect) {
+        let visuals = if enabled {
+            ui.style().interact(&response)
+        } else {
+            &ui.style().visuals.widgets.inactive
+        };
+        ui.painter().rect(
+            rect,
+            visuals.corner_radius,
+            visuals.weak_bg_fill,
+            visuals.bg_stroke,
+            egui::StrokeKind::Inside,
+        );
+        let color = if enabled {
+            Color32::from_gray(50)
+        } else {
+            Color32::from_gray(190)
+        };
+        let icon_rect = Rect::from_center_size(rect.center(), Vec2::splat(22.0));
+        paint(ui.painter(), icon, icon_rect, color);
+    }
+    response.on_hover_text(hover).clicked() && enabled
 }
 
 /// Zeichnet ein Symbol in einem Raster von −10 … 10 um die Mitte von `rect`.
@@ -266,6 +313,11 @@ pub fn paint(painter: &egui::Painter, icon: Icon, rect: Rect, color: Color32) {
                 line,
             ));
         }
+        Icon::Plus => {
+            path(&[(0.0, -7.0), (0.0, 7.0)], false);
+            path(&[(-7.0, 0.0), (7.0, 0.0)], false);
+        }
+        Icon::Minus => path(&[(-7.0, 0.0), (7.0, 0.0)], false),
         Icon::Delete => {
             path(&[(-8.0, -6.0), (8.0, -6.0)], false);
             path(

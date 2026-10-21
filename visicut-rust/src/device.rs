@@ -201,6 +201,27 @@ impl DeviceStore {
         count
     }
 
+    /// Kopie des Geräts `index` unter einem freien Namen am Ende der Liste;
+    /// liefert ihre Position.
+    pub fn duplicate(&mut self, index: usize) -> usize {
+        self.merge(vec![self.devices[index].clone()]);
+        self.devices.len() - 1
+    }
+
+    /// Entfernt das Gerät `index`, solange danach noch eines bleibt. Das aktive
+    /// Gerät bleibt dasselbe; war es das entfernte, wird das davor aktiv.
+    /// Liefert die Position, die danach in der Liste gewählt ist.
+    pub fn remove(&mut self, index: usize) -> Option<usize> {
+        if self.devices.len() < 2 || index >= self.devices.len() {
+            return None;
+        }
+        self.devices.remove(index);
+        if self.selected >= index && self.selected > 0 {
+            self.selected -= 1;
+        }
+        Some(index.min(self.devices.len() - 1))
+    }
+
     pub fn load(dir: &Path) -> Result<Self, String> {
         let path = dir.join(STORE_FILE);
         if !path.exists() {
@@ -736,6 +757,44 @@ mod tests {
         store.devices[1].name = store.devices[0].name.clone();
         assert!(store.save(&dir).unwrap_err().contains("doppelt"));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn duplicate_and_remove_keep_names_and_active_device() {
+        let named = |name: &str| LaserDevice {
+            name: name.into(),
+            ..LaserDevice::fau()
+        };
+        let mut store = DeviceStore {
+            devices: vec![named("A"), named("B"), named("C")],
+            selected: 1,
+            ..DeviceStore::default()
+        };
+        // Kopien bekommen freie Namen und landen am Ende.
+        assert_eq!(store.duplicate(0), 3);
+        assert_eq!(store.duplicate(0), 4);
+        let names: Vec<_> = store.devices.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, ["A", "B", "C", "A (2)", "A (3)"]);
+        assert_eq!(store.devices[3].hostname, store.devices[0].hostname);
+        // Ein Gerät vor dem aktiven: das aktive (B) rückt nach.
+        assert_eq!(store.remove(0), Some(0));
+        assert_eq!(
+            (store.selected, store.devices[store.selected].name.as_str()),
+            (0, "B")
+        );
+        // Das letzte dahinter: das aktive bleibt, die Auswahl rückt auf das
+        // neue letzte.
+        assert_eq!(store.remove(3), Some(2));
+        assert_eq!(store.devices[store.selected].name, "B");
+        // Das aktive selbst: das davor wird aktiv, an Position 0 das nächste.
+        assert_eq!(store.remove(0), Some(0));
+        assert_eq!((store.selected, store.devices[0].name.as_str()), (0, "C"));
+        // Das letzte in der Liste: die Auswahl rückt auf das neue letzte.
+        assert_eq!(store.remove(1), Some(0));
+        // Das einzige Gerät bleibt; ungültige Positionen ändern nichts.
+        assert_eq!(store.remove(0), None);
+        assert_eq!(store.remove(5), None);
+        assert_eq!(store.devices.len(), 1);
     }
 
     fn export_and_reimport(path: &Path, devices: &[LaserDevice]) {

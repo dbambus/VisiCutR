@@ -216,7 +216,6 @@
   "Keine VisiCut-Gerätedatei": "Pas un fichier d'appareils VisiCut",
   "Keine auswählbaren Objekte in der SVG.": "Aucun objet sélectionnable dans le SVG.",
   "Konturen markieren. Eigene Leistung einstellen.": "Marquer les contours. Régler une puissance personnalisée.",
-  "Kopie": "Copie",
   "Kopien im Raster": "Copies en grille",
   "Kopien im Raster …": "Copies en grille …",
   "Kursiv": "Italique",
@@ -285,7 +284,6 @@
   "Motivhöhe muss positiv und höchstens 100000 sein": "La hauteur du motif doit être positive et au plus 100000",
   "Nach dem Entfernen doppelter Linien bleibt nichts zu schneiden": "Après suppression des lignes en double, il ne reste rien à découper",
   "Name": "Nom",
-  "Neu": "Nouveau",
   "Neues Projekt": "Nouveau projet",
   "Neues Projekt. Datei öffnen, um zu beginnen.": "Nouveau projet. Ouvrir un fichier pour commencer.",
   "Nicht festgelegt": "Non défini",
@@ -938,5 +936,9 @@
   "Erweiterungsordner von Inkscape unbekannt": "Dossier des extensions d’Inkscape inconnu",
   "Inkscape-Erweiterung installiert in {path}. Inkscape neu starten.": "Extension Inkscape installée dans {path}. Redémarrez Inkscape.",
   "Inkscape-Erweiterung nicht installiert: {error}": "Extension Inkscape non installée : {error}",
-  "In Inkscape unter Erweiterungen → Lasercut Path: „Add to VisiCutR“ fügt die Zeichnung oder Auswahl als Teil hinzu, „Open in VisiCutR“ ersetzt das Projekt. Läuft VisiCutR schon, öffnet sich die Datei dort.": "Dans Inkscape, sous Extensions → Lasercut Path : « Add to VisiCutR » ajoute le dessin ou la sélection comme pièce, « Open in VisiCutR » remplace le projet. Si VisiCutR est déjà ouvert, le fichier s’y ouvre."
+  "In Inkscape unter Erweiterungen → Lasercut Path: „Add to VisiCutR“ fügt die Zeichnung oder Auswahl als Teil hinzu, „Open in VisiCutR“ ersetzt das Projekt. Läuft VisiCutR schon, öffnet sich die Datei dort.": "Dans Inkscape, sous Extensions → Lasercut Path : « Add to VisiCutR » ajoute le dessin ou la sélection comme pièce, « Open in VisiCutR » remplace le projet. Si VisiCutR est déjà ouvert, le fichier s’y ouvre.",
+  "Kopie des Lasercutters anlegen": "Dupliquer la découpeuse laser",
+  "Lasercutter entfernen": "Supprimer la découpeuse laser",
+  "Material duplizieren": "Dupliquer le matériau",
+  "Material entfernen": "Supprimer le matériau"
 }

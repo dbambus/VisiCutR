@@ -27,6 +27,8 @@ use visicut_core::{
 };
 
 const WARNING: Color32 = Color32::from_rgb(180, 75, 40);
+/// Rahmen und Symbol von Hinweisen.
+const ALERT_RED: Color32 = Color32::from_rgb(205, 40, 40);
 /// So lange bleibt der Hinweis nach dem Senden stehen.
 const SENT_NOTICE_DURATION: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -3344,25 +3346,54 @@ impl VisiCutR {
         }
         if let Some(text) = &self.alert {
             let mut close = false;
-            let modal = egui::Modal::new(egui::Id::new("alert")).show(ctx, |ui| {
-                ui.set_max_width(460.0);
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("⚠").size(22.0).color(WARNING));
-                    ui.heading(tr("Hinweis"));
+            // Roter Rahmen ein paar Punkte innerhalb des Fensterrands, Inhalt
+            // zentriert.
+            let outer = egui::Frame::popup(&ctx.style()).inner_margin(5.0);
+            let modal = egui::Modal::new(egui::Id::new("alert"))
+                .frame(outer)
+                .show(ctx, |ui| {
+                    egui::Frame::new()
+                        .stroke(egui::Stroke::new(2.0, ALERT_RED))
+                        .corner_radius(7.0)
+                        .inner_margin(egui::Margin::symmetric(18, 14))
+                        .show(ui, |ui| {
+                            ui.set_width(440.0);
+                            ui.vertical_centered(|ui| {
+                                let mut title = egui::text::LayoutJob::default();
+                                let size = 20.0;
+                                title.append(
+                                    "⚠  ",
+                                    0.0,
+                                    egui::TextFormat::simple(
+                                        egui::FontId::proportional(size),
+                                        ALERT_RED,
+                                    ),
+                                );
+                                title.append(
+                                    tr("Hinweis"),
+                                    0.0,
+                                    egui::TextFormat::simple(
+                                        form::bold(size),
+                                        ui.visuals().strong_text_color(),
+                                    ),
+                                );
+                                ui.label(title);
+                                ui.add_space(6.0);
+                                egui::ScrollArea::vertical()
+                                    .max_height(320.0)
+                                    .show(ui, |ui| ui.label(text));
+                                ui.add_space(10.0);
+                                close = ui.button(tr("OK")).clicked();
+                                if let Some(left) = left {
+                                    let seconds = left.as_secs_f32().ceil() as u32;
+                                    ui.weak(tr!("schließt in {seconds} s", seconds = seconds));
+                                    ctx.request_repaint_after(std::time::Duration::from_millis(
+                                        250,
+                                    ));
+                                }
+                            });
+                        });
                 });
-                egui::ScrollArea::vertical()
-                    .max_height(320.0)
-                    .show(ui, |ui| ui.label(text));
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    close = ui.button(tr("OK")).clicked();
-                    if let Some(left) = left {
-                        let seconds = left.as_secs_f32().ceil() as u32;
-                        ui.weak(tr!("schließt in {seconds} s", seconds = seconds));
-                        ctx.request_repaint_after(std::time::Duration::from_millis(250));
-                    }
-                });
-            });
             if close || modal.should_close() {
                 self.alert = None;
             }

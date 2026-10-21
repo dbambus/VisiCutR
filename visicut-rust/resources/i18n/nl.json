@@ -301,7 +301,6 @@
   "Port": "Poort",
   "Position muss endlich sein": "Positie moet eindig zijn",
   "Position und Größe": "Positie en grootte",
-  "Positive Winkel drehen im Uhrzeigersinn": "Positieve hoeken draaien met de klok mee",
   "Profil entfernen": "Profiel verwijderen",
   "Projekt geöffnet": "Project geopend",
   "Projekt mit eingebetteter SVG gesichert": "Project met ingebedde SVG opgeslagen",
@@ -950,5 +949,6 @@
   "Regeln dieser Vorlage in das Projekt übernehmen": "Regels van dit sjabloon in het project overnemen",
   "Regeln und Vorlagen": "Regels en sjablonen",
   "Standard": "Standaard",
-  "Vorlage": "Sjabloon"
+  "Vorlage": "Sjabloon",
+  "Anklicken und Winkel eingeben; positive Winkel drehen im Uhrzeigersinn": "Klik en voer een hoek in; positieve hoeken draaien met de klok mee"
 }

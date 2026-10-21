@@ -301,7 +301,6 @@
   "Port": "Port",
   "Position muss endlich sein": "Position must be finite",
   "Position und Größe": "Position and size",
-  "Positive Winkel drehen im Uhrzeigersinn": "Positive angles rotate clockwise",
   "Profil entfernen": "Remove profile",
   "Projekt geöffnet": "Project opened",
   "Projekt mit eingebetteter SVG gesichert": "Project saved with embedded SVG",
@@ -950,5 +949,6 @@
   "Regeln dieser Vorlage in das Projekt übernehmen": "Apply this template's rules to the project",
   "Regeln und Vorlagen": "Rules and templates",
   "Standard": "Default",
-  "Vorlage": "Template"
+  "Vorlage": "Template",
+  "Anklicken und Winkel eingeben; positive Winkel drehen im Uhrzeigersinn": "Click and enter an angle; positive angles rotate clockwise"
 }

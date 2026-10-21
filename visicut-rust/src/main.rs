@@ -2349,17 +2349,26 @@ impl VisiCutR {
         let editable = self.texture.is_some() && !self.busy();
         ui.horizontal(|ui| {
             ui.label(tr("Winkel"));
-            ui.add(
-                egui::DragValue::new(&mut self.rotate_deg)
-                    .range(-360.0..=360.0)
-                    .speed(1.0)
-                    .suffix("°"),
-            )
-            .on_hover_text(tr("Positive Winkel drehen im Uhrzeigersinn"));
-            if ui
+            // Feste Breite und kein Ziehen: anklicken, Zahl tippen, Enter dreht.
+            let field = ui
+                .add_sized(
+                    [80.0, ui.spacing().interact_size.y],
+                    egui::DragValue::new(&mut self.rotate_deg)
+                        .range(-360.0..=360.0)
+                        .speed(0.0)
+                        .suffix("°"),
+                )
+                .on_hover_text(tr(
+                    "Anklicken und Winkel eingeben; positive Winkel drehen im Uhrzeigersinn",
+                ));
+            let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if (ui
                 .add_enabled(editable && self.rotate_deg != 0.0, egui::Button::new("✔"))
                 .on_hover_text(tr("Anwenden"))
                 .clicked()
+                || enter)
+                && editable
+                && self.rotate_deg != 0.0
             {
                 *clicked = Some(Command::RotateBy);
             }

@@ -301,7 +301,6 @@
   "Port": "Port",
   "Position muss endlich sein": "La position doit être finie",
   "Position und Größe": "Position et taille",
-  "Positive Winkel drehen im Uhrzeigersinn": "Les angles positifs tournent dans le sens horaire",
   "Profil entfernen": "Supprimer le profil",
   "Projekt geöffnet": "Projet ouvert",
   "Projekt mit eingebetteter SVG gesichert": "Projet enregistré avec SVG intégré",
@@ -950,5 +949,6 @@
   "Regeln dieser Vorlage in das Projekt übernehmen": "Appliquer les règles de ce modèle au projet",
   "Regeln und Vorlagen": "Règles et modèles",
   "Standard": "Par défaut",
-  "Vorlage": "Modèle"
+  "Vorlage": "Modèle",
+  "Anklicken und Winkel eingeben; positive Winkel drehen im Uhrzeigersinn": "Cliquer et saisir un angle ; les angles positifs tournent dans le sens horaire"
 }

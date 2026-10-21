@@ -18,7 +18,7 @@ use visicut_core::{
     tr,
 };
 use visicut_core::{
-    import,
+    import, inkscape, instance,
     ltt::{self, OutputJob, PreparedJob},
     project::{CutOrder, Operation, Project},
     session, svg,
@@ -349,12 +349,18 @@ struct VisiCutR {
     /// Laufende Update-Prüfung (`true`: von Hand gestartet) und gefundenes Release.
     update_check: Option<(bool, UpdateCheck)>,
     update_found: Option<visicut_core::update::Release>,
+    /// Nimmt Dateien späterer Starts und der Inkscape-Erweiterung entgegen.
+    instance: Option<instance::Listener>,
+    /// Übergebene Dateien, die auf das Ende eines Dialogs warten.
+    handed_over: Option<instance::Request>,
+    /// Stand der Inkscape-Erweiterung (Einstellungen), erst bei Bedarf geprüft.
+    inkscape: Option<inkscape::Status>,
     #[cfg(feature = "screenshot")]
     capture: Option<(PathBuf, u32)>,
 }
 
 impl VisiCutR {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, launch: instance::Launch) -> Self {
         // Erster Start nach der Umbenennung: Einstellungen von VisiCutRust übernehmen.
         let moved = visicut_core::device::migrate_legacy_config();
         let mut settings = settings::AppSettings::load();
@@ -422,6 +428,9 @@ impl VisiCutR {
             settings,
             update_check: None,
             update_found: None,
+            instance: None,
+            handed_over: None,
+            inkscape: None,
             #[cfg(feature = "screenshot")]
             capture: None,
         };
@@ -444,6 +453,7 @@ impl VisiCutR {
         } else if let Some(error) = material_error {
             app.report(error);
         }
+        #[cfg(feature = "screenshot")]
         let arguments: Vec<String> = std::env::args().skip(1).collect();
         #[cfg(feature = "screenshot")]
         if let Some(index) = arguments
@@ -466,13 +476,19 @@ impl VisiCutR {
                 _ => {}
             }
         }
-        if arguments
-            .first()
-            .is_some_and(|argument| argument == "--demo")
-        {
+        if !launch.standalone {
+            let ctx = cc.egui_ctx.clone();
+            match instance::Listener::start(&visicut_core::device::config_dir(), move || {
+                ctx.request_repaint()
+            }) {
+                Ok(listener) => app.instance = Some(listener),
+                Err(e) => eprintln!("Einzelinstanz nicht verfügbar: {e}"),
+            }
+        }
+        if launch.demo {
             app.perform(&cc.egui_ctx, Replace::Demo);
-        } else if let Some(path) = arguments.first().filter(|a| !a.starts_with('-')) {
-            app.perform(&cc.egui_ctx, Replace::Open(PathBuf::from(path)));
+        } else if !launch.request.files.is_empty() {
+            app.open_request(&cc.egui_ctx, launch.request);
         } else if let Some(path) = session::take_resume(&session::dir()) {
             // Beim letzten Beenden ungesicherter Stand.
             app.perform(&cc.egui_ctx, Replace::Open(path));
@@ -841,6 +857,18 @@ impl VisiCutR {
             }
             self.remember(path);
             Ok(())
+        }
+    }
+
+    /// Dateien aus der Befehlszeile oder von einem späteren Start: mit
+    /// `--add` oder mehreren Dateien wie abgelegt, sonst ersetzt die Datei das
+    /// Projekt.
+    fn open_request(&mut self, ctx: &egui::Context, request: instance::Request) {
+        match <[PathBuf; 1]>::try_from(request.files) {
+            Ok([path]) if !request.add => self.request(ctx, Replace::Open(path)),
+            Ok(files) => self.drop_files(ctx, files.into()),
+            Err(files) if !files.is_empty() => self.drop_files(ctx, files),
+            Err(_) => {}
         }
     }
 
@@ -1645,12 +1673,63 @@ impl VisiCutR {
                     }
                 });
             });
+            form::section(ui, tr("Inkscape"), |ui| self.inkscape_section(ui));
             form::section(ui, tr("Lasercutter"), |ui| {
                 self.devices
                     .transfer(ui, &mut self.project, &mut self.status);
                 form::caption(ui, tr("Importieren liest VisiCut-Gerätedateien, .vcsettings-Archive und eigene Exporte; Herunterladen holt die Einstellungen eines Labors. Neue Geräte werden sofort gesichert."));
             });
         });
+    }
+
+    /// Installiert die Inkscape-Erweiterung „Add to VisiCutR“ wie das Menü
+    /// „Inkscape-Erweiterung installieren“ in Java-VisiCut.
+    fn inkscape_section(&mut self, ui: &mut egui::Ui) {
+        let target = inkscape::extensions_dir();
+        let program = std::env::current_exe().ok();
+        let status = *self
+            .inkscape
+            .get_or_insert_with(|| match (&target, &program) {
+                (Some(dir), Some(program)) => inkscape::status(dir, program),
+                _ => inkscape::Status::Missing,
+            });
+        form::row(ui, tr("Erweiterung"), |ui| {
+            ui.label(match status {
+                inkscape::Status::Missing => tr("nicht installiert"),
+                inkscape::Status::Outdated => tr("veraltet, bitte neu installieren"),
+                inkscape::Status::Current => tr("installiert"),
+            })
+        });
+        let label = if status == inkscape::Status::Missing {
+            tr("Inkscape-Erweiterung installieren")
+        } else {
+            tr("Inkscape-Erweiterung neu installieren")
+        };
+        if ui.button(label).clicked() {
+            let result = match (&target, &program) {
+                (Some(dir), Some(program)) => inkscape::install(dir, program),
+                _ => Err(tr("Erweiterungsordner von Inkscape unbekannt").into()),
+            };
+            self.inkscape = None;
+            match result {
+                Ok(dir) => {
+                    self.status = tr!(
+                        "Inkscape-Erweiterung installiert in {path}. Inkscape neu starten.",
+                        path = dir.display()
+                    )
+                }
+                Err(e) => self.report(tr!(
+                    "Inkscape-Erweiterung nicht installiert: {error}",
+                    error = e
+                )),
+            }
+        }
+        form::caption(
+            ui,
+            tr(
+                "In Inkscape unter Erweiterungen → Lasercut Path: „Add to VisiCutR“ fügt die Zeichnung oder Auswahl als Teil hinzu, „Open in VisiCutR“ ersetzt das Projekt. Läuft VisiCutR schon, öffnet sich die Datei dort.",
+            ),
+        );
     }
 
     /// Kopf der Seitenleiste „Vorbereiten“: aktiver Lasercutter wie die
@@ -3445,6 +3524,22 @@ impl eframe::App for VisiCutR {
         if !dropped.is_empty() && !self.modal_open() {
             self.drop_files(ctx, dropped);
         }
+        // Ein späterer Start hat Dateien übergeben: Fenster nach vorn holen.
+        // Wartet ein Dialog, bleibt die Anfrage bis zu seinem Ende liegen.
+        if self.handed_over.is_none()
+            && let Some(request) = self.instance.as_ref().and_then(|i| i.try_recv())
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            self.handed_over = Some(request);
+        }
+        if !self.modal_open()
+            && !self.busy()
+            && self.pending_import.is_none()
+            && let Some(request) = self.handed_over.take()
+        {
+            self.open_request(ctx, request);
+        }
         self.keyboard(ctx);
         if let Some(object) = self.jobs.take_deleted_object() {
             self.delete_objects(ctx, &[object]);
@@ -3601,6 +3696,19 @@ fn window_icon() -> Option<egui::IconData> {
 }
 
 fn main() -> eframe::Result {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let launch = match instance::parse(std::env::args().skip(1), &cwd) {
+        Ok(launch) => launch,
+        Err(message) => {
+            eprintln!("{message}");
+            std::process::exit(2);
+        }
+    };
+    // Läuft VisiCutR schon, öffnet das dortige Fenster die Dateien.
+    if launch.forwards() && instance::forward(&visicut_core::device::config_dir(), &launch.request)
+    {
+        return Ok(());
+    }
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1240.0, 820.0])
         .with_min_inner_size([900.0, 620.0])
@@ -3615,7 +3723,7 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "VisiCutR",
         options,
-        Box::new(|cc| Ok(Box::new(VisiCutR::new(cc)))),
+        Box::new(|cc| Ok(Box::new(VisiCutR::new(cc, launch)))),
     )
 }
 

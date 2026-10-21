@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Teil von VisiCutR; wird von VisiCutR (Einstellungen → Allgemein) installiert. -->
+<inkscape-extension xmlns="http://www.inkscape.org/namespace/inkscape/extension">
+  <name>Add to VisiCutR</name>
+  <id>io.github.dbambus.visicutr.add</id>
+  <param name="add" type="bool" gui-hidden="true">true</param>
+  <effect needs-live-preview="false">
+    <object-type>all</object-type>
+    <effects-menu>
+      <submenu name="Lasercut Path"/>
+    </effects-menu>
+  </effect>
+  <script>
+    <command location="inx" interpreter="python">visicutr_export.py</command>
+  </script>
+</inkscape-extension>

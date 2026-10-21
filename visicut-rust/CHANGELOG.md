@@ -5,6 +5,15 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
 
 ## Unveröffentlicht
 
+- **Inkscape-Anbindung** wie in Java-VisiCut: Die Erweiterung „Add to
+  VisiCutR“ / „Open in VisiCutR“ (Erweiterungen → Lasercut Path) schickt die
+  Zeichnung oder Auswahl an VisiCutR. Installiert wird sie unter
+  Einstellungen → Allgemein → Inkscape; der Download enthält sie zusätzlich
+  unter `inkscape-extension/`.
+- **Eine Instanz:** Ein weiterer Start (`visicutr datei.svg`,
+  `visicutr --add datei.svg`) übergibt die Dateien an das laufende Fenster
+  und holt es nach vorn. Unbekannte Optionen werden mit einer Hilfe
+  abgelehnt.
 - **Neuer Name VisiCutR** mit eigenem Logo (VC mit hochgestelltem R).
   Programm `visicutr`, macOS `VisiCutR.app`, Downloads `VisiCutR-…`,
   Repository `dbambus/VisiCutR`. Der Einstellungsordner von VisiCutRust

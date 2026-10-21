@@ -890,5 +890,16 @@
   "Unterschied zum Foto des leeren Betts": "Différence avec la photo du plateau vide",
   "Zuerst das leere Bett als Referenz speichern": "Enregistrez d'abord le plateau vide comme référence",
   "{count} Reststück(e) · größtes etwa {width} × {height} mm": "{count} chute(s) · la plus grande env. {width} × {height} mm",
-  "Reststücke als Teil eingefügt; kein Schneid-Profil für dieses Material: Leistung und Geschwindigkeit prüfen": "Chutes insérées comme pièce ; pas de profil de découpe pour ce matériau : vérifier la puissance et la vitesse"
+  "Reststücke als Teil eingefügt; kein Schneid-Profil für dieses Material: Leistung und Geschwindigkeit prüfen": "Chutes insérées comme pièce ; pas de profil de découpe pour ce matériau : vérifier la puissance et la vitesse",
+  "Inkscape": "Inkscape",
+  "Erweiterung": "Extension",
+  "nicht installiert": "non installée",
+  "veraltet, bitte neu installieren": "obsolète, veuillez la réinstaller",
+  "installiert": "installée",
+  "Inkscape-Erweiterung installieren": "Installer l’extension Inkscape",
+  "Inkscape-Erweiterung neu installieren": "Réinstaller l’extension Inkscape",
+  "Erweiterungsordner von Inkscape unbekannt": "Dossier des extensions d’Inkscape inconnu",
+  "Inkscape-Erweiterung installiert in {path}. Inkscape neu starten.": "Extension Inkscape installée dans {path}. Redémarrez Inkscape.",
+  "Inkscape-Erweiterung nicht installiert: {error}": "Extension Inkscape non installée : {error}",
+  "In Inkscape unter Erweiterungen → Lasercut Path: „Add to VisiCutR“ fügt die Zeichnung oder Auswahl als Teil hinzu, „Open in VisiCutR“ ersetzt das Projekt. Läuft VisiCutR schon, öffnet sich die Datei dort.": "Dans Inkscape, sous Extensions → Lasercut Path : « Add to VisiCutR » ajoute le dessin ou la sélection comme pièce, « Open in VisiCutR » remplace le projet. Si VisiCutR est déjà ouvert, le fichier s’y ouvre."
 }

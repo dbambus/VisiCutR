@@ -32,6 +32,8 @@ cp ../COPYING.LESSER "$app/Contents/Resources/COPYING.LESSER"
 cp README.md "$app/Contents/Resources/README.md"
 cp PROTOCOL.md "$app/Contents/Resources/PROTOCOL.md"
 cp resources/materials.json "$app/Contents/Resources/materials.json"
+# Inkscape-Erweiterung zum Installieren von Hand (VisiCutR installiert sie auch selbst).
+cp -R resources/inkscape "$app/Contents/Resources/inkscape-extension"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

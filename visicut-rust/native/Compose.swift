@@ -35,7 +35,7 @@ extension AppModel {
             let oldObjects = objects.count
             // Nach einem Teilwechsel gehören Schritte und Objektnummern zu einem
             // anderen Teil; Dateien als Teile behalten ihre eigenen Zuordnungen.
-            let switchesPart = ["append", "select_part", "remove_part", "duplicate_part"].contains(action)
+            let switchesPart = ["append", "select_part", "remove_part", "duplicate_part", "insert_remnants"].contains(action)
             let before = UndoState(project: project, image: image, objects: objects)
             let response: ProjectResponse = try RustCore.decode(action, project: project, values: values)
             accept(response, dirty: true)

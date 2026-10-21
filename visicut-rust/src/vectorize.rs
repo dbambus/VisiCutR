@@ -187,7 +187,7 @@ const DIRECTIONS: [(i64, i64); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
 /// Verfolgt alle Umrisskanten zwischen Motiv und Hintergrund. Jede Kante liegt
 /// so, dass das Motiv in Laufrichtung immer rechts liegt (Bildschirmkoordinaten,
 /// y nach unten). Dadurch sind äußere Konturen und Löcher gegenläufig.
-fn trace(mask: &[bool], width: usize, height: usize) -> Vec<Vec<[f64; 2]>> {
+pub(crate) fn trace(mask: &[bool], width: usize, height: usize) -> Vec<Vec<[f64; 2]>> {
     let (w, h) = (width as i64, height as i64);
     let filled = |x: i64, y: i64| x >= 0 && y >= 0 && x < w && y < h && mask[(y * w + x) as usize];
     let edge = |x: i64, y: i64, dir: usize| match dir {
@@ -252,7 +252,7 @@ fn turn(from: usize, to: usize) -> i64 {
 
 /// Douglas-Peucker für geschlossene Ringe: Der Startpunkt und sein am weitesten
 /// entfernter Punkt teilen den Ring in zwei offene Züge.
-fn simplify_closed(ring: &[[f64; 2]], tolerance: f64) -> Vec<[f64; 2]> {
+pub(crate) fn simplify_closed(ring: &[[f64; 2]], tolerance: f64) -> Vec<[f64; 2]> {
     let n = ring.len();
     if n < 3 {
         return ring.to_vec();

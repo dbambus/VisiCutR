@@ -3,6 +3,17 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## Unveröffentlicht
+
+- **Reststücke erkennen** (Menü **Darstellung**, egui und macOS): findet
+  Materialreste im entzerrten Kamerabild und zeigt ihre Umrisse mit Fläche auf
+  dem Arbeitsbett. Material wird an der Helligkeit (heller oder dunkler als
+  das Bett) oder, zuverlässiger, am Unterschied zu einem gespeicherten Foto
+  des leeren Betts erkannt. Einstellbar sind Schwellwert (sonst automatisch
+  nach Otsu), Glättung gegen Wabe und Lamellen, Sicherheitsabstand nach innen
+  und Mindestfläche; ausgeschnittene Löcher bleiben erhalten. **Als Teil
+  einfügen** legt die Umrisse als Schneid-Teil an ihre Stelle (widerrufbar).
+
 ## 0.19.0 – 16.10.2026
 
 - **Zeichnung größer als die Zeichenfläche** (egui): Ragt eine importierte

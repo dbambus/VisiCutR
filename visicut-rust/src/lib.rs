@@ -11,6 +11,7 @@ pub mod materials;
 pub mod overlap;
 pub mod project;
 pub mod raster;
+pub mod remnant;
 pub mod selection;
 pub mod session;
 pub mod shift_calibration;

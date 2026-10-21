@@ -160,6 +160,65 @@ fn vectorize(request: &Value) -> Result<Value, String> {
     Ok(response)
 }
 
+/// Referenzbild (leeres Bett) des Lasercutters `device_name`.
+fn remnant_reference_path(request: &Value) -> Result<std::path::PathBuf, String> {
+    let name = request["device_name"]
+        .as_str()
+        .ok_or(tr("Lasercutter fehlt"))?;
+    Ok(crate::remnant::reference_path(&device::config_dir(), name))
+}
+
+/// Reststücke erkennen (wie `remnant_ui` der egui-Oberfläche) im entzerrten
+/// Kamerabild unter `path` (PNG von `camera_background`). `method`:
+/// "reference" (Unterschied zum Referenzbild), "lighter" oder "darker";
+/// `threshold` null: automatisch.
+fn detect_remnants(request: &Value) -> Result<Value, String> {
+    use crate::remnant::{Contrast, Options};
+    let project = get_project(request)?;
+    let image = camera::decode(&std::fs::read(path(request)?).map_err(|e| e.to_string())?)?;
+    let reference_path = remnant_reference_path(request)?;
+    let reference = crate::remnant::load_reference(&reference_path);
+    let defaults = Options::default();
+    let number = |key: &str, default: f64| request[key].as_f64().unwrap_or(default);
+    let (contrast, use_reference) = match request["method"].as_str().unwrap_or("lighter") {
+        "reference" => (Contrast::Lighter, true),
+        "darker" => (Contrast::Darker, false),
+        _ => (Contrast::Lighter, false),
+    };
+    if use_reference && reference.is_none() {
+        return Err(tr("Zuerst das leere Bett als Referenz speichern").into());
+    }
+    let threshold = match &request["threshold"] {
+        Value::Null => None,
+        value => Some(
+            value
+                .as_u64()
+                .and_then(|v| u8::try_from(v).ok())
+                .ok_or(tr("Schwellwert muss zwischen 0 und 255 liegen"))?,
+        ),
+    };
+    let options = Options {
+        contrast,
+        threshold,
+        smoothing_mm: number("smoothing_mm", defaults.smoothing_mm),
+        margin_mm: number("margin_mm", defaults.margin_mm),
+        min_area_mm2: number("min_area_mm2", defaults.min_area_mm2),
+        ..defaults
+    };
+    let detection = crate::remnant::detect(
+        &image,
+        reference.as_ref().filter(|_| use_reference),
+        [
+            f64::from(project.bed_width_mm),
+            f64::from(project.bed_height_mm),
+        ],
+        &options,
+    )?;
+    let bounds: Vec<[f64; 4]> = detection.remnants.iter().map(|r| r.bounds()).collect();
+    Ok(json!({"remnants": detection.remnants, "bounds": bounds,
+        "threshold": detection.threshold, "has_reference": reference.is_some()}))
+}
+
 pub(crate) fn execute(request: &Value) -> Result<Value, String> {
     match request["action"].as_str().unwrap_or("") {
         "default" => Ok(json!({"project": Project::default()})),
@@ -321,6 +380,28 @@ pub(crate) fn execute(request: &Value) -> Result<Value, String> {
             )?;
             Ok(json!({"png": png}))
         }
+        "detect_remnants" => detect_remnants(request),
+        // Referenzbild: mit `path` speichern, mit `delete` löschen, sonst abfragen.
+        "remnant_reference" => {
+            let target = remnant_reference_path(request)?;
+            if request["delete"].as_bool().unwrap_or(false) {
+                match std::fs::remove_file(&target) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.to_string()),
+                    _ => {}
+                }
+            } else if let Some(source) = request["path"].as_str() {
+                let image = camera::decode(&std::fs::read(source).map_err(|e| e.to_string())?)?;
+                crate::remnant::save_reference(&target, &image)?;
+            }
+            Ok(json!({"has_reference": target.exists()}))
+        }
+        "insert_remnants" => composed(
+            crate::remnant::add_part(
+                &get_project(request)?,
+                &get::<Vec<crate::remnant::Remnant>>(request, "remnants")?,
+            )?,
+            Vec::new(),
+        ),
         "calibration_page" => {
             let mut project = get_project(request)?;
             let points: Vec<[f64; 2]> = get(request, "reference_points")?;
@@ -719,6 +800,65 @@ mod tests {
         assert!(result["project"]["steps"].as_array().unwrap().is_empty());
     }
 
+    /// Reststücke erkennen, Referenzbild speichern und löschen, einfügen.
+    /// Läuft in `device_actions_…`, das als einziger Test das
+    /// Konfigurationsverzeichnis umlenkt.
+    fn remnant_actions(config: &std::path::Path) {
+        let dir = config.join("remnants");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Kamera.png");
+        let empty = dir.join("Leer.png");
+        // Bett 1000 × 600 mm mit 0,5 px/mm: dunkel, helles Stück bei 100/50 mm, 300 × 200 mm.
+        image::RgbaImage::from_fn(500, 300, |x, y| {
+            if (50..200).contains(&x) && (25..125).contains(&y) {
+                image::Rgba([210, 180, 130, 255])
+            } else {
+                image::Rgba([35, 35, 35, 255])
+            }
+        })
+        .save(&path)
+        .unwrap();
+        image::RgbaImage::from_pixel(500, 300, image::Rgba([35, 35, 35, 255]))
+            .save(&empty)
+            .unwrap();
+        let mut project = Project::default();
+        (project.bed_width_mm, project.bed_height_mm) = (1000.0, 600.0);
+        let device = "Testgerät";
+        let detect = |method: &str| {
+            execute(
+                &json!({"action": "detect_remnants", "project": project, "path": path,
+                "device_name": device, "method": method, "threshold": null,
+                "smoothing_mm": 4.0, "margin_mm": 0.0, "min_area_mm2": 400.0}),
+            )
+        };
+        let lighter = detect("lighter").unwrap();
+        let without_reference = detect("reference");
+        let saved =
+            execute(&json!({"action": "remnant_reference", "device_name": device, "path": empty}));
+        let referenced = detect("reference");
+        let deleted =
+            execute(&json!({"action": "remnant_reference", "device_name": device, "delete": true}));
+        let inserted = execute(&json!({"action": "insert_remnants", "project": project,
+            "remnants": lighter["remnants"]}));
+        assert!(!config.join("camera-references/Testgerät.png").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(lighter["remnants"].as_array().unwrap().len(), 1);
+        assert_eq!(lighter["has_reference"], false);
+        let bounds = &lighter["bounds"][0];
+        assert!((bounds[0].as_f64().unwrap() - 100.0).abs() < 3.0);
+        assert!((bounds[2].as_f64().unwrap() - 300.0).abs() < 5.0);
+        assert!(without_reference.unwrap_err().contains("Referenz"));
+        assert_eq!(saved.unwrap()["has_reference"], true);
+        let referenced = referenced.unwrap();
+        assert_eq!(referenced["has_reference"], true);
+        assert_eq!(referenced["remnants"].as_array().unwrap().len(), 1);
+        assert_eq!(deleted.unwrap()["has_reference"], false);
+        let inserted = inserted.unwrap();
+        assert_eq!(inserted["project"]["operation"], "Cut");
+        assert_eq!(inserted["objects"].as_array().unwrap().len(), 1);
+    }
+
     #[test]
     fn vectorize_previews_and_replaces_artwork_like_an_import() {
         let dir =
@@ -795,6 +935,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("visicut-bridge-{}", std::process::id()));
         // Only this test reads the configuration directory.
         unsafe { std::env::set_var("VISICUT_RUST_CONFIG_DIR", &dir) };
+        remnant_actions(&dir);
         let listed = execute(&json!({"action": "devices"})).unwrap();
         assert_eq!(
             listed["store"]["devices"][0]["camera_url"],

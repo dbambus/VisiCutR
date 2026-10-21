@@ -110,6 +110,8 @@ pub struct DeviceUi {
     draft: Option<(DeviceStore, usize)>,
     show_camera: bool,
     camera: Option<egui::TextureHandle>,
+    /// Das zuletzt geladene entzerrte Kamerabild (Reststück-Erkennung).
+    camera_image: Option<std::sync::Arc<image::RgbaImage>>,
     camera_loading: Option<Pending>,
     /// Laufende Kamera-Aktualisierung: nächstes Bild und Fehler in Folge.
     camera_next: Option<std::time::Instant>,
@@ -137,6 +139,7 @@ impl DeviceUi {
             draft: None,
             show_camera: false,
             camera: None,
+            camera_image: None,
             camera_loading: None,
             camera_next: None,
             camera_errors: 0,
@@ -194,6 +197,18 @@ impl DeviceUi {
         self.camera_loading.is_some()
     }
 
+    /// Zuletzt geladenes Kamerabild, auf das Bett entzerrt.
+    pub fn camera_image(&self) -> Option<std::sync::Arc<image::RgbaImage>> {
+        self.camera_image.clone()
+    }
+
+    /// Blendet das Kamerabild ein (lädt es, falls nötig).
+    pub fn show_camera(&mut self, project: &Project) {
+        if !self.show_camera {
+            self.toggle_camera(project);
+        }
+    }
+
     /// Kamerabild ein- oder ausblenden; lädt es beim ersten Einblenden.
     pub fn toggle_camera(&mut self, project: &Project) {
         if !self.has_camera() {
@@ -221,6 +236,7 @@ impl DeviceUi {
         self.store = store;
         if camera_changed {
             self.camera = None;
+            self.camera_image = None;
             self.show_camera = false;
         }
         self.apply(project);
@@ -307,6 +323,7 @@ impl DeviceUi {
         match poll(&mut self.camera_loading, ctx) {
             Some(Ok(image)) => {
                 self.camera = Some(texture(ctx, "Kamera", &image));
+                self.camera_image = Some(std::sync::Arc::new(image));
                 if refresh == 0 || self.camera_errors > 0 {
                     *status = tr("Kamerabild aktualisiert").into();
                 }

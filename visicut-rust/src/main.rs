@@ -1537,6 +1537,11 @@ impl VisiCutR {
                     self.jobs.rules_settings(ui, &mut self.project, &mut self.dirty);
                 });
             });
+            form::section(ui, tr("Eigene Vorlagen"), |ui| {
+                ui.add_enabled_ui(!self.busy(), |ui| {
+                    self.jobs.own_templates(ui, &self.project);
+                });
+            });
             form::section(ui, tr("Ignorieren"), |ui| {
                 ui.add_enabled_ui(!self.busy(), |ui| {
                     self.jobs.ignore_rules(ui, &mut self.project, &mut self.dirty);

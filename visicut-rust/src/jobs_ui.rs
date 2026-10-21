@@ -1210,9 +1210,6 @@ impl JobUi {
             *dirty = true;
         }
         let profile = preset(self.active(), project, project.operation).cloned();
-        if project.operation == Operation::Mark && profile.is_none() {
-            crate::form::caption(ui, tr("Konturen markieren. Eigene Leistung einstellen."));
-        }
         *dirty |= parameters(
             ui,
             &mut project.power_percent,

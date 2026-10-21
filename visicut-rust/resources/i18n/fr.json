@@ -215,7 +215,6 @@
   "Ist der Lasercutter eingeschaltet, blockiert macOS vermutlich den Zugriff auf das lokale Netzwerk. Unter Systemeinstellungen → Datenschutz & Sicherheit → Lokales Netzwerk VisiCutR erlauben und erneut senden.": "Si la découpeuse laser est allumée, macOS bloque probablement l'accès au réseau local. Autorisez VisiCutR dans Réglages Système → Confidentialité et sécurité → Réseau local, puis renvoyez.",
   "Keine VisiCut-Gerätedatei": "Pas un fichier d'appareils VisiCut",
   "Keine auswählbaren Objekte in der SVG.": "Aucun objet sélectionnable dans le SVG.",
-  "Konturen markieren. Eigene Leistung einstellen.": "Marquer les contours. Régler une puissance personnalisée.",
   "Kopien im Raster": "Copies en grille",
   "Kopien im Raster …": "Copies en grille …",
   "Kursiv": "Italique",

@@ -277,10 +277,18 @@ enum SettingsPage {
     Materials,
     Job,
     General,
+    /// Erweiterungen für Zeichenprogramme (Inkscape, später weitere).
+    AddIns,
 }
 
 impl SettingsPage {
-    const ALL: [Self; 4] = [Self::General, Self::Devices, Self::Materials, Self::Job];
+    const ALL: [Self; 5] = [
+        Self::General,
+        Self::Devices,
+        Self::Materials,
+        Self::Job,
+        Self::AddIns,
+    ];
 
     /// Name in der linken Leiste und zugleich Überschrift der Seite.
     fn title(self) -> &'static str {
@@ -289,6 +297,7 @@ impl SettingsPage {
             Self::Materials => tr("Materialien"),
             Self::Job => tr("Job"),
             Self::General => tr("Allgemein"),
+            Self::AddIns => tr("Software-Add-ins"),
         }
     }
 }
@@ -491,6 +500,7 @@ impl VisiCutR {
                 Some("materials") => app.show_settings(SettingsPage::Materials),
                 Some("job") => app.show_settings(SettingsPage::Job),
                 Some("general") => app.show_settings(SettingsPage::General),
+                Some("addins") => app.show_settings(SettingsPage::AddIns),
                 _ => {}
             }
         }
@@ -1534,6 +1544,7 @@ impl VisiCutR {
                     SettingsPage::Materials => self.jobs.library_page(ui, &mut self.status),
                     SettingsPage::Job => self.job_page(ui),
                     SettingsPage::General => self.general_page(ui),
+                    SettingsPage::AddIns => self.add_ins_page(ui),
                 }
             });
     }
@@ -1697,7 +1708,6 @@ impl VisiCutR {
                     }
                 });
             });
-            form::section(ui, tr("Inkscape"), |ui| self.inkscape_section(ui));
             if cfg!(windows) {
                 self.file_types_section(ui);
             }
@@ -1725,6 +1735,22 @@ impl VisiCutR {
                 form::caption(ui, tr("Rust-Neuentwicklung auf Grundlage von VisiCut (Thomas Oster und Mitwirkende, LGPL). Ohne Gewähr; Aufträge vor dem Starten am Gerät prüfen."));
             });
         });
+    }
+
+    /// Einstellungen → Software-Add-ins: Erweiterungen, mit denen
+    /// Zeichenprogramme ihre Zeichnung direkt an VisiCutR schicken.
+    fn add_ins_page(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                form::caption(
+                    ui,
+                    tr("Erweiterungen für Zeichenprogramme: Sie schicken die Zeichnung direkt an VisiCutR, ohne Speichern und Öffnen."),
+                );
+                ui.add_space(6.0);
+                form::section(ui, tr("Inkscape"), |ui| self.inkscape_section(ui));
+            });
     }
 
     /// Installiert die Inkscape-Erweiterung „Add to VisiCutR“ wie das Menü

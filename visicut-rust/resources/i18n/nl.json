@@ -944,5 +944,7 @@
   "Info": "Info",
   "Lizenz": "Licentie",
   "Programm": "Programma",
-  "Rust-Neuentwicklung auf Grundlage von VisiCut (Thomas Oster und Mitwirkende, LGPL). Ohne Gewähr; Aufträge vor dem Starten am Gerät prüfen.": "Rust-herimplementatie op basis van VisiCut (Thomas Oster en bijdragers, LGPL). Zonder garantie; controleer opdrachten op de machine voordat je ze start."
+  "Rust-Neuentwicklung auf Grundlage von VisiCut (Thomas Oster und Mitwirkende, LGPL). Ohne Gewähr; Aufträge vor dem Starten am Gerät prüfen.": "Rust-herimplementatie op basis van VisiCut (Thomas Oster en bijdragers, LGPL). Zonder garantie; controleer opdrachten op de machine voordat je ze start.",
+  "Software-Add-ins": "Software-add-ins",
+  "Erweiterungen für Zeichenprogramme: Sie schicken die Zeichnung direkt an VisiCutR, ohne Speichern und Öffnen.": "Uitbreidingen voor tekenprogramma's: ze sturen de tekening direct naar VisiCutR, zonder opslaan en openen."
 }

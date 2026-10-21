@@ -11,7 +11,9 @@ pub const TOPBAR: Color32 = Color32::from_rgb(38, 46, 48);
 /// Hintergrund der Seitenleiste (weiß wie in Bambu Studio).
 pub const SIDEBAR: Color32 = Color32::WHITE;
 /// Kopfleisten der Bereiche.
-const HEADER: Color32 = Color32::from_gray(245);
+const HEADER: Color32 = Color32::from_gray(233);
+/// Linien über und unter den Bereichsköpfen, dunkler als [`DIVIDER`].
+const HEADER_LINE: Color32 = Color32::from_gray(178);
 /// Hintergrund hinter dem Arbeitsbett.
 pub const CANVAS: Color32 = Color32::from_gray(226);
 const CARD_STROKE: Color32 = Color32::from_gray(218);
@@ -386,7 +388,7 @@ pub fn panel_header(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::
         })
         .response;
     let rect = response.rect;
-    let stroke = Stroke::new(1.0, DIVIDER);
+    let stroke = Stroke::new(1.0, HEADER_LINE);
     ui.painter().hline(rect.x_range(), rect.top(), stroke);
     ui.painter().hline(rect.x_range(), rect.bottom(), stroke);
 }

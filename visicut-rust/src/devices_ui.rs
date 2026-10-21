@@ -77,6 +77,8 @@ struct Calibration {
     expected: Option<camera::Mapping>,
     /// Objektiv, mit dem die Kalibrierung die Verzeichnung bestimmt.
     lens: LensChoice,
+    /// Zuletzt gewählte Anordnung; „Zurücksetzen“ stellt sie wieder her.
+    grid: Grid,
     /// Restfehler und Linse der aktuellen Punkte (Text für den Dialog).
     quality: Option<String>,
     /// Grauwerte des Fotos für die Kreuzerkennung.
@@ -745,8 +747,10 @@ impl DeviceUi {
                 Some("generic") => LensChoice::Generic,
                 _ => LensChoice::RaspberryPiV2,
             };
+            let grid = Grid::of(&points.reference_points);
             self.calibration = Some(Calibration {
                 lens,
+                grid,
                 quality: None,
                 expected: None,
                 device,
@@ -1092,6 +1096,18 @@ enum Grid {
 }
 
 impl Grid {
+    /// Anordnung zu gespeicherten Punkten: die passende, sonst nach Anzahl.
+    fn of(points: &[[f64; 2]]) -> Self {
+        [Self::Fine, Self::Coarse]
+            .into_iter()
+            .find(|g| g.points() == points)
+            .unwrap_or(if points.len() <= 6 {
+                Self::Coarse
+            } else {
+                Self::Fine
+            })
+    }
+
     fn label(self) -> &'static str {
         match self {
             Self::Fine => tr("5 × 3 Kreuze"),
@@ -1278,6 +1294,7 @@ fn calibration_panel(ui: &mut egui::Ui, c: &mut Calibration, height: f32) {
                         .on_hover_text(tr("5 × 3: 15 Kreuze gleichmäßig über das Bett, genauer und für die Linsenkorrektur. 3 × 2: 6 Kreuze wie bisher. Nach dem Wechsel die Kalibrierseite neu öffnen und markieren."));
                 });
                 if let Some(grid) = chosen.filter(|g| Some(*g) != current) {
+                    c.grid = grid;
                     set_grid(c, grid);
                 }
                 ui.add_space(4.0);
@@ -1309,7 +1326,8 @@ fn calibration_panel(ui: &mut egui::Ui, c: &mut Calibration, height: f32) {
                 ui.add_space(4.0);
                 let has_picture = c.picture.is_some();
                 let removable = c.points.reference_points.len() > 2;
-                list_footer(ui, 120.0, |ui| {
+                let moved = c.points.reference_points != c.grid.points();
+                list_footer(ui, ui.available_width(), |ui| {
                     if list_button(ui, Icon::Plus, has_picture, tr("Punkt hinzufügen"))
                         && let Some((_, size)) = &c.picture
                     {
@@ -1323,6 +1341,18 @@ fn calibration_panel(ui: &mut egui::Ui, c: &mut Calibration, height: f32) {
                             c.points.view_points.remove(c.selected);
                         }
                         c.selected = c.selected.saturating_sub(1);
+                    }
+                    ui.add_space(6.0);
+                    let grid = c.grid;
+                    if ui
+                        .add_enabled(moved, egui::Button::new(tr("Zurücksetzen")))
+                        .on_hover_text(tr!(
+                            "Punkte wieder auf die Anordnung „{grid}“ setzen",
+                            grid = grid.label()
+                        ))
+                        .clicked()
+                    {
+                        set_grid(c, grid);
                     }
                 });
             });
@@ -1348,7 +1378,6 @@ fn calibration_panel(ui: &mut egui::Ui, c: &mut Calibration, height: f32) {
             }
             crate::form::section(ui, tr("Bedienung"), |ui| {
                 crate::form::caption(ui, tr("1. Kalibrierseite öffnen und markieren.\n2. Foto aufnehmen.\n3. Marker auf die Kreuze ziehen (Nummer = Anzahl Striche).\nMindestens 4 Punkte."));
-                crate::form::caption(ui, tr("Zoomen: zwei Finger oder ⌘/Strg + Mausrad. Verschieben: scrollen oder mit rechter Maustaste ziehen. Pfeiltasten: Punkt fein verschieben (⇧: weiter)."));
             });
         });
 }

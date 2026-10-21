@@ -830,7 +830,6 @@
   "Auf Punkt": "To point",
   "Ganzes Foto": "Whole photo",
   "Gewählten Punkt vergrößert in die Mitte holen": "Zoom in on the selected point",
-  "Zoomen: zwei Finger oder ⌘/Strg + Mausrad. Verschieben: scrollen oder mit rechter Maustaste ziehen. Pfeiltasten: Punkt fein verschieben (⇧: weiter).": "Zoom: pinch or ⌘/Ctrl + mouse wheel. Pan: scroll or drag with the right mouse button. Arrow keys: nudge the point (⇧: further).",
   "Kreuze erkennen": "Detect crosses",
   "Setzt jeden Punkt genau auf die Mitte des gelaserten Kreuzes in seiner Nähe. Punkte vorher grob in die Nähe ziehen.": "Moves each point exactly onto the centre of the lasered cross nearby. Drag the points roughly into place first.",
   "Kreuze erkannt: {found} von {total}": "Crosses detected: {found} of {total}",
@@ -949,5 +948,6 @@
   "Gewählten Punkt entfernen": "Remove selected point",
   "Kalibrierpunkte": "Calibration points",
   "Punkt hinzufügen": "Add point",
-  "Status": "Status"
+  "Status": "Status",
+  "Punkte wieder auf die Anordnung „{grid}“ setzen": "Reset the points to the “{grid}” layout"
 }

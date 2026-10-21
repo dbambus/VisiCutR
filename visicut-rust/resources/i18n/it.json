@@ -830,7 +830,6 @@
   "Auf Punkt": "Sul punto",
   "Ganzes Foto": "Foto intera",
   "Gewählten Punkt vergrößert in die Mitte holen": "Ingrandisci e centra il punto selezionato",
-  "Zoomen: zwei Finger oder ⌘/Strg + Mausrad. Verschieben: scrollen oder mit rechter Maustaste ziehen. Pfeiltasten: Punkt fein verschieben (⇧: weiter).": "Zoom: pizzico o ⌘/Ctrl + rotellina. Spostare: scorrere o trascinare con il tasto destro. Frecce: spostare il punto con precisione (⇧: di più).",
   "Kreuze erkennen": "Rileva croci",
   "Setzt jeden Punkt genau auf die Mitte des gelaserten Kreuzes in seiner Nähe. Punkte vorher grob in die Nähe ziehen.": "Sposta ogni punto esattamente al centro della croce incisa vicina. Prima trascinare i punti approssimativamente in posizione.",
   "Kreuze erkannt: {found} von {total}": "Croci rilevate: {found} di {total}",
@@ -949,5 +948,6 @@
   "Gewählten Punkt entfernen": "Rimuovi il punto selezionato",
   "Kalibrierpunkte": "Punti di calibrazione",
   "Punkt hinzufügen": "Aggiungi punto",
-  "Status": "Stato"
+  "Status": "Stato",
+  "Punkte wieder auf die Anordnung „{grid}“ setzen": "Riporta i punti alla disposizione «{grid}»"
 }

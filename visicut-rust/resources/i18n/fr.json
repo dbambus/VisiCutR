@@ -830,7 +830,6 @@
   "Auf Punkt": "Sur le point",
   "Ganzes Foto": "Photo entière",
   "Gewählten Punkt vergrößert in die Mitte holen": "Agrandir et centrer le point sélectionné",
-  "Zoomen: zwei Finger oder ⌘/Strg + Mausrad. Verschieben: scrollen oder mit rechter Maustaste ziehen. Pfeiltasten: Punkt fein verschieben (⇧: weiter).": "Zoom : pincer ou ⌘/Ctrl + molette. Déplacer : défiler ou glisser avec le bouton droit. Flèches : ajuster le point finement (⇧ : plus loin).",
   "Kreuze erkennen": "Détecter les croix",
   "Setzt jeden Punkt genau auf die Mitte des gelaserten Kreuzes in seiner Nähe. Punkte vorher grob in die Nähe ziehen.": "Place chaque point exactement au centre de la croix gravée la plus proche. Glisser d'abord les points à peu près en place.",
   "Kreuze erkannt: {found} von {total}": "Croix détectées : {found} sur {total}",
@@ -949,5 +948,6 @@
   "Gewählten Punkt entfernen": "Supprimer le point sélectionné",
   "Kalibrierpunkte": "Points d'étalonnage",
   "Punkt hinzufügen": "Ajouter un point",
-  "Status": "État"
+  "Status": "État",
+  "Punkte wieder auf die Anordnung „{grid}“ setzen": "Remettre les points dans la disposition « {grid} »"
 }

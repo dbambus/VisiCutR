@@ -830,7 +830,6 @@
   "Auf Punkt": "Naar punt",
   "Ganzes Foto": "Hele foto",
   "Gewählten Punkt vergrößert in die Mitte holen": "Geselecteerd punt vergroot in het midden tonen",
-  "Zoomen: zwei Finger oder ⌘/Strg + Mausrad. Verschieben: scrollen oder mit rechter Maustaste ziehen. Pfeiltasten: Punkt fein verschieben (⇧: weiter).": "Zoomen: knijpen of ⌘/Ctrl + muiswiel. Verschuiven: scrollen of met de rechtermuisknop slepen. Pijltjestoetsen: punt fijn verschuiven (⇧: verder).",
   "Kreuze erkennen": "Kruisen herkennen",
   "Setzt jeden Punkt genau auf die Mitte des gelaserten Kreuzes in seiner Nähe. Punkte vorher grob in die Nähe ziehen.": "Zet elk punt precies op het midden van het gelaserde kruis in de buurt. Sleep de punten eerst ongeveer op hun plek.",
   "Kreuze erkannt: {found} von {total}": "Kruisen herkend: {found} van {total}",
@@ -949,5 +948,6 @@
   "Gewählten Punkt entfernen": "Geselecteerd punt verwijderen",
   "Kalibrierpunkte": "Kalibratiepunten",
   "Punkt hinzufügen": "Punt toevoegen",
-  "Status": "Status"
+  "Status": "Status",
+  "Punkte wieder auf die Anordnung „{grid}“ setzen": "Punten terugzetten naar de indeling „{grid}”"
 }

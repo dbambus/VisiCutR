@@ -9,7 +9,7 @@ description = "VisiCutRust laser job preparation for Windows, Linux, and macOS"
 
 [lib]
 name = "visicut_core"
-crate-type = ["staticlib", "rlib"]
+crate-type = ["rlib"]
 
 [features]
 screenshot = ["eframe/__screenshot"]

@@ -17,19 +17,13 @@ sign() {
     codesign --force --sign - "$@"
   fi
 }
-cargo build --release --lib --bin visicut-cameraserver --locked
-arch="$(uname -m)"
-xcrun swiftc -parse-as-library -swift-version 5 -O \
-  -target "$arch-apple-macosx14.0" \
-  -module-cache-path target/swift-module-cache \
-  native/VisiCutApp.swift native/JobSimulation.swift native/Devices.swift native/Mapping.swift native/Vectorize.swift native/Compose.swift native/Updates.swift native/Remnants.swift target/release/libvisicut_core.a \
-  -o target/release/visicut-native \
-  -framework SwiftUI -framework AppKit -framework CoreFoundation \
-  -framework Security -framework OpenGL -framework CoreGraphics \
-  -liconv -Xlinker -dead_strip
+# Das Bundle enthält die egui-Oberfläche (dieselbe wie unter Windows/Linux).
+cargo build --release --bins --locked
 app="$project_dir/dist/VisiCutRust.app"
+rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp target/release/visicut-native "$app/Contents/MacOS/visicut-rust"
+cp target/release/visicut-rust "$app/Contents/MacOS/visicut-rust"
+sign "$app/Contents/MacOS/visicut-rust"
 cp target/release/visicut-cameraserver "$app/Contents/MacOS/visicut-cameraserver"
 sign "$app/Contents/MacOS/visicut-cameraserver"
 cp ../distribute/mac/MacIcon.icns "$app/Contents/Resources/VisiCut.icns"

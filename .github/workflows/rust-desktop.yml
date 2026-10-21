@@ -179,20 +179,13 @@ jobs:
             echo "notarize=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build and sign native macOS application
+      - name: Build and sign macOS application bundle
         if: runner.os == 'macOS'
         env:
           MACOS_SIGN_IDENTITY: ${{ steps.signing.outputs.identity }}
         run: bash scripts/bundle-macos.sh
 
-      - name: Test native macOS interface and timeline
-        if: runner.os == 'macOS'
-        run: |
-          "dist/VisiCutRust.app/Contents/MacOS/visicut-rust" \
-            --ui-test --capture "$PWD/dist/native-preview.png" \
-            2>&1 | tee dist/native-ui-test.log
-
-      - name: Notarize native macOS application
+      - name: Notarize macOS application
         if: runner.os == 'macOS' && steps.signing.outputs.notarize == 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -216,17 +209,6 @@ jobs:
           name: VisiCutRust-${{ matrix.target }}
           path: visicut-rust/dist/VisiCutRust-*-${{ matrix.target }}.*
           if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload native UI test evidence
-        if: always() && runner.os == 'macOS'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: native-ui-test-${{ matrix.target }}
-          path: |
-            visicut-rust/dist/native-preview.png
-            visicut-rust/dist/native-ui-test.log
-          if-no-files-found: ignore
           retention-days: 14
 
   release:

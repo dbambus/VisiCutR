@@ -1,7 +1,7 @@
 # VisiCutRust für Windows, Linux und macOS
 
-Native macOS-Oberfläche mit AppKit und SwiftUI, SVG-Verarbeitung und
-LTT-Treiber in Rust. Der Java-Quellbaum bleibt separat.
+egui-Oberfläche, SVG-Verarbeitung und LTT-Treiber in Rust, auf allen drei
+Plattformen gleich. Der Java-Quellbaum bleibt separat.
 Erster Ziel-Lasercutter: LTT iLaser 4000 des FAU FabLabs.
 
 ## Starten
@@ -31,12 +31,14 @@ Das Bundle ist lokal ad hoc signiert. Mit
 Skript mit einer Developer ID (Hardened Runtime); die CI notarisiert dann
 auch, wenn die Secrets hinterlegt sind (siehe README im Hauptverzeichnis).
 
+Zum Entwickeln startet `cargo run --release --bin visicut-rust` dieselbe
+Oberfläche direkt.
+
 ## Windows, Linux und GitHub Actions
 
-macOS hat eine native AppKit-/SwiftUI-Oberfläche, Windows und Linux eine
-egui-Oberfläche im üblichen Stil der Plattform (Kürzel mit Strg statt ⌘).
-Beide nutzen denselben Rust-Kern und bieten dieselben Funktionen:
-Menüleiste, Zoom und Lineale, Einzel- und Regelzuordnung mit Wertvorschlägen,
+Alle drei Plattformen nutzen dieselbe egui-Oberfläche (unter Windows und
+Linux Kürzel mit Strg statt ⌘) mit denselben Funktionen:
+Zoom und Lineale, Einzel- und Regelzuordnung mit Wertvorschlägen,
 Materialbibliothek, Parametersätze, Bitmap-Vektorisierung, Schnittreihenfolge,
 Text, Formen, Schilder, Kopien und Nesting,
 Vorschau mit Zeitschätzung und Zeitslider, Geräte mit Maschinenwerten und
@@ -48,13 +50,12 @@ Der Workflow **VisiCutRust releases** baut drei native Ziele auf GitHub-gehostet
 | --- | --- | --- |
 | Windows x64 / MSVC | egui | ZIP mit EXE |
 | Linux x64 / Ubuntu 24.04 | egui, X11/Wayland | tar.gz mit ausführbarer Datei |
-| macOS Apple Silicon | native AppKit/SwiftUI | ZIP mit `.app` |
+| macOS Apple Silicon | egui | ZIP mit `.app` |
 
 Bei Pull Requests und Änderungen an `master`/`main` laufen Rust-Tests auf
 allen drei Zielen. Linux prüft zusätzlich Formatierung und Clippy; das
-Mac-Ziel baut und signiert das Bundle und testet die native Oberfläche
-einschließlich Zeitslider. TCP-Tests verwenden ausschließlich localhost.
-Die Downloads und Mac-Testbilder liegen unter **Actions → VisiCutRust releases →
+Mac-Ziel baut und signiert das Bundle. TCP-Tests verwenden ausschließlich
+localhost. Die Downloads liegen unter **Actions → VisiCutRust releases →
 Artifacts** (14 Tage Aufbewahrung). Ein Push auf `master` veröffentlicht
 nach erfolgreichen Builds auf allen drei Zielen ein vollständiges
 [GitHub Release](https://github.com/dbambus/VisiCutRust/releases)
@@ -436,36 +437,13 @@ die macOS-App holt sie über die Brückenaktion `set_language`. Ein Test prüft,
 dass jeder Text aus `src/` und `native/` in jeder Sprache mit denselben
 Platzhaltern übersetzt ist und keine veralteten Einträge bleiben. `cargo test --lib i18n::tests::export_missing -- --ignored`
 schreibt fehlende Texte nach `target/i18n/missing-<sprache>.json`.
-Die native macOS-Menüleiste bietet Ablage, Bearbeiten, Darstellung und Job.
-Die Oberfläche verwendet Systemschrift, Systemfarben, native Werkzeugleiste,
-Systemdialoge und automatische Hell-/Dunkel-Darstellung.
 
-## Entwicklung und UI-Test
+## Entwicklung
 
-`src/lib.rs` baut den Rust-Kern als statische Bibliothek.
-`native/VisiCutApp.swift` ist die native Oberfläche; `native/JobSimulation.swift`
-implementiert Zeitslider und Wiedergabe. Die zustandslose
-C-Schnittstelle in `src/bridge.rs` transportiert JSON und gibt jede
-Antwort mit `visicut_free` wieder frei. Das Bundle enthält den Rust-Kern;
-es werden keine zusätzlichen Runtime-Dateien benötigt.
-
-Der frühere egui-Prototyp bleibt für Entwicklung mit `cargo run` verfügbar;
-er ist nicht die Oberfläche des ausgelieferten App-Bundles.
-
-```sh
-'dist/VisiCutRust.app/Contents/MacOS/visicut-rust' --ui-test
-```
-
-Der UI-Test prüft den nativen Material-Control über Accessibility,
-Material-/Stärken-/Verfahrenswechsel, Profilübernahme, Skalierung,
-natives Speichern mit Rust-Laden und LTT-Export. Außerdem prüft er gemischte
-Objektzuordnungen, getrennte Parameter, Vorschau, Zeitschätzung, erneutes Laden
-und die automatische Ungültigkeit alter Vorschauen. Abschließend öffnet er
-die Auftragsvorschau über die reguläre asynchrone Vorbereitung. Der Test
-bewegt den echten nativen Slider vorwärts/rückwärts und prüft Interpolation,
-Durchgangswechsel, Ende der Wiedergabe sowie drei getrennte Aufträge.
-Er prüft außerdem Regel-Zuordnung mit Rest und Ignorierregeln, 3D-Gravur, Rasterverfahren, Parametersätze und die Materialbibliothek (Sichern, doppelte Einträge, Wiederherstellen). Außerdem prüft er Geräteliste und Gerätewechsel in einem temporären Einstellungsordner, Aufträge mit Rotationseinheit, Kamerahintergrund aus einer lokalen Bilddatei, die Kalibrierseite, das Zeilenversatz-Testmuster mit Übernahme in die Tabelle, den Hinweis zur experimentellen Kurvenbeschleunigung sowie Schild, Text, Kopien und Nesting. Rust-Tests prüfen drei unabhängige TCP-Verbindungen ausschließlich lokal. Er sendet keinen
-Job an den Lasercutter. Der normale Start enthält keinen Selbsttest.
+`src/lib.rs` ist der Rust-Kern, `src/main.rs` die egui-Oberfläche. Die
+frühere native macOS-Oberfläche (`native/*.swift` mit der C-Schnittstelle
+`src/bridge.rs`) wird nicht mehr gebaut oder ausgeliefert; die Quellen
+bleiben vorerst im Repository.
 
 `tests/java_parity.rs` vergleicht die erzeugten LTT-Aufträge Byte für Byte
 mit Referenzen aus dem originalen Java-VisiCut; neu erzeugt werden sie mit

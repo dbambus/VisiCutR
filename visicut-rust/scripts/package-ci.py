@@ -28,7 +28,7 @@ def main():
     if target.endswith("apple-darwin"):
         app = dist / "VisiCutRust.app"
         if not (app / "Contents/MacOS/visicut-rust").is_file():
-            parser.error("Build the native application with bundle-macos.sh first")
+            parser.error("Build the application bundle with bundle-macos.sh first")
         archive = dist / f"{name}.zip"
         subprocess.run([
             "ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(app), str(archive),
@@ -51,9 +51,9 @@ def main():
                        project.parent / "COPYING", project.parent / "COPYING.LESSER"]:
             shutil.copy2(source, stage / source.name)
         (stage / "START-HERE.txt").write_text(
-            "VisiCutRust - portable egui development interface\n\n"
+            "VisiCutRust - egui interface (the same on Windows, Linux and macOS)\n\n"
             f"Start visicut-rust{suffix}. No Java is required.\n"
-            "It offers the same features as the macOS app: object assignment, material\n"
+            "Features: object assignment, material\n"
             "library, text/shape/sign tools, copies, nesting, job preview with timeline,\n"
             "LTT iLaser 4000 devices, rotary jobs and the calibrated camera background.\n"
             f"visicut-cameraserver{suffix} serves photos from a capture command.\n"

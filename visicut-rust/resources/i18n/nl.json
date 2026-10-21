@@ -448,7 +448,6 @@
   "geändert": "gewijzigd",
   "keine": "geen",
   "pddelay der Gerätekonfiguration; nur für die Zeitschätzung.": "pddelay van de apparaatconfiguratie; alleen voor de tijdsinschatting.",
-  "um 90° erlaubt": "90° draaien toegestaan",
   "unbekannt": "onbekend",
   "vorhanden": "aanwezig",
   "{added} neue Objekte (Nr. {first}–{last}) sind noch keinem Schritt zugeordnet": "{added} nieuwe objecten (nr. {first}–{last}) zijn nog aan geen stap toegewezen",
@@ -944,11 +943,14 @@
   "Gewählten Punkt entfernen": "Geselecteerd punt verwijderen",
   "Kalibrierpunkte": "Kalibratiepunten",
   "Punkt hinzufügen": "Punt toevoegen",
-  "Status": "Status",
   "Punkte wieder auf die Anordnung „{grid}“ setzen": "Punten terugzetten naar de indeling „{grid}”",
   "Regeln dieser Vorlage in das Projekt übernehmen": "Regels van dit sjabloon in het project overnemen",
   "Regeln und Vorlagen": "Regels en sjablonen",
   "Standard": "Standaard",
   "Vorlage": "Sjabloon",
-  "Anklicken und Winkel eingeben; positive Winkel drehen im Uhrzeigersinn": "Klik en voer een hoek in; positieve hoeken draaien met de klok mee"
+  "Anklicken und Winkel eingeben; positive Winkel drehen im Uhrzeigersinn": "Klik en voer een hoek in; positieve hoeken draaien met de klok mee",
+  "Keine Drehung": "Niet draaien",
+  "Nur um 90°": "Alleen 90°",
+  "Beliebig (ganze Grad)": "Vrij (hele graden)",
+  "Beliebig: jedes Teil wird zusätzlich so gedreht, dass sein umschließendes Rechteck am kleinsten ist.": "Vrij: elk onderdeel wordt bovendien zo gedraaid dat de omsluitende rechthoek het kleinst is."
 }

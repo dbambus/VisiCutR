@@ -1012,52 +1012,53 @@ fn shift_test_window(
     apply: &mut bool,
     action: &mut Option<Action>,
 ) {
-    egui::Window::new(tr!(
-        "Zeilenversatz kalibrieren · {device}",
-        device = test.device
-    ))
-    .id(egui::Id::new(("shift_test", &test.device)))
-    .open(open)
-    .default_width(420.0)
-    .show(ctx, |ui| {
-        ui.label(tr(
-            "1. Testmuster öffnen, senden und gravieren. Je Geschwindigkeit (10 % oben bis \
+    let title = tr!("Zeilenversatz kalibrieren · {device}", device = test.device);
+    crate::form::tool_window(
+        ctx,
+        ("shift_test", &test.device),
+        &title,
+        460.0,
+        open,
+        |ui| {
+            ui.label(tr(
+                "1. Testmuster öffnen, senden und gravieren. Je Geschwindigkeit (10 % oben bis \
                  100 % unten, Balken links = Tempo) entstehen fünf Blöcke mit −2 … +2 Pixeln \
                  Versatz; Block 3 unter dem Dreieck nutzt die aktuelle Tabelle.",
-        ));
-        ui.horizontal(|ui| {
-            ui.label(tr("Leistung"));
-            ui.add(
-                egui::DragValue::new(&mut test.power)
-                    .range(1.0..=100.0)
-                    .suffix(" %"),
-            );
-            if ui
-                .add_enabled(active, egui::Button::new(tr("Testmuster öffnen")))
-                .on_disabled_hover_text(tr(
-                    "Nur für den aktiven Lasercutter ohne ungesicherte Änderungen",
-                ))
-                .clicked()
-            {
-                *action = Some(Action::ShiftPattern(test.power));
-            }
-        });
-        ui.separator();
-        ui.label(tr(
-            "2. Je Zeile den Block mit den geradesten Balkenkanten wählen. Liegt er am \
-                 Rand, übernehmen und das Testmuster erneut gravieren.",
-        ));
-        egui::Grid::new("shift_best").show(ui, |ui| {
-            for (speed, best) in shift_calibration::SPEEDS.iter().zip(&mut test.best) {
-                ui.label(format!("{speed} %"));
-                for block in 1..=shift_calibration::OFFSETS.len() {
-                    ui.radio_value(best, block, block.to_string());
+            ));
+            ui.horizontal(|ui| {
+                ui.label(tr("Leistung"));
+                ui.add(
+                    egui::DragValue::new(&mut test.power)
+                        .range(1.0..=100.0)
+                        .suffix(" %"),
+                );
+                if ui
+                    .add_enabled(active, egui::Button::new(tr("Testmuster öffnen")))
+                    .on_disabled_hover_text(tr(
+                        "Nur für den aktiven Lasercutter ohne ungesicherte Änderungen",
+                    ))
+                    .clicked()
+                {
+                    *action = Some(Action::ShiftPattern(test.power));
                 }
-                ui.end_row();
-            }
-        });
-        *apply = ui.button(tr("In die Tabelle übernehmen")).clicked();
-    });
+            });
+            ui.separator();
+            ui.label(tr(
+                "2. Je Zeile den Block mit den geradesten Balkenkanten wählen. Liegt er am \
+                 Rand, übernehmen und das Testmuster erneut gravieren.",
+            ));
+            egui::Grid::new("shift_best").show(ui, |ui| {
+                for (speed, best) in shift_calibration::SPEEDS.iter().zip(&mut test.best) {
+                    ui.label(format!("{speed} %"));
+                    for block in 1..=shift_calibration::OFFSETS.len() {
+                        ui.radio_value(best, block, block.to_string());
+                    }
+                    ui.end_row();
+                }
+            });
+            *apply = ui.button(tr("In die Tabelle übernehmen")).clicked();
+        },
+    );
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -1251,8 +1252,8 @@ fn detect_crosses(c: &mut Calibration) {
 /// Breite der Spalte links neben dem Foto im Kalibrierdialog.
 const PANEL_WIDTH: f32 = 290.0;
 
-/// Spalte links im Kalibrierdialog: Objektiv, Bedienung, Kalibrierpunkte
-/// und Status, gestaltet wie die Einstellungsseiten.
+/// Spalte links im Kalibrierdialog: Objektiv, Bedienung und Kalibrierpunkte,
+/// gestaltet wie die Einstellungsseiten.
 fn calibration_panel(ui: &mut egui::Ui, c: &mut Calibration, height: f32) {
     use crate::object_bar::{Icon, list_button, list_footer};
     egui::ScrollArea::vertical()
@@ -1359,27 +1360,60 @@ fn calibration_panel(ui: &mut egui::Ui, c: &mut Calibration, height: f32) {
                     }
                 });
             });
-            if c.picture.is_some() || c.problem.is_some() {
-                crate::form::section(ui, tr("Status"), |ui| {
-                    if c.picture.is_some() {
-                        crate::form::caption(ui, match c.markers.len() {
-                            0 => tr("Keine Passmarken erkannt: das Kamerabild wird nur über die Kalibrierung ausgerichtet.").to_owned(),
-                            1 => tr("1 Passmarke erkannt (grün); für die Nachführung sind mindestens 2 nötig.").to_owned(),
-                            n => tr!("{count} Passmarken erkannt (grün): spätere Bilder werden daran nachgeführt.", count = n),
-                        });
-                    }
-                    if let Some((found, total)) = c.crosses {
-                        crate::form::caption(ui, tr!("Kreuze erkannt: {found} von {total}", found = found, total = total));
-                    }
-                    if let Some(quality) = &c.quality {
-                        crate::form::caption(ui, quality.clone());
-                    }
-                    if let Some(problem) = &c.problem {
-                        ui.colored_label(Color32::from_rgb(180, 75, 40), problem);
-                    }
-                });
+        });
+}
+
+/// Kopfleiste über Spalte und Foto mit Erkennung, Güte und Fehlern; nur
+/// sichtbar, wenn es etwas zu melden gibt.
+fn calibration_status(ui: &mut egui::Ui, c: &Calibration) {
+    let mut lines = Vec::new();
+    if c.picture.is_some() {
+        lines.push(match c.markers.len() {
+            0 => tr("Keine Passmarken erkannt: das Kamerabild wird nur über die Kalibrierung ausgerichtet.").to_owned(),
+            1 => tr("1 Passmarke erkannt (grün); für die Nachführung sind mindestens 2 nötig.").to_owned(),
+            n => tr!("{count} Passmarken erkannt (grün): spätere Bilder werden daran nachgeführt.", count = n),
+        });
+    }
+    if let Some((found, total)) = c.crosses {
+        lines.push(tr!(
+            "Kreuze erkannt: {found} von {total}",
+            found = found,
+            total = total
+        ));
+    }
+    if let Some(quality) = &c.quality {
+        lines.push(quality.clone());
+    }
+    if lines.is_empty() && c.problem.is_none() {
+        return;
+    }
+    let problem = c.problem.is_some();
+    egui::Frame::new()
+        .fill(if problem {
+            Color32::from_rgb(251, 236, 230)
+        } else {
+            Color32::from_gray(240)
+        })
+        .stroke(egui::Stroke::new(
+            1.0,
+            if problem {
+                Color32::from_rgb(220, 160, 140)
+            } else {
+                Color32::from_gray(210)
+            },
+        ))
+        .corner_radius(4.0)
+        .inner_margin(egui::Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            if let Some(problem) = &c.problem {
+                ui.colored_label(Color32::from_rgb(180, 75, 40), format!("⚠ {problem}"));
+            }
+            if !lines.is_empty() {
+                ui.label(egui::RichText::new(lines.join("  ·  ")).color(Color32::from_gray(80)));
             }
         });
+    ui.add_space(6.0);
 }
 
 /// Knopfzeile unter dem Foto: Foto und Kreuze links, Ansicht in der Mitte,
@@ -1538,6 +1572,7 @@ fn calibration_body(
     apply: &mut Option<CameraCalibration>,
     action: &mut Option<Action>,
 ) {
+    calibration_status(ui, c);
     ui.horizontal_top(|ui| {
         let space = Vec2::new(
             (ui.available_width() - PANEL_WIDTH - 12.0).max(200.0),

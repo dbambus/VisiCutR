@@ -448,7 +448,6 @@
   "geändert": "modified",
   "keine": "none",
   "pddelay der Gerätekonfiguration; nur für die Zeitschätzung.": "pddelay from the device configuration; only used for the time estimate.",
-  "um 90° erlaubt": "90° rotation allowed",
   "unbekannt": "unknown",
   "vorhanden": "present",
   "{added} neue Objekte (Nr. {first}–{last}) sind noch keinem Schritt zugeordnet": "{added} new objects (no. {first}–{last}) are not yet assigned to a step",
@@ -944,11 +943,14 @@
   "Gewählten Punkt entfernen": "Remove selected point",
   "Kalibrierpunkte": "Calibration points",
   "Punkt hinzufügen": "Add point",
-  "Status": "Status",
   "Punkte wieder auf die Anordnung „{grid}“ setzen": "Reset the points to the “{grid}” layout",
   "Regeln dieser Vorlage in das Projekt übernehmen": "Apply this template's rules to the project",
   "Regeln und Vorlagen": "Rules and templates",
   "Standard": "Default",
   "Vorlage": "Template",
-  "Anklicken und Winkel eingeben; positive Winkel drehen im Uhrzeigersinn": "Click and enter an angle; positive angles rotate clockwise"
+  "Anklicken und Winkel eingeben; positive Winkel drehen im Uhrzeigersinn": "Click and enter an angle; positive angles rotate clockwise",
+  "Keine Drehung": "No rotation",
+  "Nur um 90°": "Only by 90°",
+  "Beliebig (ganze Grad)": "Any (whole degrees)",
+  "Beliebig: jedes Teil wird zusätzlich so gedreht, dass sein umschließendes Rechteck am kleinsten ist.": "Any: each part is additionally turned so that its enclosing rectangle is smallest."
 }

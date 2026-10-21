@@ -1,7 +1,7 @@
 //! Text, shapes, signs, copies and nesting for the egui interface.
 use eframe::egui;
 use visicut_core::{
-    compose::{self, Align, NestSettings, NewObject, Shape, Sign},
+    compose::{self, Align, NestRotation, NestSettings, NewObject, Shape, Sign},
     i18n::tr,
     project::{Operation, Project},
     tr,
@@ -173,25 +173,21 @@ impl ComposeUi {
         let tool = self.open?;
         let mut open = true;
         let mut apply = false;
-        egui::Window::new(tool.title())
-            .id(egui::Id::new("compose_tool"))
-            .open(&mut open)
-            .resizable(false)
-            .show(ctx, |ui| {
-                match tool {
-                    Tool::Text => self.text_form(ui),
-                    Tool::Shape => self.shape_form(ui),
-                    Tool::Sign => self.sign_form(ui),
-                    Tool::Array => self.array_form(ui, project),
-                    Tool::Nest => self.nest_form(ui, project),
-                }
-                ui.separator();
-                let label = match tool {
-                    Tool::Array | Tool::Nest => tr("Anwenden"),
-                    _ => tr("Einfügen"),
-                };
-                apply = ui.button(label).clicked();
-            });
+        crate::form::tool_window(ctx, "compose_tool", tool.title(), 380.0, &mut open, |ui| {
+            match tool {
+                Tool::Text => self.text_form(ui),
+                Tool::Shape => self.shape_form(ui),
+                Tool::Sign => self.sign_form(ui),
+                Tool::Array => self.array_form(ui, project),
+                Tool::Nest => self.nest_form(ui, project),
+            }
+            ui.separator();
+            let label = match tool {
+                Tool::Array | Tool::Nest => tr("Anwenden"),
+                _ => tr("Einfügen"),
+            };
+            apply = ui.button(label).clicked();
+        });
         if !open {
             self.open = None;
         }
@@ -458,7 +454,20 @@ impl ComposeUi {
             ui.end_row();
             mm(ui, tr("Abstand"), &mut n.gap_mm, 0.0..=50.0);
             ui.label(tr("Drehen"));
-            ui.checkbox(&mut n.rotate, tr("um 90° erlaubt"));
+            let label = |r: NestRotation| match r {
+                NestRotation::None => tr("Keine Drehung"),
+                NestRotation::Quarter => tr("Nur um 90°"),
+                NestRotation::Free => tr("Beliebig (ganze Grad)"),
+            };
+            crate::form::Dropdown::from_id_salt("nest_rotation")
+                .selected_text(label(n.rotation))
+                .show_ui(ui, |ui| {
+                    for r in [NestRotation::None, NestRotation::Quarter, NestRotation::Free] {
+                        ui.selectable_value(&mut n.rotation, r, label(r));
+                    }
+                })
+                .response
+                .on_hover_text(tr("Beliebig: jedes Teil wird zusätzlich so gedreht, dass sein umschließendes Rechteck am kleinsten ist."));
             ui.end_row();
             mm(ui, tr("Fläche X"), &mut n.area_mm[0], 0.0..=1000.0);
             mm(ui, tr("Fläche Y"), &mut n.area_mm[1], 0.0..=600.0);

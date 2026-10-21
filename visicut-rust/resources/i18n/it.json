@@ -448,7 +448,6 @@
   "geändert": "modificato",
   "keine": "nessuno",
   "pddelay der Gerätekonfiguration; nur für die Zeitschätzung.": "pddelay della configurazione del dispositivo; solo per la stima del tempo.",
-  "um 90° erlaubt": "di 90° consentita",
   "unbekannt": "sconosciuto",
   "vorhanden": "presente",
   "{added} neue Objekte (Nr. {first}–{last}) sind noch keinem Schritt zugeordnet": "{added} nuovi oggetti (n. {first}–{last}) non sono ancora assegnati a un passo",
@@ -944,11 +943,14 @@
   "Gewählten Punkt entfernen": "Rimuovi il punto selezionato",
   "Kalibrierpunkte": "Punti di calibrazione",
   "Punkt hinzufügen": "Aggiungi punto",
-  "Status": "Stato",
   "Punkte wieder auf die Anordnung „{grid}“ setzen": "Riporta i punti alla disposizione «{grid}»",
   "Regeln dieser Vorlage in das Projekt übernehmen": "Applica al progetto le regole di questo modello",
   "Regeln und Vorlagen": "Regole e modelli",
   "Standard": "Predefinito",
   "Vorlage": "Modello",
-  "Anklicken und Winkel eingeben; positive Winkel drehen im Uhrzeigersinn": "Fare clic e inserire un angolo; gli angoli positivi ruotano in senso orario"
+  "Anklicken und Winkel eingeben; positive Winkel drehen im Uhrzeigersinn": "Fare clic e inserire un angolo; gli angoli positivi ruotano in senso orario",
+  "Keine Drehung": "Nessuna rotazione",
+  "Nur um 90°": "Solo di 90°",
+  "Beliebig (ganze Grad)": "Libera (gradi interi)",
+  "Beliebig: jedes Teil wird zusätzlich so gedreht, dass sein umschließendes Rechteck am kleinsten ist.": "Libera: ogni parte viene inoltre ruotata in modo che il rettangolo che la racchiude sia il più piccolo."
 }

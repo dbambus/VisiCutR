@@ -247,12 +247,13 @@ impl RemnantUi {
         let mut open = self.open;
         let mut action = None;
         let mut close = false;
-        egui::Window::new(tr("Reststücke erkennen"))
-            .id(egui::Id::new("remnants"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
+        crate::form::tool_window(
+            ctx,
+            "remnants",
+            tr("Reststücke erkennen"),
+            420.0,
+            &mut open,
+            |ui| {
                 ui.horizontal(|ui| {
                     if devices.camera_loading() {
                         ui.spinner();
@@ -279,9 +280,7 @@ impl RemnantUi {
                         Method::Reference,
                         tr("Unterschied zum Foto des leeren Betts"),
                     )
-                    .on_disabled_hover_text(tr(
-                        "Zuerst das leere Bett als Referenz speichern",
-                    ));
+                    .on_disabled_hover_text(tr("Zuerst das leere Bett als Referenz speichern"));
                 });
                 ui.radio_value(
                     &mut self.method,
@@ -406,7 +405,9 @@ impl RemnantUi {
                 }
                 crate::form::caption(
                     ui,
-                    tr("Die Umrisse stammen aus dem Kamerabild und sind nur so genau wie dessen Kalibrierung."),
+                    tr(
+                        "Die Umrisse stammen aus dem Kamerabild und sind nur so genau wie dessen Kalibrierung.",
+                    ),
                 );
                 let found = matches!(&self.result, Some((_, Ok(d))) if !d.remnants.is_empty());
                 ui.horizontal(|ui| {
@@ -432,7 +433,8 @@ impl RemnantUi {
                         close = true;
                     }
                 });
-            });
+            },
+        );
         self.open = open && !close;
         action
     }

@@ -448,7 +448,6 @@
   "geändert": "modifié",
   "keine": "aucun",
   "pddelay der Gerätekonfiguration; nur für die Zeitschätzung.": "pddelay de la configuration machine ; uniquement pour l'estimation du temps.",
-  "um 90° erlaubt": "90° autorisé",
   "unbekannt": "inconnu",
   "vorhanden": "présent",
   "{added} neue Objekte (Nr. {first}–{last}) sind noch keinem Schritt zugeordnet": "{added} nouveaux objets (n° {first}–{last}) ne sont encore affectés à aucune étape",
@@ -944,11 +943,14 @@
   "Gewählten Punkt entfernen": "Supprimer le point sélectionné",
   "Kalibrierpunkte": "Points d'étalonnage",
   "Punkt hinzufügen": "Ajouter un point",
-  "Status": "État",
   "Punkte wieder auf die Anordnung „{grid}“ setzen": "Remettre les points dans la disposition « {grid} »",
   "Regeln dieser Vorlage in das Projekt übernehmen": "Appliquer les règles de ce modèle au projet",
   "Regeln und Vorlagen": "Règles et modèles",
   "Standard": "Par défaut",
   "Vorlage": "Modèle",
-  "Anklicken und Winkel eingeben; positive Winkel drehen im Uhrzeigersinn": "Cliquer et saisir un angle ; les angles positifs tournent dans le sens horaire"
+  "Anklicken und Winkel eingeben; positive Winkel drehen im Uhrzeigersinn": "Cliquer et saisir un angle ; les angles positifs tournent dans le sens horaire",
+  "Keine Drehung": "Aucune rotation",
+  "Nur um 90°": "Seulement de 90°",
+  "Beliebig (ganze Grad)": "Libre (degrés entiers)",
+  "Beliebig: jedes Teil wird zusätzlich so gedreht, dass sein umschließendes Rechteck am kleinsten ist.": "Libre : chaque pièce est en plus tournée pour que son rectangle englobant soit le plus petit."
 }

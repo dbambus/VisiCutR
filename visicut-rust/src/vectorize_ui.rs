@@ -89,12 +89,13 @@ impl VectorizeUi {
         let mut open = self.open;
         let mut apply = false;
         let mut cancel = false;
-        egui::Window::new(tr("Bitmap vektorisieren"))
-            .id(egui::Id::new("vectorize"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
+        crate::form::tool_window(
+            ctx,
+            "vectorize",
+            tr("Bitmap vektorisieren"),
+            380.0,
+            &mut open,
+            |ui| {
                 ui.label(tr!("Bild: {name}", name = self.name));
                 ui.add(egui::Slider::new(&mut self.threshold, 0..=255).text(tr("Schwellwert")));
                 ui.checkbox(
@@ -140,7 +141,8 @@ impl VectorizeUi {
                         cancel = true;
                     }
                 });
-            });
+            },
+        );
         self.open = open && !cancel;
         if !apply {
             return None;

@@ -544,3 +544,59 @@ pub fn page_heading(ui: &mut egui::Ui, title: &str) {
         .hline(rect.x_range(), rect.bottom() - 0.5, stroke);
     ui.add_space(8.0);
 }
+
+/// Zusatzfenster als eigenes Fenster des Betriebssystems, unabhängig vom
+/// Hauptfenster verschiebbar (auch auf einen anderen Bildschirm). Die Höhe
+/// folgt dem Inhalt; ohne Unterstützung für eigene Fenster erscheint es
+/// innerhalb des Hauptfensters. `open` wird beim Schließen falsch.
+pub fn tool_window(
+    ctx: &egui::Context,
+    id: impl std::hash::Hash,
+    title: &str,
+    width: f32,
+    open: &mut bool,
+    add: impl FnOnce(&mut egui::Ui),
+) {
+    let viewport = egui::ViewportId::from_hash_of(("tool_window", &id));
+    let mut add = Some(add);
+    let mut run = move |ui: &mut egui::Ui| {
+        if let Some(add) = add.take() {
+            add(ui);
+        }
+    };
+    ctx.show_viewport_immediate(
+        viewport,
+        egui::ViewportBuilder::default()
+            .with_title(title)
+            .with_inner_size([width, 200.0])
+            .with_min_inner_size([width * 0.6, 120.0]),
+        |ctx, class| {
+            if class == egui::ViewportClass::Embedded {
+                egui::Window::new(title)
+                    .id(egui::Id::new(viewport))
+                    .open(open)
+                    .collapsible(false)
+                    .resizable(false)
+                    .default_width(width)
+                    .show(ctx, &mut run);
+                return;
+            }
+            let panel = egui::CentralPanel::default().show(ctx, |ui| {
+                let top = ui.min_rect().top();
+                run(ui);
+                (top, ui.min_rect().bottom())
+            });
+            // Fensterhöhe an den Inhalt anpassen, unten so viel Rand wie oben.
+            let (top, bottom) = panel.inner;
+            let wanted = (bottom + top - panel.response.rect.top()).ceil();
+            let current = ctx.input(|i| i.viewport().inner_rect.map(|r| r.height()));
+            if current.is_some_and(|h| (h - wanted).abs() > 1.0) {
+                let width = ctx.input(|i| i.viewport().inner_rect.map_or(width, |r| r.width()));
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(width, wanted)));
+            }
+            if ctx.input(|i| i.viewport().close_requested()) {
+                *open = false;
+            }
+        },
+    );
+}

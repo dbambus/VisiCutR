@@ -133,8 +133,21 @@ pub struct NestSettings {
     pub gap_mm: f64,
     /// Copies of every part.
     pub quantity: u32,
+    /// How parts may be turned.
+    pub rotation: NestRotation,
+}
+
+/// Turning of parts while nesting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NestRotation {
+    /// Parts keep their orientation.
+    None,
     /// Parts may be turned by 90°.
-    pub rotate: bool,
+    #[default]
+    Quarter,
+    /// Parts may additionally be turned (in whole degrees) so that their
+    /// enclosing rectangle is smallest.
+    Free,
 }
 
 impl Default for NestSettings {
@@ -143,7 +156,7 @@ impl Default for NestSettings {
             area_mm: [5.0, 5.0, 990.0, 590.0],
             gap_mm: 3.0,
             quantity: 1,
-            rotate: true,
+            rotation: NestRotation::Quarter,
         }
     }
 }
@@ -472,7 +485,7 @@ pub fn array(
 
 /// Bounding-box nesting: copies of every part (top-level object, or object
 /// of a top-level layer) are placed into the sheet, largest first, with the
-/// free-rectangle method; parts may be turned by 90°.
+/// free-rectangle method; parts may be turned as the settings allow.
 pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, String> {
     if project.svg.is_empty() {
         return Err(tr("Zuerst ein Motiv öffnen").into());
@@ -518,18 +531,18 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, String
     let mut engraved_rows: Vec<[f64; 2]> = Vec::new();
     let gap = settings.gap_mm;
     let mut free = vec![[ax, ay, aw + gap, ah + gap]];
-    // (part, x, y, rotated)
-    let mut placements: Vec<(usize, f64, f64, bool)> = Vec::new();
+    let orientations: Vec<Vec<Orientation>> = parts
+        .iter()
+        .map(|p| orientations(p, settings.rotation))
+        .collect();
+    // (part, x, y, orientation)
+    let mut placements: Vec<(usize, f64, f64, Orientation)> = Vec::new();
     let mut missing = 0;
     for part in instances {
-        let [_, _, w, h] = parts[part].bounds;
-        let mut best: Option<(f64, f64, usize, bool)> = None;
+        let mut best: Option<(f64, f64, usize, Orientation)> = None;
         for (index, rect) in free.iter().enumerate() {
-            for rotated in [false, true] {
-                if rotated && !settings.rotate {
-                    continue;
-                }
-                let (pw, ph) = if rotated { (h, w) } else { (w, h) };
+            for orientation in &orientations[part] {
+                let [pw, ph] = orientation.size;
                 let (pw, ph) = (pw + gap, ph + gap);
                 if pw <= rect[2] + 1e-9 && ph <= rect[3] + 1e-9 {
                     // Engravings: fewest additional engrave lines, then the
@@ -545,22 +558,22 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, String
                         ((rect[2] - pw).min(rect[3] - ph), rect[1] + rect[0] * 1e-6)
                     };
                     if best.is_none_or(|b| (score.0, score.1) < (b.0, b.1)) {
-                        best = Some((score.0, score.1, index, rotated));
+                        best = Some((score.0, score.1, index, *orientation));
                     }
                 }
             }
         }
-        let Some((_, _, index, rotated)) = best else {
+        let Some((_, _, index, orientation)) = best else {
             missing += 1;
             continue;
         };
         let rect = free[index];
-        let (pw, ph) = if rotated { (h, w) } else { (w, h) };
+        let [pw, ph] = orientation.size;
         let used = [rect[0], rect[1], pw + gap, ph + gap];
         if raster[part] {
             engraved_rows.push([rect[1], rect[1] + ph]);
         }
-        placements.push((part, rect[0], rect[1], rotated));
+        placements.push((part, rect[0], rect[1], orientation));
         split(&mut free, used);
     }
     if placements.is_empty() {
@@ -583,19 +596,18 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, String
         num(project.y_mm as f64)
     );
     let mut previous_part = None;
-    for (copy, (index, x, y, rotated)) in placements.iter().enumerate() {
+    for (copy, (index, x, y, orientation)) in placements.iter().enumerate() {
         let part = &parts[*index];
-        let [bx, by, w, h] = part.bounds;
-        let transform = if *rotated {
-            format!(
-                "translate({} {}) rotate(90) translate({} {})",
-                x + h,
-                y,
-                -bx,
-                -by
-            )
+        let [mx, my] = orientation.min;
+        let transform = if orientation.degrees == 0 {
+            format!("translate({} {})", x - mx, y - my)
         } else {
-            format!("translate({} {})", x - bx, y - by)
+            format!(
+                "translate({} {}) rotate({})",
+                x - mx,
+                y - my,
+                orientation.degrees
+            )
         };
         // The first copy of each part keeps its ids (references point
         // there); shared definitions come once, with the very first copy.
@@ -619,7 +631,7 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, String
         )
         .unwrap();
         check_size(&body)?;
-        let (pw, ph) = if *rotated { (h, w) } else { (w, h) };
+        let [pw, ph] = orientation.size;
         bounds = union(bounds, Some([*x, *y, pw, ph]));
         for old in &part.objects {
             new_ids[*old].push(next);
@@ -986,6 +998,8 @@ fn rename_css(css: &str, renamed: &std::collections::HashMap<String, String>) ->
 struct Part {
     objects: Vec<usize>,
     bounds: [f64; 4],
+    /// Convex hull of the outline on the bed (mm).
+    hull: Vec<[f64; 2]>,
     /// Start tags of the groups between the root and the part, outermost
     /// first, with their end tags.
     opening: Vec<std::ops::Range<usize>>,
@@ -1071,6 +1085,126 @@ fn covered(ranges: &[[f64; 2]], extra: Option<[f64; 2]>) -> f64 {
 /// The laser cuts along the centre line, so with a gap of 0 mm adjacent
 /// contours lie exactly on top of each other and "Doppelte Linien
 /// entfernen" cuts them once.
+/// A way to place a part: turned by `degrees` clockwise about the origin,
+/// its enclosing rectangle starts at `min` and has `size` (mm).
+#[derive(Clone, Copy, Debug)]
+struct Orientation {
+    degrees: i32,
+    min: [f64; 2],
+    size: [f64; 2],
+}
+
+/// Enclosing rectangle of the points turned by whole degrees.
+fn turned(points: &[[f64; 2]], degrees: i32) -> Orientation {
+    let (sin, cos) = (degrees as f64).to_radians().sin_cos();
+    let mut min = [f64::INFINITY; 2];
+    let mut max = [f64::NEG_INFINITY; 2];
+    for [x, y] in points {
+        let q = [x * cos - y * sin, x * sin + y * cos];
+        for axis in 0..2 {
+            min[axis] = min[axis].min(q[axis]);
+            max[axis] = max[axis].max(q[axis]);
+        }
+    }
+    Orientation {
+        degrees,
+        min,
+        size: [max[0] - min[0], max[1] - min[1]],
+    }
+}
+
+/// The orientations a part may be placed in.
+fn orientations(part: &Part, rotation: NestRotation) -> Vec<Orientation> {
+    let [bx, by, w, h] = part.bounds;
+    let mut result = vec![Orientation {
+        degrees: 0,
+        min: [bx, by],
+        size: [w, h],
+    }];
+    if rotation == NestRotation::None {
+        return result;
+    }
+    result.push(Orientation {
+        degrees: 90,
+        min: [-(by + h), bx],
+        size: [h, w],
+    });
+    if rotation == NestRotation::Free && !part.hull.is_empty() {
+        // Smallest enclosing rectangle over whole degrees; 0° wins ties.
+        let area = |o: &Orientation| o.size[0] * o.size[1];
+        let best = (1..90)
+            .map(|d| turned(&part.hull, d))
+            .min_by(|a, b| area(a).total_cmp(&area(b)))
+            .filter(|o| area(o) < w * h * (1.0 - 1e-6));
+        if let Some(best) = best {
+            result.push(best);
+            result.push(turned(&part.hull, best.degrees - 90));
+        }
+    }
+    result
+}
+
+/// Convex hull (counter-clockwise) of the points.
+fn convex_hull(mut points: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
+    points.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+    points.dedup();
+    if points.len() < 3 {
+        return points;
+    }
+    let cross = |o: [f64; 2], a: [f64; 2], b: [f64; 2]| {
+        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    };
+    let mut hull: Vec<[f64; 2]> = Vec::new();
+    for pass in 0..2 {
+        let start = hull.len();
+        let iter: Box<dyn Iterator<Item = &[f64; 2]>> = if pass == 0 {
+            Box::new(points.iter())
+        } else {
+            Box::new(points.iter().rev())
+        };
+        for p in iter {
+            while hull.len() >= start + 2
+                && cross(hull[hull.len() - 2], hull[hull.len() - 1], *p) <= 0.0
+            {
+                hull.pop();
+            }
+            hull.push(*p);
+        }
+        hull.pop();
+    }
+    hull
+}
+
+/// Outline points of the content in canvas pixels: path points (with
+/// control points) and the corners of everything else.
+fn content_points(group: &usvg::Group, points: &mut Vec<[f64; 2]>) {
+    for node in group.children() {
+        match node {
+            usvg::Node::Group(g) => content_points(g, points),
+            usvg::Node::Path(path) => {
+                let t = path.abs_transform();
+                for p in path.data().points() {
+                    let mut p = *p;
+                    t.map_point(&mut p);
+                    points.push([p.x as f64, p.y as f64]);
+                }
+            }
+            usvg::Node::Text(text) => content_points(text.flattened(), points),
+            other => {
+                let b = other.abs_bounding_box();
+                for (x, y) in [
+                    (b.left(), b.top()),
+                    (b.right(), b.top()),
+                    (b.right(), b.bottom()),
+                    (b.left(), b.bottom()),
+                ] {
+                    points.push([x as f64, y as f64]);
+                }
+            }
+        }
+    }
+}
+
 fn content_bounds(group: &usvg::Group) -> Option<tiny_skia::Rect> {
     let mut bounds: Option<tiny_skia::Rect> = None;
     for node in group.children() {
@@ -1158,6 +1292,7 @@ fn parts(project: &Project) -> Result<Parts, String> {
         parts.push(Part {
             objects,
             bounds: [0.0; 4],
+            hull: Vec::new(),
             opening,
             closing,
             body: node.range(),
@@ -1187,6 +1322,14 @@ fn parts(project: &Project) -> Result<Parts, String> {
             b.width() as f64 * sx,
             b.height() as f64 * sy,
         ];
+        let mut points = Vec::new();
+        content_points(tree.root(), &mut points);
+        part.hull = convex_hull(
+            points
+                .into_iter()
+                .map(|[x, y]| [project.x_mm as f64 + x * sx, project.y_mm as f64 + y * sy])
+                .collect(),
+        );
         kept.push(part);
     }
     result.parts = kept;
@@ -2042,6 +2185,35 @@ mod tests {
     }
 
     #[test]
+    fn free_rotation_turns_slanted_parts_upright() {
+        // A 100 × 10 bar slanted by 30°: only upright does it fit 105 × 15.
+        let project = Project {
+            svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="120mm" height="80mm" viewBox="0 0 120 80"><rect x="0" y="0" width="100" height="10" transform="translate(10 5) rotate(30)" fill="none" stroke="red" stroke-width="0.1"/></svg>"#.into(),
+            x_mm: 0.0,
+            y_mm: 0.0,
+            width_mm: 120.0,
+            height_mm: 80.0,
+            steps: vec![JobStep { objects: vec![0], ..JobStep::new(Operation::Cut) }],
+            ..Default::default()
+        };
+        let mut settings = NestSettings {
+            area_mm: [5.0, 5.0, 105.0, 15.0],
+            gap_mm: 0.0,
+            quantity: 1,
+            rotation: NestRotation::Quarter,
+        };
+        assert!(nest(&project, &settings).is_err());
+        settings.rotation = NestRotation::Free;
+        let nested = nest(&project, &settings).unwrap();
+        assert_eq!((nested.placed, nested.missing), (1, 0));
+        let p = &nested.project;
+        assert!((p.width_mm - 100.0).abs() < 0.1, "{}", p.width_mm);
+        assert!((p.height_mm - 10.0).abs() < 0.1, "{}", p.height_mm);
+        assert!(p.svg.contains("rotate(-30)"));
+        ltt::prepare(p).unwrap();
+    }
+
+    #[test]
     fn nesting_fills_the_sheet_and_reports_what_does_not_fit() {
         let project = Project {
             svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 100 50"><rect id="a" width="40" height="20" fill="none" stroke="red" stroke-width="0.1"/><g><circle cx="70" cy="25" r="10" fill="none" stroke="red" stroke-width="0.1"/><circle cx="70" cy="25" r="3" fill="none" stroke="red" stroke-width="0.1"/></g></svg>"#.into(),
@@ -2056,7 +2228,7 @@ mod tests {
             area_mm: [10.0, 10.0, 120.0, 60.0],
             gap_mm: 2.0,
             quantity: 4,
-            rotate: true,
+            rotation: NestRotation::Quarter,
         };
         let nested = nest(&project, &settings).unwrap();
         assert_eq!(nested.placed + nested.missing, 8);

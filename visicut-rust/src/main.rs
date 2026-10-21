@@ -2356,12 +2356,15 @@ impl VisiCutR {
                     egui::DragValue::new(&mut self.rotate_deg)
                         .range(-360.0..=360.0)
                         .speed(0.0)
+                        .fixed_decimals(0)
                         .suffix("°"),
                 )
                 .on_hover_text(tr(
                     "Anklicken und Winkel eingeben; positive Winkel drehen im Uhrzeigersinn",
                 ));
             let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            // Nur ganzzahlige Drehungen.
+            self.rotate_deg = self.rotate_deg.round();
             if (ui
                 .add_enabled(editable && self.rotate_deg != 0.0, egui::Button::new("✔"))
                 .on_hover_text(tr("Anwenden"))
@@ -3117,7 +3120,9 @@ impl VisiCutR {
                 [start.x, start.y],
                 [pointer.x, pointer.y],
                 shift,
-            );
+            )
+            // Nur ganze Grad, wie im Eingabefeld.
+            .round();
             self.handle_drag = Some(HandleDrag::Rotate { start, degrees });
         }
         if response.drag_stopped() {

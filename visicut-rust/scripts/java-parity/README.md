@@ -38,6 +38,8 @@ Temp-Ordner und liest keine Benutzereinstellungen.
 | `invert`, `color_shift`, `unidirectional`, `bottom_up` | Rasteroptionen |
 | `compare=header` | nur bis zur ersten Rasterzeile vergleichen (Grund im Kommentar) |
 | `scale` | Teil einheitlich skalieren wie in der VisiCut-Oberfläche (Rust: `width_mm`/`height_mm` entsprechend setzen) |
+| `rust_file` | Datei, die Rust statt `svg` liest (etwa eine PDF, während Java eine geometrisch gleiche SVG bekommt); Nicht-SVG-Dateien laufen auf beiden Seiten durch die Importer (DXF, EPS, PNG/JPG/BMP, G-Code) |
+| `place=bbox` | linke obere Ecke der Geometrie (ohne Konturbreiten) statt des Dokumentursprungs auf `x_mm`/`y_mm` legen, wie beim Platzieren in der Oberfläche; nötig für DXF, EPS und PDF |
 | `deviation` | dokumentierte Abweichung mit Grund: wird gemeldet, lässt den Test nicht scheitern; der Test weist darauf hin, wenn der Fall wieder byte-gleich ist |
 
 Ohne `width_mm`/`height_mm` bestimmen beide Seiten die Größe selbst aus der SVG
@@ -60,5 +62,6 @@ Rust-Ausgabe unter `target/tmp/<fall>.ltt` ab.
   Seiten den Rasterbereich gleich abschneiden.
 - „Zufall“ ist in Java ungeseedet und wird nicht verglichen.
 - Bewusste Abweichungen von Java stehen in `PROTOCOL.md`.
-- Das Audit vom 2026-10-21 (`AUDIT-2026-10-21.md`) vergleicht 190 Grenzfälle und
-  begründet jede Abweichung; die Gründe stehen auch als `deviation=` in den Fällen.
+- Das Audit vom 2026-10-21 (`AUDIT-2026-10-21.md`) vergleicht 249 Grenzfälle,
+  darunter 59 Importe (PNG/JPEG/BMP/GIF, G-Code, DXF, EPS, PDF), und begründet jede
+  Abweichung; die Gründe stehen auch als `deviation=` in den Fällen.

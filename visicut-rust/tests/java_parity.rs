@@ -25,20 +25,38 @@ fn properties(text: &str) -> HashMap<String, String> {
         .collect()
 }
 
-fn project(dir: &Path, case: &HashMap<String, String>) -> Project {
+fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String> {
     let get = |key: &str| {
         case.get(key)
             .unwrap_or_else(|| panic!("{}: {key} fehlt", dir.display()))
     };
     let number = |key: &str| -> f32 { get(key).parse().unwrap() };
-    // Without width_mm/height_mm both sides derive the size from the SVG
+    // Rust reads `rust_file` (default: the Java file); anything but SVG goes
+    // through the app's importers (DXF, EPS, PDF, raster, G-code, PLF).
+    let rust_file = dir.join(case.get("rust_file").unwrap_or_else(|| get("svg")));
+    let svg_text = if rust_file.extension().is_some_and(|e| e == "svg") {
+        fs::read_to_string(&rust_file).unwrap()
+    } else {
+        visicut_core::import::read_file(&rust_file)
+            .map_err(|e| format!("Rust-Import lehnt ab: {e}"))?
+            .svg
+    };
+    // Without width_mm/height_mm both sides derive the size from the file
     // (Rust like the app's import: usvg size at 96 DPI).
-    let svg_text = fs::read_to_string(dir.join(get("svg"))).unwrap();
     let natural = || {
         let preview = visicut_core::svg::render(&svg_text).unwrap();
         (preview.width_mm, preview.height_mm)
     };
     let scale: f32 = case.get("scale").map_or(1.0, |s| s.parse().unwrap());
+    // `place=bbox`: the top left corner of the geometry goes to x/y.
+    let (mut x_mm, mut y_mm) = (number("x_mm"), number("y_mm"));
+    if case.get("place").is_some_and(|p| p == "bbox") {
+        let tree = resvg::usvg::Tree::from_str(&svg_text, &visicut_core::svg::options()).unwrap();
+        let bbox = tree.root().abs_bounding_box();
+        let (w, h) = natural();
+        x_mm -= bbox.x() * w / tree.size().width();
+        y_mm -= bbox.y() * h / tree.size().height();
+    }
     let width_mm = case
         .get("width_mm")
         .map_or_else(|| natural().0 * scale, |v| v.parse().unwrap());
@@ -54,9 +72,9 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Project {
     };
     let mut project = Project {
         name: get("name").clone(),
-        svg: fs::read_to_string(dir.join(get("svg"))).unwrap(),
-        x_mm: number("x_mm"),
-        y_mm: number("y_mm"),
+        svg: svg_text.clone(),
+        x_mm,
+        y_mm,
         width_mm,
         height_mm,
         operation,
@@ -93,7 +111,7 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Project {
             ..JobStep::new(operation)
         }];
     }
-    project
+    Ok(project)
 }
 
 /// Raster options under the names of the Java harness (LttParity.java).
@@ -206,7 +224,7 @@ fn compare(dir: &Path, name: &str, case: &HashMap<String, String>) -> Result<(),
     let expected_file = match fs::read(dir.join("expected.ltt")) {
         Ok(bytes) => bytes,
         Err(_) => {
-            let rust = match ltt::prepare(&project(dir, case)) {
+            let rust = match project(dir, case).and_then(|p| ltt::prepare(&p)) {
                 Ok(p) => format!("Rust erzeugt {} Bytes", p.jobs[0].bytes.len()),
                 Err(e) => format!("Rust lehnt ab: {e}"),
             };
@@ -220,7 +238,8 @@ fn compare(dir: &Path, name: &str, case: &HashMap<String, String>) -> Result<(),
             });
         }
     };
-    let prepared = ltt::prepare(&project(dir, case))
+    let prepared = project(dir, case)
+        .and_then(|p| ltt::prepare(&p))
         .map_err(|e| Outcome::Different(format!("{name}: Rust lehnt ab: {e}")))?;
     if prepared.jobs.len() != 1 {
         return Err(Outcome::Different(format!(

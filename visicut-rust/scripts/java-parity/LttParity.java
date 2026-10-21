@@ -159,8 +159,17 @@ public class LttParity
     model.setMaterialThickness(Float.parseFloat(c.getProperty("thickness_mm", "0")));
     List<String> warnings = new ArrayList<>();
     PlfPart part = model.loadGraphicFile(new File(dir, c.getProperty("svg")), warnings);
-    AffineTransform t = AffineTransform.getTranslateInstance(
-      Double.parseDouble(c.getProperty("x_mm")), Double.parseDouble(c.getProperty("y_mm")));
+    double x = Double.parseDouble(c.getProperty("x_mm"));
+    double y = Double.parseDouble(c.getProperty("y_mm"));
+    // "place=bbox": the top left corner of the geometry (without strokes)
+    // goes to x/y, like placing a part in the GUI, instead of the document origin.
+    if ("bbox".equals(c.getProperty("place")))
+    {
+      java.awt.geom.Rectangle2D bounds = geometryBounds(part.getGraphicObjects());
+      x -= bounds.getX();
+      y -= bounds.getY();
+    }
+    AffineTransform t = AffineTransform.getTranslateInstance(x, y);
     // Optional "scale": the part is resized like in VisiCut's GUI (uniform).
     double scale = Double.parseDouble(c.getProperty("scale", "1"));
     if (scale != 1)
@@ -188,6 +197,20 @@ public class LttParity
       System.err.println(dir.getName() + ": " + w);
     }
     System.out.println(dir.getName() + ": " + out.length() + " bytes as " + name);
+  }
+
+  /** Union of the objects' geometry bounds in mm (basic transform, no strokes). */
+  private static java.awt.geom.Rectangle2D geometryBounds(de.thomas_oster.visicut.model.graphicelements.GraphicSet objects)
+  {
+    java.awt.geom.Rectangle2D result = null;
+    for (de.thomas_oster.visicut.model.graphicelements.GraphicObject e : objects)
+    {
+      java.awt.Shape shape = (e instanceof de.thomas_oster.visicut.model.graphicelements.ShapeObject)
+        ? ((de.thomas_oster.visicut.model.graphicelements.ShapeObject) e).getShape() : e.getBoundingBox();
+      java.awt.geom.Rectangle2D bb = objects.getBasicTransform().createTransformedShape(shape).getBounds2D();
+      result = result == null ? bb : result.createUnion(bb);
+    }
+    return result == null ? new java.awt.geom.Rectangle2D.Double() : result;
   }
 
   /** Same device job name as VisiCutR (prefix, ASCII, at most 15 characters). */

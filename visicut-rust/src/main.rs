@@ -1862,7 +1862,7 @@ impl VisiCutR {
                     form::caption(
                         ui,
                         format!(
-                            "{}:{} · {} × {} mm",
+                            "{}:{}\n{} × {} mm",
                             device.hostname,
                             device.port,
                             self.project.bed_width_mm,

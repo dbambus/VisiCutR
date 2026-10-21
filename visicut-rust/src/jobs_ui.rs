@@ -640,22 +640,17 @@ impl Document {
 }
 
 fn operation_selector(ui: &mut egui::Ui, project: &mut Project) -> bool {
-    let mut changed = false;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        let width = ui.available_width() / Operation::ALL.len() as f32;
-        for candidate in Operation::ALL {
-            let selected = project.operation == candidate;
-            let color = crate::preview_ui::operation_color(candidate);
-            if crate::form::tinted_choice(ui, operation_title(candidate), color, selected, width)
-                && !selected
-            {
-                select_operation(project, candidate);
-                changed = true;
-            }
+    // Wie „Gesamt · Einzeln · Regeln“; der gewählte Teil nimmt die Farbe
+    // des Verfahrens an.
+    let options =
+        Operation::ALL.map(|o| (o, operation_title(o), crate::preview_ui::operation_color(o)));
+    match crate::form::segmented_colored(ui, project.operation, &options) {
+        Some(candidate) => {
+            select_operation(project, candidate);
+            true
         }
-    });
-    changed
+        None => false,
+    }
 }
 
 fn raster_options(
@@ -1110,9 +1105,9 @@ impl JobUi {
             // Bearbeitung orange an.
             apply_presets(library, project);
         }
-        if project.material.is_empty() {
-            crate::form::caption(ui, tr("Material wählen, um sein Profil zu übernehmen."));
-        } else if preset(library, project, project.operation).is_none() && project.steps.is_empty()
+        if !project.material.is_empty()
+            && preset(library, project, project.operation).is_none()
+            && project.steps.is_empty()
         {
             crate::form::caption(
                 ui,

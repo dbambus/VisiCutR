@@ -272,6 +272,17 @@ pub fn segmented<T: PartialEq + Copy>(
     current: T,
     options: &[(T, &str)],
 ) -> Option<T> {
+    let options: Vec<(T, &str, Color32)> = options.iter().map(|&(v, t)| (v, t, ACCENT)).collect();
+    segmented_colored(ui, current, &options)
+}
+
+/// [`segmented`] mit eigener Farbe je Wahl: der gewählte Teil nimmt seine
+/// Farbe an (z. B. die Verfahrensfarbe).
+pub fn segmented_colored<T: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    current: T,
+    options: &[(T, &str, Color32)],
+) -> Option<T> {
     let mut chosen = None;
     egui::Frame::new()
         .fill(Color32::from_gray(232))
@@ -282,7 +293,7 @@ pub fn segmented<T: PartialEq + Copy>(
             let count = options.len().max(1) as f32;
             let width = ui.available_width() / count;
             ui.horizontal(|ui| {
-                for &(value, title) in options {
+                for &(value, title, color) in options {
                     let selected = value == current;
                     let text = RichText::new(title).color(if selected {
                         Color32::WHITE
@@ -291,7 +302,7 @@ pub fn segmented<T: PartialEq + Copy>(
                     });
                     let button = egui::Button::new(if selected { text.strong() } else { text })
                         .fill(if selected {
-                            ACCENT
+                            color
                         } else {
                             Color32::TRANSPARENT
                         })
@@ -305,42 +316,6 @@ pub fn segmented<T: PartialEq + Copy>(
             });
         });
     chosen
-}
-
-/// Reiter mit farbiger Unterstreichung wie „Quality · Strength · Speed“ in
-/// Bambu Studio; gewählt in der Farbe des Verfahrens.
-pub fn tinted_choice(
-    ui: &mut egui::Ui,
-    title: &str,
-    color: Color32,
-    selected: bool,
-    width: f32,
-) -> bool {
-    let text = RichText::new(title).size(13.0).color(if selected {
-        color
-    } else {
-        Color32::from_gray(70)
-    });
-    // Feste Breite: längere Übersetzungen dürfen die Seitenleiste nicht verbreitern.
-    ui.spacing_mut().button_padding.x = 1.0;
-    let response = ui.add_sized(
-        [width, 30.0],
-        egui::Button::new(if selected { text.strong() } else { text })
-            .fill(Color32::TRANSPARENT)
-            .stroke(Stroke::NONE)
-            .truncate(),
-    );
-    let rect = response.rect;
-    let line = if selected {
-        Stroke::new(3.0, color)
-    } else if response.hovered() {
-        Stroke::new(1.0, color.gamma_multiply(0.5))
-    } else {
-        Stroke::NONE
-    };
-    ui.painter()
-        .hline(rect.x_range().shrink(6.0), rect.bottom() - 1.5, line);
-    response.clicked()
 }
 
 /// Hervorgehobene Schaltfläche (wie `.borderedProminent`).

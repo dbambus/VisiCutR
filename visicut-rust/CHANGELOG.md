@@ -18,6 +18,13 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
   nach Otsu), Glättung gegen Wabe und Lamellen, Sicherheitsabstand nach innen
   und Mindestfläche; ausgeschnittene Löcher bleiben erhalten. **Als Teil
   einfügen** legt die Umrisse als Schneid-Teil an ihre Stelle (widerrufbar).
+- **Dateien per Doppelklick öffnen**: Unter macOS öffnet `VisiCutR.app`
+  Dateien aus dem Finder (bisher kam das Ereignis nicht an), auch bei
+  laufender App; neu zugeordnet sind `.plf`, `.ls` sowie SVG, PDF, DXF und EPS
+  unter „Öffnen mit“. Windows: **Einstellungen → Allgemein → Dateitypen
+  zuordnen** trägt die portable EXE für das eigene Konto ein und entfernt sie
+  wieder. Linux: `install-desktop.sh` im tar.gz legt Menüeintrag und
+  MIME-Typen in `~/.local/share` an.
 
 ## 0.19.0 – 16.10.2026
 

@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=VisiCutR
+GenericName=Laser Cutter Software
+GenericName[de]=Lasercutter-Software
+Comment=Prepare laser cutter jobs and send them to the device
+Comment[de]=Laseraufträge vorbereiten und an den Lasercutter senden
+Icon=visicutr
+Exec=@EXEC@ %f
+Terminal=false
+Categories=Graphics;VectorGraphics;Engineering;
+Keywords=laser;cutter;engrave;svg;
+MimeType=application/x-visicutr-project;application/x-plf;application/x-ls;image/svg+xml;application/pdf;image/vnd.dxf;image/x-eps;
+StartupNotify=true
+StartupWMClass=VisiCutR

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-visicutr-project">
+    <comment>VisiCutR project</comment>
+    <comment xml:lang="de">VisiCutR-Projekt</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.vcr"/>
+  </mime-type>
+  <!-- Wie bei Java-VisiCut (distribute/linux), damit beide nebeneinander laufen. -->
+  <mime-type type="application/x-plf">
+    <comment>VisiCut Portable Laser File</comment>
+    <comment xml:lang="de">Portable Laser Datei für VisiCut</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.plf"/>
+  </mime-type>
+  <mime-type type="application/x-ls">
+    <comment>VisiCut LaserScript file</comment>
+    <comment xml:lang="de">LaserScript-Datei für VisiCut</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.ls"/>
+  </mime-type>
+</mime-info>

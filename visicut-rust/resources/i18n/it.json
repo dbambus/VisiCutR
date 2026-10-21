@@ -890,5 +890,15 @@
   "Unterschied zum Foto des leeren Betts": "Differenza dalla foto del piano vuoto",
   "Zuerst das leere Bett als Referenz speichern": "Salva prima il piano vuoto come riferimento",
   "{count} Reststück(e) · größtes etwa {width} × {height} mm": "{count} sfrido/i · il più grande circa {width} × {height} mm",
-  "Reststücke als Teil eingefügt; kein Schneid-Profil für dieses Material: Leistung und Geschwindigkeit prüfen": "Ritagli inseriti come parte; nessun profilo di taglio per questo materiale: controllare potenza e velocità"
+  "Reststücke als Teil eingefügt; kein Schneid-Profil für dieses Material: Leistung und Geschwindigkeit prüfen": "Ritagli inseriti come parte; nessun profilo di taglio per questo materiale: controllare potenza e velocità",
+  "Dateitypen": "Tipi di file",
+  "Zugeordnet": "Associato",
+  "diesem Programm": "a questo programma",
+  "einem anderen Speicherort": "a un’altra posizione",
+  "nein": "no",
+  "Dateitypen zuordnen": "Associa tipi di file",
+  "Dateitypen zugeordnet": "Tipi di file associati",
+  "Zuordnung entfernen": "Rimuovi associazione",
+  "Zuordnung der Dateitypen entfernt": "Associazione dei tipi di file rimossa",
+  "VisiCutR-Projekte öffnen per Doppelklick, PLF und LaserScript, wenn noch kein anderes Programm sie öffnet. SVG, PDF, DXF und EPS stehen unter „Öffnen mit“. Gilt nur für dieses Benutzerkonto; nach dem Verschieben von VisiCutR erneut zuordnen.": "I progetti VisiCutR si aprono con un doppio clic, PLF e LaserScript se nessun altro programma li apre già. SVG, PDF, DXF ed EPS compaiono in «Apri con». Vale solo per questo account utente; associare di nuovo dopo aver spostato VisiCutR."
 }

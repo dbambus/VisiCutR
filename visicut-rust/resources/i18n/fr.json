@@ -890,5 +890,15 @@
   "Unterschied zum Foto des leeren Betts": "Différence avec la photo du plateau vide",
   "Zuerst das leere Bett als Referenz speichern": "Enregistrez d'abord le plateau vide comme référence",
   "{count} Reststück(e) · größtes etwa {width} × {height} mm": "{count} chute(s) · la plus grande env. {width} × {height} mm",
-  "Reststücke als Teil eingefügt; kein Schneid-Profil für dieses Material: Leistung und Geschwindigkeit prüfen": "Chutes insérées comme pièce ; pas de profil de découpe pour ce matériau : vérifier la puissance et la vitesse"
+  "Reststücke als Teil eingefügt; kein Schneid-Profil für dieses Material: Leistung und Geschwindigkeit prüfen": "Chutes insérées comme pièce ; pas de profil de découpe pour ce matériau : vérifier la puissance et la vitesse",
+  "Dateitypen": "Types de fichiers",
+  "Zugeordnet": "Associé",
+  "diesem Programm": "à ce programme",
+  "einem anderen Speicherort": "à un autre emplacement",
+  "nein": "non",
+  "Dateitypen zuordnen": "Associer les types de fichiers",
+  "Dateitypen zugeordnet": "Types de fichiers associés",
+  "Zuordnung entfernen": "Supprimer l’association",
+  "Zuordnung der Dateitypen entfernt": "Association des types de fichiers supprimée",
+  "VisiCutR-Projekte öffnen per Doppelklick, PLF und LaserScript, wenn noch kein anderes Programm sie öffnet. SVG, PDF, DXF und EPS stehen unter „Öffnen mit“. Gilt nur für dieses Benutzerkonto; nach dem Verschieben von VisiCutR erneut zuordnen.": "Les projets VisiCutR s’ouvrent par double-clic, PLF et LaserScript si aucun autre programme ne les ouvre encore. SVG, PDF, DXF et EPS figurent sous « Ouvrir avec ». Ne concerne que ce compte utilisateur ; associer à nouveau après avoir déplacé VisiCutR."
 }

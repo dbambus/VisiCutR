@@ -4,6 +4,8 @@ pub mod device;
 pub mod geometry;
 pub mod i18n;
 pub mod import;
+pub mod inkscape;
+pub mod instance;
 pub mod ltt;
 pub mod mapping;
 pub mod materials;

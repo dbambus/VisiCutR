@@ -1,38 +1,11 @@
 //! Dateien, die das Betriebssystem übergibt: unter Windows und Linux als
-//! Startargument, unter macOS als Apple-Event „Dokumente öffnen“, das winit
+//! Startargument (siehe `visicut_core::instance`), unter macOS als Apple-Event „Dokumente öffnen“, das winit
 //! nicht weiterreicht. Das Ereignis kommt beim Start vor dem ersten Bild und
 //! bei laufender App; die Pfade warten hier, bis die Oberfläche sie abholt.
 
 use eframe::egui;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
-
-/// Was der Start laut Kommandozeile tun soll.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Startup {
-    Demo,
-    Open(PathBuf),
-}
-
-/// Schalter der Bildschirmfoto-Aufnahme, deren Wert keine Datei ist.
-const OPTIONS_WITH_VALUE: [&str; 2] = ["--capture", "--page"];
-
-/// Erste Datei oder `--demo` aus den Argumenten (ohne Programmnamen).
-pub fn startup(arguments: &[String]) -> Option<Startup> {
-    let mut rest = arguments.iter();
-    while let Some(argument) = rest.next() {
-        match argument.as_str() {
-            "--demo" => return Some(Startup::Demo),
-            option if OPTIONS_WITH_VALUE.contains(&option) => {
-                rest.next();
-            }
-            // Ältere macOS-Versionen hängen `-psn_…` an.
-            option if option.starts_with('-') => {}
-            path => return Some(Startup::Open(PathBuf::from(path))),
-        }
-    }
-    None
-}
 
 static PENDING: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 static REPAINT: OnceLock<egui::Context> = OnceLock::new();
@@ -152,39 +125,6 @@ mod apple {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn args(list: &[&str]) -> Vec<String> {
-        list.iter().map(|a| a.to_string()).collect()
-    }
-
-    #[test]
-    fn startup_opens_the_first_file_argument() {
-        assert_eq!(startup(&args(&[])), None);
-        assert_eq!(
-            startup(&args(&["C:\\Users\\Lab\\Schild.svg"])),
-            Some(Startup::Open(PathBuf::from("C:\\Users\\Lab\\Schild.svg")))
-        );
-        assert_eq!(
-            startup(&args(&["/home/lab/mit Leerzeichen.vcr", "zweite.svg"])),
-            Some(Startup::Open(PathBuf::from(
-                "/home/lab/mit Leerzeichen.vcr"
-            )))
-        );
-        assert_eq!(
-            startup(&args(&["-psn_0_12345", "/Users/lab/Teil.dxf"])),
-            Some(Startup::Open(PathBuf::from("/Users/lab/Teil.dxf")))
-        );
-        assert_eq!(startup(&args(&["--demo"])), Some(Startup::Demo));
-        // Werte der Aufnahme-Schalter sind keine Dateien.
-        assert_eq!(
-            startup(&args(&["--capture", "bild.png", "--page", "general"])),
-            None
-        );
-        assert_eq!(
-            startup(&args(&["--capture", "bild.png", "projekt.vcr"])),
-            Some(Startup::Open(PathBuf::from("projekt.vcr")))
-        );
-    }
 
     #[test]
     fn delivered_files_wait_until_taken() {

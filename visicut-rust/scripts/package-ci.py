@@ -50,6 +50,10 @@ def main():
         for source in [project / "README.md", project / "PROTOCOL.md",
                        project.parent / "COPYING", project.parent / "COPYING.LESSER"]:
             shutil.copy2(source, stage / source.name)
+        # Inkscape-Erweiterung zum Installieren von Hand; VisiCutR installiert
+        # sie auch selbst (Einstellungen > Allgemein).
+        shutil.copytree(project / "resources/inkscape", stage / "inkscape-extension",
+                        ignore=shutil.ignore_patterns("__pycache__"))
         if "linux" in target:
             # Anwendungsmenü und Dateizuordnungen für ~/.local/share.
             linux = project / "resources/linux"
@@ -77,6 +81,8 @@ def main():
             "Features: object assignment, material\n"
             "library, text/shape/sign tools, copies, nesting, job preview with timeline,\n"
             "LTT iLaser 4000 devices, rotary jobs and the calibrated camera background.\n"
+            "inkscape-extension/ holds the Inkscape extension \"Add to VisiCutR\";\n"
+            "VisiCutR installs it under Settings > General > Inkscape.\n"
             f"visicutr-cameraserver{suffix} serves photos from a capture command.\n"
             "Linux requires a graphical X11/Wayland session, OpenGL/EGL, libxkbcommon,\n"
             "and a desktop portal for file dialogs. Built on Ubuntu 24.04 (glibc 2.39).\n"
@@ -87,8 +93,8 @@ def main():
         if "windows" in target:
             archive = dist / f"{name}.zip"
             with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
-                for path in sorted(stage.iterdir()):
-                    output.write(path, f"{name}/{path.name}")
+                for path in sorted(stage.rglob("*")):
+                    output.write(path, f"{name}/{path.relative_to(stage).as_posix()}")
         else:
             archive = dist / f"{name}.tar.gz"
             with tarfile.open(archive, "w:gz") as output:

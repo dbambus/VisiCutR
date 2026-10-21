@@ -927,5 +927,16 @@
   "Dateitypen zugeordnet": "Tipi di file associati",
   "Zuordnung entfernen": "Rimuovi associazione",
   "Zuordnung der Dateitypen entfernt": "Associazione dei tipi di file rimossa",
-  "VisiCutR-Projekte öffnen per Doppelklick, PLF und LaserScript, wenn noch kein anderes Programm sie öffnet. SVG, PDF, DXF und EPS stehen unter „Öffnen mit“. Gilt nur für dieses Benutzerkonto; nach dem Verschieben von VisiCutR erneut zuordnen.": "I progetti VisiCutR si aprono con un doppio clic, PLF e LaserScript se nessun altro programma li apre già. SVG, PDF, DXF ed EPS compaiono in «Apri con». Vale solo per questo account utente; associare di nuovo dopo aver spostato VisiCutR."
+  "VisiCutR-Projekte öffnen per Doppelklick, PLF und LaserScript, wenn noch kein anderes Programm sie öffnet. SVG, PDF, DXF und EPS stehen unter „Öffnen mit“. Gilt nur für dieses Benutzerkonto; nach dem Verschieben von VisiCutR erneut zuordnen.": "I progetti VisiCutR si aprono con un doppio clic, PLF e LaserScript se nessun altro programma li apre già. SVG, PDF, DXF ed EPS compaiono in «Apri con». Vale solo per questo account utente; associare di nuovo dopo aver spostato VisiCutR.",
+  "Inkscape": "Inkscape",
+  "Erweiterung": "Estensione",
+  "nicht installiert": "non installata",
+  "veraltet, bitte neu installieren": "obsoleta, reinstallarla",
+  "installiert": "installata",
+  "Inkscape-Erweiterung installieren": "Installa estensione Inkscape",
+  "Inkscape-Erweiterung neu installieren": "Reinstalla estensione Inkscape",
+  "Erweiterungsordner von Inkscape unbekannt": "Cartella delle estensioni di Inkscape sconosciuta",
+  "Inkscape-Erweiterung installiert in {path}. Inkscape neu starten.": "Estensione Inkscape installata in {path}. Riavviare Inkscape.",
+  "Inkscape-Erweiterung nicht installiert: {error}": "Estensione Inkscape non installata: {error}",
+  "In Inkscape unter Erweiterungen → Lasercut Path: „Add to VisiCutR“ fügt die Zeichnung oder Auswahl als Teil hinzu, „Open in VisiCutR“ ersetzt das Projekt. Läuft VisiCutR schon, öffnet sich die Datei dort.": "In Inkscape in Estensioni → Lasercut Path: «Add to VisiCutR» aggiunge il disegno o la selezione come parte, «Open in VisiCutR» sostituisce il progetto. Se VisiCutR è già in esecuzione, il file si apre lì."
 }

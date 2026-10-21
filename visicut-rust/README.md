@@ -151,7 +151,14 @@ lokal nach einem Build für die jeweilige Host-Architektur.
    Füllfarbe, Linienstärke, Gruppe/Ebene, Typ oder ID; ein Restschritt nimmt
    alles Übrige, Ignorierregeln schließen Objekte aus. Vorlagen enthalten die
    FAU-Zuordnungen („rot schneiden, grün markieren, blau ignorieren, Rest
-   gravieren“). Die Wertliste neben jeder Bedingung zeigt die Werte der SVG.
+   gravieren“). Unter **Einstellungen → Job → Eigene Vorlagen** lassen sich
+   die Regel-Schritte (Bedingungen, Verfahren, Rest) samt Ignorierregeln unter
+   einem Namen sichern, umbenennen, löschen und als **Standard für neue
+   Projekte** festlegen; Leistung und Geschwindigkeit kommen weiter aus dem
+   Materialprofil. **Aus VisiCut importieren …** übernimmt Zuordnungen
+   (`mappings/*.xml`) aus VisiCut-Einstellungen oder einem `.vcsettings`-Archiv.
+   Die Vorlagen liegen in `mapping-templates.json` im Einstellungsordner.
+   Die Wertliste neben jeder Bedingung zeigt die Werte der SVG.
    Die Liste zeigt
    Objektnummer, SVG-ID bzw. Bezeichnung und direkt gesetzte Farbe.
    Gruppen bleiben mit ihren Transformationen erhalten; Text, Bilder und

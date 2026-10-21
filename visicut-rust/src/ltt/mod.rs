@@ -2439,11 +2439,11 @@ mod tests {
             .find(|p| p.name.starts_with("FAU: rot"))
             .unwrap();
         let fau = &fau;
-        for (operation, filters, rest) in &fau.rules {
+        for rule in &fau.rules {
             p.steps.push(crate::project::JobStep {
-                filters: filters.clone(),
-                rest: *rest,
-                ..crate::project::JobStep::new(*operation)
+                filters: rule.filters.clone(),
+                rest: rule.rest,
+                ..crate::project::JobStep::new(rule.operation)
             });
         }
         p.ignore_filters = fau.ignore.clone();

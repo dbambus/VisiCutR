@@ -322,6 +322,9 @@ pub fn duplicate_material(materials: &mut Vec<Material>, index: usize) -> usize 
 fn profile_table(ui: &mut egui::Ui, material: &mut Material, drop: &mut Option<usize>) {
     let groups = profile_groups(&material.profiles);
     let mut add_to = None;
+    // Einheitliche Feldbreiten, egal wie viele Stellen der Wert hat.
+    let height = ui.spacing().interact_size.y;
+    let percent = [64.0, height];
     egui::Grid::new("profiles")
         .num_columns(5)
         .spacing([10.0, 4.0])
@@ -343,7 +346,8 @@ fn profile_table(ui: &mut egui::Ui, material: &mut Material, drop: &mut Option<u
                 }
                 let mut value = *thickness;
                 let changed = ui
-                    .add(
+                    .add_sized(
+                        [72.0, height],
                         egui::DragValue::new(&mut value)
                             .range(0.0..=1000.0)
                             .suffix(" mm"),
@@ -379,6 +383,9 @@ fn profile_table(ui: &mut egui::Ui, material: &mut Material, drop: &mut Option<u
                                     .color(color),
                             )
                             .show_ui(ui, |ui| {
+                                // Neutral hinterlegt: auf dem Orange der Auswahl
+                                // wären die Verfahrensfarben nicht lesbar.
+                                ui.visuals_mut().selection.bg_fill = egui::Color32::from_gray(222);
                                 for o in Operation::ALL {
                                     let text = egui::RichText::new(operation_title(o))
                                         .color(crate::preview_ui::operation_color(o));
@@ -386,12 +393,14 @@ fn profile_table(ui: &mut egui::Ui, material: &mut Material, drop: &mut Option<u
                                 }
                             });
                     });
-                    ui.add(
+                    ui.add_sized(
+                        percent,
                         egui::DragValue::new(&mut profile.power_percent)
                             .range(0.0..=100.0)
                             .suffix(" %"),
                     );
-                    ui.add(
+                    ui.add_sized(
+                        percent,
                         egui::DragValue::new(&mut profile.speed_percent)
                             .range(0.0..=100.0)
                             .suffix(" %"),

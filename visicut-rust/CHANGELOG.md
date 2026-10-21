@@ -14,6 +14,14 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
   `visicutr --add datei.svg`) übergibt die Dateien an das laufende Fenster
   und holt es nach vorn. Unbekannte Optionen werden mit einer Hilfe
   abgelehnt.
+- **Eigene Zuordnungs-Vorlagen** (Einstellungen → Job → Eigene Vorlagen):
+  Regel-Schritte mit Bedingungen, Verfahren und Rest sowie die Ignorierregeln
+  eines Projekts unter einem Namen sichern, umbenennen und löschen. **Vorlage
+  übernehmen** listet eingebaute und eigene Vorlagen; eine davon gilt als
+  **Standard für neue Projekte** beim Wechsel auf „Regeln“ (bisher immer die
+  erste eingebaute). Parameter gehören nicht zur Vorlage, sie kommen weiter aus
+  dem Materialprofil. **Aus VisiCut importieren …** liest Java-Zuordnungen
+  (`mappings/*.xml`) einzeln oder aus einem `.vcsettings`-Archiv.
 - **Neuer Name VisiCutR** mit eigenem Logo (VC mit hochgestelltem R).
   Programm `visicutr`, macOS `VisiCutR.app`, Downloads `VisiCutR-…`,
   Repository `dbambus/VisiCutR`. Der Einstellungsordner von VisiCutRust
@@ -27,6 +35,13 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
   nach Otsu), Glättung gegen Wabe und Lamellen, Sicherheitsabstand nach innen
   und Mindestfläche; ausgeschnittene Löcher bleiben erhalten. **Als Teil
   einfügen** legt die Umrisse als Schneid-Teil an ihre Stelle (widerrufbar).
+- **Dateien per Doppelklick öffnen**: Unter macOS öffnet `VisiCutR.app`
+  Dateien aus dem Finder (bisher kam das Ereignis nicht an), auch bei
+  laufender App; neu zugeordnet sind `.plf`, `.ls` sowie SVG, PDF, DXF und EPS
+  unter „Öffnen mit“. Windows: **Einstellungen → Allgemein → Dateitypen
+  zuordnen** trägt die portable EXE für das eigene Konto ein und entfernt sie
+  wieder. Linux: `install-desktop.sh` im tar.gz legt Menüeintrag und
+  MIME-Typen in `~/.local/share` an.
 
 ## 0.19.0 – 16.10.2026
 

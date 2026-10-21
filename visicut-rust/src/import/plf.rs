@@ -24,6 +24,7 @@ mod script;
 mod write;
 mod xml;
 
+pub use mappings::import_templates;
 pub use write::{plf_bytes, write_plf};
 
 use super::{Imported, MAX_FILE_BYTES};

@@ -6,6 +6,7 @@ use crate::{i18n::tr, tr};
 use resvg::usvg::{self, roxmltree};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::path::Path;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Attribute {
@@ -420,13 +421,64 @@ pub fn values(svg: &str) -> Result<Vec<(Attribute, ValueCounts)>, String> {
         .collect())
 }
 
-/// A predefined mapping (VisiCut "mappings/*.xml").
-#[derive(Clone, Debug, Serialize)]
+/// One step of a mapping template: operation and conditions, without laser
+/// parameters (they come from the material profile).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Rule {
+    pub operation: Operation,
+    /// `None` together with `rest`: the objects no other rule takes.
+    #[serde(default)]
+    pub filters: Option<Vec<Filter>>,
+    #[serde(default)]
+    pub rest: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub outline: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
+impl Rule {
+    fn new(operation: Operation, filters: Option<Vec<Filter>>, rest: bool) -> Self {
+        Self {
+            operation,
+            filters,
+            rest,
+            outline: false,
+        }
+    }
+}
+
+/// A mapping template (VisiCut "mappings/*.xml"): rule steps and ignore rules.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Predefined {
-    pub name: &'static str,
-    /// (operation, filters, rest)
-    pub rules: Vec<(Operation, Option<Vec<Filter>>, bool)>,
+    pub name: String,
+    pub rules: Vec<Rule>,
+    #[serde(default)]
     pub ignore: Vec<Vec<Filter>>,
+}
+
+impl Predefined {
+    /// The rule steps and ignore rules of a project; steps with a fixed object
+    /// list are left out.
+    pub fn from_project(name: &str, project: &Project) -> Self {
+        Self {
+            name: name.trim().into(),
+            rules: project
+                .steps
+                .iter()
+                .filter(|s| s.filters.is_some() || s.rest)
+                .map(|s| Rule {
+                    outline: s.outline,
+                    ..Rule::new(s.operation, s.filters.clone(), s.rest)
+                })
+                .collect(),
+            ignore: project.ignore_filters.clone(),
+        }
+    }
 }
 
 fn color(value: &str) -> Vec<Filter> {
@@ -441,44 +493,191 @@ fn color(value: &str) -> Vec<Filter> {
 /// Templates for rule mappings. "Everything one operation" is not offered:
 /// the assignment "Gesamt" does exactly that.
 pub fn predefined() -> Vec<Predefined> {
+    let rule = Rule::new;
     vec![
         // Reine RGB-Farben wie in vielen Laser-Workflows.
         Predefined {
-            name: tr("Farben: Rot schneiden, Blau gravieren, Grün markieren"),
+            name: tr("Farben: Rot schneiden, Blau gravieren, Grün markieren").into(),
             rules: vec![
-                (Operation::Engrave, Some(color("#0000ff")), false),
-                (Operation::Mark, Some(color("#00ff00")), false),
-                (Operation::Cut, Some(color("#ff0000")), false),
+                rule(Operation::Engrave, Some(color("#0000ff")), false),
+                rule(Operation::Mark, Some(color("#00ff00")), false),
+                rule(Operation::Cut, Some(color("#ff0000")), false),
             ],
             ignore: vec![],
         },
         // fau-fablab/visicut-settings/mappings
         Predefined {
-            name: tr("FAU: rot schneiden, grün markieren, blau ignorieren, Rest gravieren"),
+            name: tr("FAU: rot schneiden, grün markieren, blau ignorieren, Rest gravieren").into(),
             rules: vec![
-                (Operation::Mark, Some(color("#00ff00")), false),
-                (Operation::Cut, Some(color("#ff0000")), false),
-                (Operation::Engrave, None, true),
+                rule(Operation::Mark, Some(color("#00ff00")), false),
+                rule(Operation::Cut, Some(color("#ff0000")), false),
+                rule(Operation::Engrave, None, true),
             ],
             ignore: vec![color("#0000ff")],
         },
         Predefined {
-            name: tr("FAU: grün markieren, rot und blau ignorieren, Rest gravieren"),
+            name: tr("FAU: grün markieren, rot und blau ignorieren, Rest gravieren").into(),
             rules: vec![
-                (Operation::Mark, Some(color("#00ff00")), false),
-                (Operation::Engrave, None, true),
+                rule(Operation::Mark, Some(color("#00ff00")), false),
+                rule(Operation::Engrave, None, true),
             ],
             ignore: vec![color("#0000ff"), color("#ff0000")],
         },
         Predefined {
-            name: tr("Rot schneiden, Rest gravieren"),
+            name: tr("Rot schneiden, Rest gravieren").into(),
             rules: vec![
-                (Operation::Cut, Some(color("#ff0000")), false),
-                (Operation::Engrave, None, true),
+                rule(Operation::Cut, Some(color("#ff0000")), false),
+                rule(Operation::Engrave, None, true),
             ],
             ignore: vec![],
         },
     ]
+}
+
+/// A template in the list of built-in and own templates.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TemplateRef {
+    /// Position in [`predefined`]; built-in names change with the language.
+    Builtin(usize),
+    Own(String),
+}
+
+/// File with the user's own templates in the settings folder.
+const TEMPLATES_FILE: &str = "mapping-templates.json";
+
+/// The user's own mapping templates and the template new projects start with.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Templates {
+    pub own: Vec<Predefined>,
+    /// `None`: the first built-in template.
+    pub default: Option<TemplateRef>,
+}
+
+impl Templates {
+    /// Own templates in `dir`; none if the file is missing.
+    pub fn load(dir: &Path) -> Result<Self, String> {
+        let path = dir.join(TEMPLATES_FILE);
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+        let source = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&source).map_err(|e| {
+            tr!(
+                "Zuordnungsvorlagen {path} sind beschädigt: {error}",
+                path = path.display(),
+                error = e
+            )
+        })
+    }
+
+    pub fn save(&self, dir: &Path) -> Result<(), String> {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        let temporary = dir.join(format!("{TEMPLATES_FILE}.tmp"));
+        let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
+        std::fs::write(&temporary, json).map_err(|e| e.to_string())?;
+        std::fs::rename(&temporary, dir.join(TEMPLATES_FILE)).map_err(|e| e.to_string())
+    }
+
+    /// Built-in templates followed by the own ones.
+    pub fn all(&self) -> Vec<(TemplateRef, Predefined)> {
+        predefined()
+            .into_iter()
+            .enumerate()
+            .map(|(i, p)| (TemplateRef::Builtin(i), p))
+            .chain(
+                self.own
+                    .iter()
+                    .map(|p| (TemplateRef::Own(p.name.clone()), p.clone())),
+            )
+            .collect()
+    }
+
+    pub fn get(&self, reference: &TemplateRef) -> Option<Predefined> {
+        match reference {
+            TemplateRef::Builtin(i) => predefined().into_iter().nth(*i),
+            TemplateRef::Own(name) => self.own.iter().find(|p| p.name == *name).cloned(),
+        }
+    }
+
+    /// The template for new projects; the first built-in one if the chosen
+    /// one no longer exists.
+    pub fn default_template(&self) -> Predefined {
+        self.default
+            .as_ref()
+            .and_then(|r| self.get(r))
+            .unwrap_or_else(|| predefined().swap_remove(0))
+    }
+
+    pub fn is_default(&self, reference: &TemplateRef) -> bool {
+        match &self.default {
+            Some(default) => default == reference,
+            None => *reference == TemplateRef::Builtin(0),
+        }
+    }
+
+    fn check_name(&self, name: &str) -> Result<(), String> {
+        if name.trim().is_empty() {
+            return Err(tr("Die Vorlage braucht einen Namen").into());
+        }
+        Ok(())
+    }
+
+    /// `base`, or `base (2)`, `base (3)` … if an own template has that name.
+    pub fn free_name(&self, base: &str) -> String {
+        let base = base.trim();
+        let taken = |name: &str| self.own.iter().any(|p| p.name == name);
+        (1..)
+            .map(|n| match n {
+                1 => base.to_string(),
+                n => format!("{base} ({n})"),
+            })
+            .find(|name| !taken(name))
+            .unwrap_or_default()
+    }
+
+    /// Adds a template or replaces the own one with the same name.
+    pub fn store(&mut self, template: Predefined) -> Result<(), String> {
+        self.check_name(&template.name)?;
+        if template.rules.is_empty() {
+            return Err(tr("Die Vorlage enthält keine Regel").into());
+        }
+        match self.own.iter_mut().find(|p| p.name == template.name) {
+            Some(existing) => *existing = template,
+            None => self.own.push(template),
+        }
+        Ok(())
+    }
+
+    pub fn rename(&mut self, old: &str, new: &str) -> Result<(), String> {
+        let new = new.trim();
+        self.check_name(new)?;
+        if new == old {
+            return Ok(());
+        }
+        if self.own.iter().any(|p| p.name == new) {
+            return Err(tr!("Es gibt schon eine Vorlage „{name}“", name = new));
+        }
+        let template = self
+            .own
+            .iter_mut()
+            .find(|p| p.name == old)
+            .ok_or_else(|| tr!("Vorlage „{name}“ fehlt", name = old))?;
+        template.name = new.into();
+        if self.default == Some(TemplateRef::Own(old.into())) {
+            self.default = Some(TemplateRef::Own(new.into()));
+        }
+        Ok(())
+    }
+
+    /// Removes an own template; new projects then start with the first
+    /// built-in one if it was the default.
+    pub fn remove(&mut self, name: &str) {
+        self.own.retain(|p| p.name != name);
+        if self.default == Some(TemplateRef::Own(name.into())) {
+            self.default = None;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -566,11 +765,11 @@ mod tests {
             .find(|p| p.name.starts_with("FAU: rot"))
             .unwrap();
         let fau = &fau;
-        for (operation, filters, rest) in &fau.rules {
+        for rule in &fau.rules {
             project.steps.push(JobStep {
-                filters: filters.clone(),
-                rest: *rest,
-                ..JobStep::new(*operation)
+                filters: rule.filters.clone(),
+                rest: rule.rest,
+                ..JobStep::new(rule.operation)
             });
         }
         project.ignore_filters = fau.ignore.clone();
@@ -621,11 +820,11 @@ mod tests {
             svg: svg.into(),
             ..Default::default()
         };
-        for (operation, filters, rest) in &predefined()[0].rules {
+        for rule in &predefined()[0].rules {
             project.steps.push(JobStep {
-                filters: filters.clone(),
-                rest: *rest,
-                ..JobStep::new(*operation)
+                filters: rule.filters.clone(),
+                rest: rule.rest,
+                ..JobStep::new(rule.operation)
             });
         }
         let by_operation = |project: &Project| -> Vec<(Operation, Vec<usize>)> {
@@ -656,5 +855,100 @@ mod tests {
                 .iter()
                 .all(|(_, objects)| objects.is_empty())
         );
+    }
+
+    #[test]
+    fn own_templates_save_load_rename_remove_and_default() {
+        let dir = std::env::temp_dir().join(format!("visicut-templates-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut templates = Templates::load(&dir).unwrap();
+        assert_eq!(templates, Templates::default());
+        assert_eq!(templates.default_template(), predefined()[0]);
+
+        // Only rule steps and ignore rules go into the template.
+        let mut project = Project::default();
+        project.steps.push(JobStep {
+            filters: Some(color("#ff0000")),
+            outline: true,
+            power_percent: 77.0,
+            ..JobStep::new(Operation::Cut)
+        });
+        project.steps.push(JobStep {
+            objects: vec![1],
+            ..JobStep::new(Operation::Mark)
+        });
+        project.steps.push(JobStep {
+            rest: true,
+            ..JobStep::new(Operation::Engrave)
+        });
+        project.ignore_filters = vec![color("#0000ff")];
+        let own = Predefined::from_project(" Werkstatt ", &project);
+        assert_eq!(own.name, "Werkstatt");
+        assert_eq!(
+            own.rules,
+            [
+                Rule {
+                    outline: true,
+                    ..Rule::new(Operation::Cut, Some(color("#ff0000")), false)
+                },
+                Rule::new(Operation::Engrave, None, true),
+            ]
+        );
+        assert_eq!(own.ignore, [color("#0000ff")]);
+        templates.store(own.clone()).unwrap();
+        assert!(
+            templates
+                .store(Predefined::from_project("  ", &project))
+                .is_err()
+        );
+        assert!(
+            templates
+                .store(Predefined::from_project("Leer", &Project::default()))
+                .is_err()
+        );
+        // Same name replaces.
+        let mut changed = own.clone();
+        changed.ignore.clear();
+        templates.store(changed.clone()).unwrap();
+        assert_eq!(templates.own, [changed.clone()]);
+        assert_eq!(templates.free_name("Werkstatt"), "Werkstatt (2)");
+        assert_eq!(templates.free_name("Neu"), "Neu");
+
+        let reference = TemplateRef::Own("Werkstatt".into());
+        assert!(templates.is_default(&TemplateRef::Builtin(0)));
+        templates.default = Some(reference.clone());
+        assert!(templates.is_default(&reference));
+        assert_eq!(templates.default_template(), changed);
+        let all = templates.all();
+        assert_eq!(all.len(), predefined().len() + 1);
+        assert_eq!(all.last().unwrap().0, reference);
+
+        templates.save(&dir).unwrap();
+        let loaded = Templates::load(&dir).unwrap();
+        assert_eq!(loaded, templates);
+
+        templates
+            .store(Predefined {
+                name: "Andere".into(),
+                ..changed.clone()
+            })
+            .unwrap();
+        assert!(templates.rename("Werkstatt", "Andere").is_err());
+        assert!(templates.rename("Werkstatt", " ").is_err());
+        templates.rename("Werkstatt", " Halle ").unwrap();
+        assert_eq!(templates.default, Some(TemplateRef::Own("Halle".into())));
+        assert_eq!(templates.default_template().name, "Halle");
+        templates.remove("Halle");
+        assert_eq!(templates.default, None);
+        assert_eq!(templates.default_template(), predefined()[0]);
+        // A default that is gone falls back to the first built-in template.
+        templates.default = Some(TemplateRef::Builtin(99));
+        assert_eq!(templates.default_template(), predefined()[0]);
+        templates.default = Some(TemplateRef::Builtin(1));
+        assert_eq!(templates.default_template(), predefined()[1]);
+
+        std::fs::write(dir.join(TEMPLATES_FILE), "{").unwrap();
+        assert!(Templates::load(&dir).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -1,8 +1,10 @@
 mod compose_ui;
 mod devices_ui;
+mod file_types;
 mod form;
 mod jobs_ui;
 mod object_bar;
+mod open_files;
 mod preview_ui;
 mod remnant_ui;
 mod settings;
@@ -485,12 +487,17 @@ impl VisiCutR {
                 Err(e) => eprintln!("Einzelinstanz nicht verfügbar: {e}"),
             }
         }
+        // Unter macOS kommen per Doppelklick geöffnete Dateien als Ereignis.
+        let opened = open_files::take();
+        open_files::watch(&cc.egui_ctx);
         if launch.demo {
             app.perform(&cc.egui_ctx, Replace::Demo);
         } else if !launch.request.files.is_empty() {
             app.open_request(&cc.egui_ctx, launch.request);
+        } else if !opened.is_empty() {
+            app.open_files(&cc.egui_ctx, opened);
         } else if let Some(path) = session::take_resume(&session::dir()) {
-            // Beim letzten Beenden ungesicherter Stand.
+            // Sonst der beim letzten Beenden ungesicherte Stand.
             app.perform(&cc.egui_ctx, Replace::Open(path));
         }
         cc.egui_ctx.request_repaint();
@@ -870,6 +877,12 @@ impl VisiCutR {
             Err(files) if !files.is_empty() => self.drop_files(ctx, files),
             Err(_) => {}
         }
+    }
+
+    /// Vom Betriebssystem übergebene Dateien: eine wird geöffnet (mit
+    /// Rückfrage bei ungesicherten Änderungen), mehrere wie abgelegt.
+    fn open_files(&mut self, ctx: &egui::Context, files: Vec<PathBuf>) {
+        self.open_request(ctx, instance::Request { add: false, files });
     }
 
     /// Abgelegte Dateien: Grafiken kommen als neue Teile hinzu (ohne Motiv
@@ -1565,6 +1578,11 @@ impl VisiCutR {
                     self.jobs.rules_settings(ui, &mut self.project, &mut self.dirty);
                 });
             });
+            form::section(ui, tr("Eigene Vorlagen"), |ui| {
+                ui.add_enabled_ui(!self.busy(), |ui| {
+                    self.jobs.own_templates(ui, &self.project);
+                });
+            });
             form::section(ui, tr("Ignorieren"), |ui| {
                 ui.add_enabled_ui(!self.busy(), |ui| {
                     self.jobs.ignore_rules(ui, &mut self.project, &mut self.dirty);
@@ -1674,6 +1692,9 @@ impl VisiCutR {
                 });
             });
             form::section(ui, tr("Inkscape"), |ui| self.inkscape_section(ui));
+            if cfg!(windows) {
+                self.file_types_section(ui);
+            }
             form::section(ui, tr("Lasercutter"), |ui| {
                 self.devices
                     .transfer(ui, &mut self.project, &mut self.status);
@@ -1730,6 +1751,56 @@ impl VisiCutR {
                 "In Inkscape unter Erweiterungen → Lasercut Path: „Add to VisiCutR“ fügt die Zeichnung oder Auswahl als Teil hinzu, „Open in VisiCutR“ ersetzt das Projekt. Läuft VisiCutR schon, öffnet sich die Datei dort.",
             ),
         );
+    }
+
+    /// Windows: Dateitypen der portablen EXE zuordnen und wieder entfernen.
+    fn file_types_section(&mut self, ui: &mut egui::Ui) {
+        let exe = std::env::current_exe().ok();
+        let status = exe
+            .as_deref()
+            .map_or(file_types::Status::Missing, file_types::status);
+        form::section(ui, tr("Dateitypen"), |ui| {
+            form::row(ui, tr("Zugeordnet"), |ui| {
+                ui.label(match status {
+                    file_types::Status::Registered => tr("diesem Programm"),
+                    file_types::Status::Elsewhere => tr("einem anderen Speicherort"),
+                    file_types::Status::Missing => tr("nein"),
+                })
+            });
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(
+                        exe.is_some() && status != file_types::Status::Registered,
+                        egui::Button::new(tr("Dateitypen zuordnen")),
+                    )
+                    .clicked()
+                    && let Some(exe) = &exe
+                {
+                    match file_types::register(exe) {
+                        Ok(()) => self.status = tr("Dateitypen zugeordnet").into(),
+                        Err(e) => self.report(e),
+                    }
+                }
+                if ui
+                    .add_enabled(
+                        status != file_types::Status::Missing,
+                        egui::Button::new(tr("Zuordnung entfernen")),
+                    )
+                    .clicked()
+                {
+                    match file_types::unregister() {
+                        Ok(()) => self.status = tr("Zuordnung der Dateitypen entfernt").into(),
+                        Err(e) => self.report(e),
+                    }
+                }
+            });
+            form::caption(
+                ui,
+                tr(
+                    "VisiCutR-Projekte öffnen per Doppelklick, PLF und LaserScript, wenn noch kein anderes Programm sie öffnet. SVG, PDF, DXF und EPS stehen unter „Öffnen mit“. Gilt nur für dieses Benutzerkonto; nach dem Verschieben von VisiCutR erneut zuordnen.",
+                ),
+            );
+        });
     }
 
     /// Kopf der Seitenleiste „Vorbereiten“: aktiver Lasercutter wie die
@@ -3540,6 +3611,10 @@ impl eframe::App for VisiCutR {
         {
             self.open_request(ctx, request);
         }
+        if !self.modal_open() && !self.busy() {
+            let opened = open_files::take();
+            self.open_files(ctx, opened);
+        }
         self.keyboard(ctx);
         if let Some(object) = self.jobs.take_deleted_object() {
             self.delete_objects(ctx, &[object]);
@@ -3716,6 +3791,7 @@ fn main() -> eframe::Result {
     if let Some(icon) = window_icon() {
         viewport = viewport.with_icon(icon);
     }
+    open_files::install();
     let options = eframe::NativeOptions {
         viewport,
         ..Default::default()

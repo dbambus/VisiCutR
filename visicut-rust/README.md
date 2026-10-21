@@ -86,6 +86,28 @@ eine kompatible glibc-Laufzeit voraus. Die Pakete enthalten Hinweise zum Start
 und zum Funktionsumfang. `scripts/package-ci.py` erstellt dieselben Archive
 lokal nach einem Build für die jeweilige Host-Architektur.
 
+### Dateien per Doppelklick öffnen
+
+VisiCutR öffnet die Datei, mit der es gestartet wird (`visicutr Datei.svg`),
+und unter macOS auch Dateien aus dem Finder bei bereits laufender App. Eine
+Datei ersetzt das Projekt (mit Rückfrage bei ungesicherten Änderungen), mehrere
+werden wie abgelegte Dateien als Teile eingefügt.
+
+| Plattform | Einrichtung | Doppelklick öffnet | Unter „Öffnen mit“ |
+| --- | --- | --- | --- |
+| macOS | automatisch mit `VisiCutR.app` | `.vcr`, `.plf`, `.ls` | SVG, PDF, DXF, EPS |
+| Windows | **Einstellungen → Allgemein → Dateitypen zuordnen** | `.vcr`; `.plf`, `.ls`, wenn kein anderes Programm sie öffnet | SVG, PDF, DXF, EPS |
+| Linux | `./install-desktop.sh` im entpackten Ordner | `.vcr`, `.plf`, `.ls` | SVG, PDF, DXF, EPS |
+
+Unter Windows schreibt die Zuordnung nur in `HKCU\Software\Classes` (ohne
+Administratorrechte, für das angemeldete Konto) und zeigt auf die gerade
+laufende `visicutr.exe`; nach dem Verschieben erneut zuordnen.
+**Zuordnung entfernen** löscht alle Einträge wieder; Standardprogramme anderer
+Anwendungen, etwa Java-VisiCut für `.plf`, bleiben unangetastet. Unter Linux
+legt das Skript Menüeintrag, MIME-Typen (`application/x-visicutr-project`,
+`application/x-plf`, `application/x-ls` wie bei Java-VisiCut) und Symbol in
+`~/.local/share` ab; `./install-desktop.sh --uninstall` entfernt sie.
+
 
 ## Workflow
 
@@ -151,7 +173,14 @@ lokal nach einem Build für die jeweilige Host-Architektur.
    Füllfarbe, Linienstärke, Gruppe/Ebene, Typ oder ID; ein Restschritt nimmt
    alles Übrige, Ignorierregeln schließen Objekte aus. Vorlagen enthalten die
    FAU-Zuordnungen („rot schneiden, grün markieren, blau ignorieren, Rest
-   gravieren“). Die Wertliste neben jeder Bedingung zeigt die Werte der SVG.
+   gravieren“). Unter **Einstellungen → Job → Eigene Vorlagen** lassen sich
+   die Regel-Schritte (Bedingungen, Verfahren, Rest) samt Ignorierregeln unter
+   einem Namen sichern, umbenennen, löschen und als **Standard für neue
+   Projekte** festlegen; Leistung und Geschwindigkeit kommen weiter aus dem
+   Materialprofil. **Aus VisiCut importieren …** übernimmt Zuordnungen
+   (`mappings/*.xml`) aus VisiCut-Einstellungen oder einem `.vcsettings`-Archiv.
+   Die Vorlagen liegen in `mapping-templates.json` im Einstellungsordner.
+   Die Wertliste neben jeder Bedingung zeigt die Werte der SVG.
    Die Liste zeigt
    Objektnummer, SVG-ID bzw. Bezeichnung und direkt gesetzte Farbe.
    Gruppen bleiben mit ihren Transformationen erhalten; Text, Bilder und

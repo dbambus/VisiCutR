@@ -54,6 +54,27 @@ def main():
         # sie auch selbst (Einstellungen > Allgemein).
         shutil.copytree(project / "resources/inkscape", stage / "inkscape-extension",
                         ignore=shutil.ignore_patterns("__pycache__"))
+        if "linux" in target:
+            # Anwendungsmenü und Dateizuordnungen für ~/.local/share.
+            linux = project / "resources/linux"
+            shutil.copy2(linux / "install-desktop.sh", stage / "install-desktop.sh")
+            desktop = stage / "desktop"
+            desktop.mkdir()
+            for source in [linux / "visicutr.desktop", linux / "visicutr-mime.xml",
+                           project / "resources/icon/visicutr.svg"]:
+                shutil.copy2(source, desktop / source.name)
+            shutil.copy2(project / "resources/icon/icon.png", desktop / "visicutr.png")
+            associations = (
+                "Run ./install-desktop.sh once to add VisiCutR to the application menu\n"
+                "and open .vcr, .plf and .ls files by double-click (SVG, PDF, DXF and EPS\n"
+                "under \"Open with\"); ./install-desktop.sh --uninstall removes it again.\n"
+            )
+        elif "windows" in target:
+            associations = (
+                "Settings > General > File types associates .vcr, .plf and .ls files with\n"
+                "this visicutr.exe for the current user (SVG, PDF, DXF and EPS under\n"
+                "\"Open with\"); the same page removes the association again.\n"
+            )
         (stage / "START-HERE.txt").write_text(
             "VisiCutR - egui interface (the same on Windows, Linux and macOS)\n\n"
             f"Start visicutr{suffix}. No Java is required.\n"
@@ -65,7 +86,8 @@ def main():
             f"visicutr-cameraserver{suffix} serves photos from a capture command.\n"
             "Linux requires a graphical X11/Wayland session, OpenGL/EGL, libxkbcommon,\n"
             "and a desktop portal for file dialogs. Built on Ubuntu 24.04 (glibc 2.39).\n"
-            "See README.md and PROTOCOL.md for features and hardware validation status.\n",
+            "See README.md and PROTOCOL.md for features and hardware validation status.\n"
+            + associations,
             encoding="utf-8",
         )
         if "windows" in target:

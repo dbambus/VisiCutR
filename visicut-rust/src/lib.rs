@@ -1,4 +1,3 @@
-mod bridge;
 pub mod camera;
 pub mod compose;
 pub mod device;

@@ -168,17 +168,12 @@ mod tests {
         }
     }
 
-    /// Alle Texte aus `tr("…")` und `tr!("…"` in den Rust- und Swift-Quellen.
+    /// Alle Texte aus `tr("…")` und `tr!("…"` in den Rust-Quellen.
     fn keys() -> BTreeSet<String> {
         let mut keys = BTreeSet::new();
         let mut files = Vec::new();
         sources(
             std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src")),
-            &mut files,
-        );
-        // Die macOS-Oberfläche nutzt dieselben Tabellen (`tr("…")` in Swift).
-        sources(
-            std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/native")),
             &mut files,
         );
         for path in files {
@@ -216,8 +211,6 @@ mod tests {
                             chars.next();
                         }
                     }
-                    // Swift-Interpolation `\(…)` gehört nicht in einen Schlüssel.
-                    Some('(') => key.push_str("\\("),
                     Some(other) => key.push(other),
                     None => {}
                 },
@@ -243,11 +236,6 @@ mod tests {
     #[test]
     fn every_text_is_translated_with_the_same_placeholders() {
         let keys = keys();
-        let interpolated: Vec<_> = keys.iter().filter(|k| k.contains("\\(")).collect();
-        assert!(
-            interpolated.is_empty(),
-            "Platzhalter {{name}} statt Swift-Interpolation: {interpolated:#?}"
-        );
         assert!(keys.len() > 100, "zu wenige Texte gefunden: {}", keys.len());
         for language in &Language::ALL[1..] {
             let table = language.table().unwrap();

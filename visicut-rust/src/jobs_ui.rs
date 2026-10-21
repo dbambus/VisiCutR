@@ -1,6 +1,5 @@
 //! Materials, processing steps, object assignment, rules and engraving
-//! options for the egui interface (counterpart of the macOS inspector in
-//! native/VisiCutApp.swift and native/Mapping.swift).
+//! options for the egui interface.
 use eframe::egui;
 use visicut_core::{
     device,

@@ -429,21 +429,18 @@ den Zwischenstand. Nur wenn das Ablegen scheitert, kommt die frühere Rückfrage
 **Ablage/Datei → Zwischenspeicher leeren …** löscht nach einer Bestätigung alle
 abgelegten Stände; gesicherte Projekte und das geöffnete Projekt bleiben.
 
-Übersetzungen: Der deutsche Text ist der Schlüssel (`tr("…")` in Rust und
-Swift, mit Platzhaltern `tr!("… {name}", name = …)` bzw.
-`tr("… {name}", ["name": …])`); die Tabellen liegen in
-`resources/i18n/<sprache>.json` und werden in den Rust-Kern einkompiliert,
-die macOS-App holt sie über die Brückenaktion `set_language`. Ein Test prüft,
-dass jeder Text aus `src/` und `native/` in jeder Sprache mit denselben
+Übersetzungen: Der deutsche Text ist der Schlüssel (`tr("…")`, mit
+Platzhaltern `tr!("… {name}", name = …)`); die Tabellen liegen in
+`resources/i18n/<sprache>.json` und werden in den Rust-Kern einkompiliert.
+Ein Test prüft, dass jeder Text aus `src/` in jeder Sprache mit denselben
 Platzhaltern übersetzt ist und keine veralteten Einträge bleiben. `cargo test --lib i18n::tests::export_missing -- --ignored`
 schreibt fehlende Texte nach `target/i18n/missing-<sprache>.json`.
 
 ## Entwicklung
 
 `src/lib.rs` ist der Rust-Kern, `src/main.rs` die egui-Oberfläche. Die
-frühere native macOS-Oberfläche (`native/*.swift` mit der C-Schnittstelle
-`src/bridge.rs`) wird nicht mehr gebaut oder ausgeliefert; die Quellen
-bleiben vorerst im Repository.
+frühere native macOS-Oberfläche (SwiftUI) ist entfernt; das macOS-Bundle
+enthält dieselbe egui-Oberfläche wie Windows und Linux.
 
 `tests/java_parity.rs` vergleicht die erzeugten LTT-Aufträge Byte für Byte
 mit Referenzen aus dem originalen Java-VisiCut; neu erzeugt werden sie mit

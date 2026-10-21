@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
-# FAU profile file name and VisiCutRust operation.
+# FAU profile file name and VisiCutR operation.
 OPERATIONS = (
     ("cut", "Cut"), ("engrave", "Engrave"), ("mark", "Mark"),
     ("engrave_32_3d", "Engrave3d"), ("engrave3d", "Engrave3d"),

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dithering {
-    /// Fixed luminance threshold 128 (VisiCutRust ≤ 0.3).
+    /// Fixed luminance threshold 128 (VisiCutR ≤ 0.3).
     Threshold,
     FloydSteinberg,
     Average,

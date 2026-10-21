@@ -49,6 +49,16 @@ impl AppSettings {
             .unwrap_or_else(Language::system)
     }
 
+    /// Zuletzt geöffnete Dateien im verschobenen Einstellungsordner (z. B.
+    /// Zwischenstände) zeigen danach auf den neuen Ort.
+    pub fn moved_config(&mut self, old: &Path, new: &Path) {
+        for path in &mut self.recent {
+            if let Ok(rest) = path.strip_prefix(old) {
+                *path = new.join(rest);
+            }
+        }
+    }
+
     /// Setzt eine Datei an den Anfang der Liste (ohne Doppelte).
     pub fn remember(&mut self, path: &Path) {
         let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());

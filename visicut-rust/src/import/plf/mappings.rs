@@ -43,7 +43,7 @@ use roxmltree::Node;
 
 /// Höchstzahl der Bearbeitungsschritte in einem Projekt (`Project::validate`).
 const MAX_STEPS: usize = 64;
-/// Auflösung, mit der VisiCutRust rastert (`ltt::RASTER_DPI`) und der Java-Standard.
+/// Auflösung, mit der VisiCutR rastert (`ltt::RASTER_DPI`) und der Java-Standard.
 const SUPPORTED_DPI: f64 = 500.0;
 
 /// Ein Wert eines Filters, so wie VisiCut ihn speichert.
@@ -55,7 +55,7 @@ pub enum Value {
     Number(f64),
     /// Zeichenkette (z. B. `none`, Gruppenname, ID).
     Text(String),
-    /// Typ, den VisiCutRust nicht kennt, mit seiner Bezeichnung.
+    /// Typ, den VisiCutR nicht kennt, mit seiner Bezeichnung.
     Unsupported(String),
 }
 
@@ -103,7 +103,7 @@ pub struct Placed {
     pub name: String,
     /// Attribute der Objekte im SVG des Teils (`None`: nicht lesbar).
     pub objects: Option<Vec<ObjectAttributes>>,
-    /// Das Teil ist SVG oder PSVG. Nur dafür kennt VisiCutRust die Attribute
+    /// Das Teil ist SVG oder PSVG. Nur dafür kennt VisiCutR die Attribute
     /// so wie VisiCut.
     pub svg: bool,
     /// Inhalt von `mappings.xml` (`None`: die Datei fehlt).
@@ -318,7 +318,7 @@ pub fn translate(parts: &[Placed], composed: Result<Vec<ObjectAttributes>, Strin
             }
             Some(Ok(entries)) => entries,
         };
-        // Bedingungen kennt VisiCutRust nur für SVG-Teile so wie VisiCut.
+        // Bedingungen kennt VisiCutR nur für SVG-Teile so wie VisiCut.
         // Zuordnungen ohne Bedingung (alle Objekte oder Rest) gelten für jedes Teil.
         let unconditional = entries
             .iter()
@@ -344,7 +344,7 @@ pub fn translate(parts: &[Placed], composed: Result<Vec<ObjectAttributes>, Strin
         ));
     }
     if out.steps.is_empty() {
-        // Ohne Schritt würde VisiCutRust das ganze Motiv bearbeiten. Ein leerer
+        // Ohne Schritt würde VisiCutR das ganze Motiv bearbeiten. Ein leerer
         // Schritt verhindert das, wie VisiCut keine Objekte ohne Zuordnung schneidet.
         out.steps.push(JobStep::new(Operation::Cut));
         out.warnings.push(
@@ -494,11 +494,11 @@ fn matching(filters: &[Filter], objects: &[ObjectAttributes]) -> Vec<usize> {
         .collect()
 }
 
-/// Filter von VisiCut in einen Filter von VisiCutRust.
+/// Filter von VisiCut in einen Filter von VisiCutR.
 ///
 /// Java wertet „Color“ bei SVG-Objekten nur als Linienfarbe aus, deshalb
 /// entspricht es hier `StrokeColor`. Die Linienstärke vergleicht Java genau,
-/// VisiCutRust mit 1e-6 mm Toleranz.
+/// VisiCutR mit 1e-6 mm Toleranz.
 fn convert(filter: &JavaFilter, part: &str, warnings: &mut Vec<String>) -> Result<Filter, String> {
     let attribute = match filter.attribute.as_str() {
         "Stroke Color" | "Color" => Attribute::StrokeColor,
@@ -509,7 +509,7 @@ fn convert(filter: &JavaFilter, part: &str, warnings: &mut Vec<String>) -> Resul
         "Group" => Attribute::Group,
         other => {
             return Err(tr!(
-                "Filter „{other}“ ist in VisiCutRust nicht bekannt",
+                "Filter „{other}“ ist in VisiCutR nicht bekannt",
                 other = other
             ));
         }
@@ -606,7 +606,7 @@ fn profile_settings(
             if order != "INNER_FIRST" {
                 warnings.push(tr!(
                     "Teil „{part}“: Sortierung „{order}“ wird nicht übernommen; \
-                     die Schnittreihenfolge gilt in VisiCutRust für das ganze Projekt \
+                     die Schnittreihenfolge gilt in VisiCutR für das ganze Projekt \
                      (Menü Job → Schnittreihenfolge)",
                     part = part,
                     order = order
@@ -791,7 +791,7 @@ mod tests {
     #[test]
     fn parts_without_a_mapping_cut_nothing() {
         // A file with a mapping elsewhere: the part without one gets no step,
-        // and the empty placeholder step keeps VisiCutRust from cutting the motif.
+        // and the empty placeholder step keeps VisiCutR from cutting the motif.
         let placed = [Placed {
             name: "a.svg".into(),
             objects: Some(vec![ObjectAttributes::default()]),

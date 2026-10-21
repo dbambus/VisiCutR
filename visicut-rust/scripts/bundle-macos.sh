@@ -19,14 +19,14 @@ sign() {
 }
 # Das Bundle enthält die egui-Oberfläche (dieselbe wie unter Windows/Linux).
 cargo build --release --bins --locked
-app="$project_dir/dist/VisiCutRust.app"
+app="$project_dir/dist/VisiCutR.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp target/release/visicut-rust "$app/Contents/MacOS/visicut-rust"
-sign "$app/Contents/MacOS/visicut-rust"
-cp target/release/visicut-cameraserver "$app/Contents/MacOS/visicut-cameraserver"
-sign "$app/Contents/MacOS/visicut-cameraserver"
-cp ../distribute/mac/MacIcon.icns "$app/Contents/Resources/VisiCut.icns"
+cp target/release/visicutr "$app/Contents/MacOS/visicutr"
+sign "$app/Contents/MacOS/visicutr"
+cp target/release/visicutr-cameraserver "$app/Contents/MacOS/visicutr-cameraserver"
+sign "$app/Contents/MacOS/visicutr-cameraserver"
+cp resources/icon/VisiCutR.icns "$app/Contents/Resources/VisiCutR.icns"
 cp ../COPYING "$app/Contents/Resources/COPYING"
 cp ../COPYING.LESSER "$app/Contents/Resources/COPYING.LESSER"
 cp README.md "$app/Contents/Resources/README.md"
@@ -36,18 +36,18 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>VisiCutRust</string>
-  <key>CFBundleDisplayName</key><string>VisiCutRust</string>
-  <key>CFBundleExecutable</key><string>visicut-rust</string>
-  <key>CFBundleIdentifier</key><string>io.github.dbambus.visicutrust</string>
+  <key>CFBundleName</key><string>VisiCutR</string>
+  <key>CFBundleDisplayName</key><string>VisiCutR</string>
+  <key>CFBundleExecutable</key><string>visicutr</string>
+  <key>CFBundleIdentifier</key><string>io.github.dbambus.visicutr</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleIconFile</key><string>VisiCut.icns</string>
+  <key>CFBundleIconFile</key><string>VisiCutR.icns</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
-  <key>NSLocalNetworkUsageDescription</key><string>VisiCutRust sendet Aufträge über das lokale Netzwerk an den Lasercutter und lädt das Kamerabild.</string>
+  <key>NSLocalNetworkUsageDescription</key><string>VisiCutR sendet Aufträge über das lokale Netzwerk an den Lasercutter und lädt das Kamerabild.</string>
   <key>CFBundleDocumentTypes</key><array>
-    <dict><key>CFBundleTypeName</key><string>VisiCutRust Projekt</string>
+    <dict><key>CFBundleTypeName</key><string>VisiCutR Projekt</string>
     <key>CFBundleTypeRole</key><string>Editor</string>
     <key>LSItemContentTypes</key><array><string>org.visicut.project</string></array></dict>
     <dict><key>CFBundleTypeName</key><string>SVG</string>
@@ -56,7 +56,7 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   </array>
   <key>UTExportedTypeDeclarations</key><array><dict>
     <key>UTTypeIdentifier</key><string>org.visicut.project</string>
-    <key>UTTypeDescription</key><string>VisiCutRust Projekt</string>
+    <key>UTTypeDescription</key><string>VisiCutR Projekt</string>
     <key>UTTypeConformsTo</key><array><string>public.json</string></array>
     <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>vcr</string></array></dict>
   </dict></array>

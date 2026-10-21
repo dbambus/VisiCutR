@@ -1,5 +1,5 @@
 /*
- * Reference generator for the Java-parity tests of VisiCutRust.
+ * Reference generator for the Java-parity tests of VisiCutR.
  *
  * Runs each case of visicut-rust/tests/java_parity through the original
  * Java pipeline (VisiCut SVG import, VectorProfile/RasterProfile and the
@@ -154,7 +154,7 @@ public class LttParity
     System.out.println(dir.getName() + ": " + out.length() + " bytes as " + name);
   }
 
-  /** Same device job name as VisiCutRust (prefix, ASCII, at most 15 characters). */
+  /** Same device job name as VisiCutR (prefix, ASCII, at most 15 characters). */
   private static String jobName(String prefix, String name)
   {
     StringBuilder b = new StringBuilder();

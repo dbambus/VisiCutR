@@ -381,7 +381,7 @@ Ausgewertet wurde der Windows-Druckertreiber „iLASER-3000_S“ 6.19.0 von LTT
 (10. Januar 2023): Konfigurationsdateien und die Befehlsfolgen der
 Treiber-DLL. Aus dem Paket ist nichts im Repository; festgehalten sind nur
 Protokollfakten. Sie gelten für den iLaser 3000 und sind für den iLaser 4000
-**nicht bestätigt**. VisiCutRust sendet keinen der folgenden Befehle.
+**nicht bestätigt**. VisiCutR sendet keinen der folgenden Befehle.
 
 - Befehlsvorrat des Treibers: `ESC v`, `ESC F`, `ESC a`, `ESC M`, `ESC l`,
   `ESC n`, `ESC O`, `ESC Q`, `ESC D`, `ESC R`, `ESC C`, `ESC T`, `ESC N`,
@@ -430,13 +430,13 @@ für `0`, `1`, `A`–`F`, `H`–`J`, `L`–`T`, `V`, `W`, `Y`, `a`, `f`, `l`, `n
 `G…` und `Z…`. Bestätigt sind:
 
 - `ESC S` nimmt nur 1 … 1000 an (sonst ignoriert) und speichert Wert × 4.
-- `PE` (und `PM`) speichert Wert × 4 **ohne** Grenzprüfung; VisiCutRust
+- `PE` (und `PM`) speichert Wert × 4 **ohne** Grenzprüfung; VisiCutR
   begrenzt selbst auf 1 … 1000.
 - `PJ` setzt den Kurvenmodus, `PF` beendet ihn. Gerade Stücke (`PR`) fahren
   im Kurvenmodus mit `PE`, sonst mit `ESC S`; beim Schneiden wird durch
   `vspeedfactor` geteilt, beim Gravieren nicht.
 - Kreisbögen (`PB`/`PC`) nutzen **immer** `ESC S` und ignorieren `PE`.
-  LibLaserCut und VisiCutRust senden vor `PJ PB … PF` deshalb zu Recht nur
+  LibLaserCut und VisiCutR senden vor `PJ PB … PF` deshalb zu Recht nur
   ein reduziertes `ESC S`.
 - Fahrten mit ausgeschaltetem Laser nutzen einen festen Freifahrt-Wert der
   Konfiguration, nicht `ESC S`. Wie schnell genau, ist nicht ermittelt; die
@@ -468,7 +468,7 @@ Verzögerungen bremst der Controller härter als seine Rampe. Die Option
 **Treiber 6.5 (`LTTiLASER-4000_S.ini`).** `JointCurves=0` (der
 Herstellertreiber nutzt verbundene Kurven standardmäßig nicht),
 `EngraveShiftTbl_L2R/R2L` −3 … −11 und `EngraveExtraSpaceTbl`
-3,5 … 35 mm für 10 … 100 % (VisiCutRust: 3,5 … 35 mm, quadratisch, dazwischen
+3,5 … 35 mm für 10 … 100 % (VisiCutR: 3,5 … 35 mm, quadratisch, dazwischen
 gleich oder größer), Kurvenwinkel-Tabelle mit 15 Stufen bis 180°.
 Die Zeilenversatz-Tabelle unterscheidet sich von der des FAU-Geräts
 (−2 … −23); deshalb ist sie je Gerät einstellbar und kalibrierbar.

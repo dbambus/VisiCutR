@@ -1,4 +1,4 @@
-name: VisiCutRust releases
+name: VisiCutR releases
 
 on:
   # A push to master publishes a release when its Cargo version has none yet;
@@ -11,9 +11,6 @@ on:
       - "visicut-rust/**"
       - ".github/workflows/rust-desktop.yml"
       - "COPYING*"
-      - "distribute/mac/MacIcon.icns"
-      - "distribute/windows/VisiCut.ico"
-      - "src/main/resources/de/thomas_oster/visicut/gui/resources/icon.png"
   workflow_dispatch:
 
 permissions:
@@ -192,11 +189,11 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
-          ditto -c -k --sequesterRsrc --keepParent dist/VisiCutRust.app "$RUNNER_TEMP/notarize.zip"
+          ditto -c -k --sequesterRsrc --keepParent dist/VisiCutR.app "$RUNNER_TEMP/notarize.zip"
           xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --apple-id "$APPLE_ID" \
             --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait --timeout 30m
-          xcrun stapler staple dist/VisiCutRust.app
-          spctl --assess --type execute --verbose dist/VisiCutRust.app
+          xcrun stapler staple dist/VisiCutR.app
+          spctl --assess --type execute --verbose dist/VisiCutR.app
 
       - name: Package desktop application
         env:
@@ -206,15 +203,15 @@ jobs:
       - name: Upload application
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: VisiCutRust-${{ matrix.target }}
-          path: visicut-rust/dist/VisiCutRust-*-${{ matrix.target }}.*
+          name: VisiCutR-${{ matrix.target }}
+          path: visicut-rust/dist/VisiCutR-*-${{ matrix.target }}.*
           if-no-files-found: error
           retention-days: 14
 
   release:
     name: Publish GitHub release
     if: >-
-      github.repository == 'dbambus/VisiCutRust' &&
+      github.repository == 'dbambus/VisiCutR' &&
       (startsWith(github.ref, 'refs/tags/v') ||
       (github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')))
     needs: build
@@ -234,7 +231,7 @@ jobs:
       - name: Download all release packages
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: VisiCutRust-*
+          pattern: VisiCutR-*
           merge-multiple: true
           path: release
 
@@ -247,8 +244,8 @@ jobs:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
         run: |
-          # Archive names carry the Cargo version, e.g. VisiCutRust-0.8.0-….zip.
-          version=$(ls VisiCutRust-*-x86_64-pc-windows-msvc.zip | sed -E 's/^VisiCutRust-(.*)-x86_64-pc-windows-msvc\.zip$/\1/')
+          # Archive names carry the Cargo version, e.g. VisiCutR-0.8.0-….zip.
+          version=$(ls VisiCutR-*-x86_64-pc-windows-msvc.zip | sed -E 's/^VisiCutR-(.*)-x86_64-pc-windows-msvc\.zip$/\1/')
           if [[ "$REF_TYPE" == tag ]]; then
             tag="$REF_NAME"
             publish=true
@@ -273,10 +270,10 @@ jobs:
           version: ${{ steps.tag.outputs.version }}
         run: |
           for target in x86_64-pc-windows-msvc aarch64-apple-darwin; do
-            test -s "VisiCutRust-$version-$target.zip"
+            test -s "VisiCutR-$version-$target.zip"
           done
-          test -s "VisiCutRust-$version-x86_64-unknown-linux-gnu.tar.gz"
-          sha256sum VisiCutRust-* > SHA256SUMS.txt
+          test -s "VisiCutR-$version-x86_64-unknown-linux-gnu.tar.gz"
+          sha256sum VisiCutR-* > SHA256SUMS.txt
 
       - name: Publish release
         if: steps.tag.outputs.publish == 'true'
@@ -296,7 +293,7 @@ jobs:
           ' ../source/visicut-rust/CHANGELOG.md > RELEASE_NOTES.md
           if [[ ! -s RELEASE_NOTES.md ]]; then
             echo "::warning::CHANGELOG.md enthält keinen Abschnitt ## $VERSION"
-            echo "VisiCutRust $VERSION." > RELEASE_NOTES.md
+            echo "VisiCutR $VERSION." > RELEASE_NOTES.md
           fi
           cat >> RELEASE_NOTES.md <<'NOTES'
 
@@ -304,9 +301,9 @@ jobs:
 
           | Datei | Plattform |
           | --- | --- |
-          | `…-x86_64-pc-windows-msvc.zip` | Windows x64: entpacken, `visicut-rust.exe` starten |
-          | `…-x86_64-unknown-linux-gnu.tar.gz` | Linux x64 (Ubuntu 24.04 oder kompatibel): entpacken, `visicut-rust` starten |
-          | `…-aarch64-apple-darwin.zip` | macOS 14+ auf Apple Silicon: `VisiCutRust.app` entpacken |
+          | `…-x86_64-pc-windows-msvc.zip` | Windows x64: entpacken, `visicutr.exe` starten |
+          | `…-x86_64-unknown-linux-gnu.tar.gz` | Linux x64 (Ubuntu 24.04 oder kompatibel): entpacken, `visicutr` starten |
+          | `…-aarch64-apple-darwin.zip` | macOS 14+ auf Apple Silicon: `VisiCutR.app` entpacken |
 
           Kein Java nötig. Alle drei Builds und Tests liefen vor der Veröffentlichung
           durch; `SHA256SUMS.txt` enthält die Prüfsummen. Hardware-Status siehe
@@ -324,8 +321,8 @@ jobs:
             target=()
             if [[ "$REF_TYPE" == tag ]]; then target=(--verify-tag); else target=(--target "$COMMIT"); fi
             gh release create "$RELEASE_TAG" "${target[@]}" --draft \
-              --title "VisiCutRust $VERSION" --notes-file RELEASE_NOTES.md
+              --title "VisiCutR $VERSION" --notes-file RELEASE_NOTES.md
           fi
-          gh release upload "$RELEASE_TAG" VisiCutRust-* SHA256SUMS.txt --clobber
+          gh release upload "$RELEASE_TAG" VisiCutR-* SHA256SUMS.txt --clobber
           gh release edit "$RELEASE_TAG" --draft=false --prerelease="$prerelease" --latest="$latest" \
-            --title "VisiCutRust $VERSION" --notes-file RELEASE_NOTES.md
+            --title "VisiCutR $VERSION" --notes-file RELEASE_NOTES.md

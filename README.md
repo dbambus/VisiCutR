@@ -1,4 +1,4 @@
-# VisiCutRust
+# VisiCutR
 
 Rust implementation of VisiCut maintained by [dbambus](https://github.com/dbambus),
 forked from [t-oster/VisiCut](https://github.com/t-oster/VisiCut).
@@ -7,14 +7,14 @@ the FAU FabLab LTT iLaser 4000.
 
 ## Downloads
 
-Get the packages from [GitHub Releases](https://github.com/dbambus/VisiCutRust/releases).
+Get the packages from [GitHub Releases](https://github.com/dbambus/VisiCutR/releases).
 Versions before 1.0 are published as development prereleases.
 
 | Platform | Package | Interface |
 | --- | --- | --- |
-| Windows x64 | `VisiCutRust-<version>-x86_64-pc-windows-msvc.zip` | Portable egui application |
-| Linux x64 | `VisiCutRust-<version>-x86_64-unknown-linux-gnu.tar.gz` | Portable egui application; Ubuntu 24.04 or compatible |
-| macOS Universal (Intel + Apple Silicon) | `VisiCutRust-<version>-universal-apple-darwin.zip` | Native AppKit/SwiftUI; macOS 14+ |
+| Windows x64 | `VisiCutR-<version>-x86_64-pc-windows-msvc.zip` | Portable egui application |
+| Linux x64 | `VisiCutR-<version>-x86_64-unknown-linux-gnu.tar.gz` | Portable egui application; Ubuntu 24.04 or compatible |
+| macOS Universal (Intel + Apple Silicon) | `VisiCutR-<version>-universal-apple-darwin.zip` | Native AppKit/SwiftUI; macOS 14+ |
 
 No Java is required. macOS uses a native AppKit/SwiftUI interface, Windows
 and Linux an egui interface in their standard style; both offer the same
@@ -26,18 +26,18 @@ instructions, platform requirements and features, and the
 ## Build and release
 
 The Rust implementation is in [`visicut-rust`](visicut-rust). Its Cargo package
-and executable are called `visicut-rust`; the application is named **VisiCutRust**.
+and executable are called `visicutr`; the application is named **VisiCutR**.
 Rust 1.90.0 is selected by the included toolchain file.
 
 ```sh
 cd visicut-rust
 cargo test --locked --all-targets
-cargo build --locked --release --bin visicut-rust
+cargo build --locked --release --bin visicutr
 # Native macOS app:
 bash scripts/bundle-macos.sh
 ```
 
-[GitHub Actions](https://github.com/dbambus/VisiCutRust/actions/workflows/rust-desktop.yml)
+[GitHub Actions](https://github.com/dbambus/VisiCutR/actions/workflows/rust-desktop.yml)
 uses GitHub-hosted Windows, Linux and Apple Silicon Mac runners. Pull
 requests, changes on `master`/`main`, and manual runs build downloadable
 artifacts.

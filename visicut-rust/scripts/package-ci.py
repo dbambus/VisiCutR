@@ -23,11 +23,11 @@ def main():
         "cargo", "metadata", "--locked", "--no-deps", "--format-version", "1",
     ], cwd=project))
     version = metadata["packages"][0]["version"]
-    name = f"VisiCutRust-{version}-{target}"
+    name = f"VisiCutR-{version}-{target}"
 
     if target.endswith("apple-darwin"):
-        app = dist / "VisiCutRust.app"
-        if not (app / "Contents/MacOS/visicut-rust").is_file():
+        app = dist / "VisiCutR.app"
+        if not (app / "Contents/MacOS/visicutr").is_file():
             parser.error("Build the application bundle with bundle-macos.sh first")
         archive = dist / f"{name}.zip"
         subprocess.run([
@@ -39,11 +39,11 @@ def main():
             shutil.rmtree(stage)
         stage.mkdir(exist_ok=True)
         suffix = ".exe" if "windows" in target else ""
-        binary = project / "target/release" / f"visicut-rust{suffix}"
+        binary = project / "target/release" / f"visicutr{suffix}"
         if not binary.is_file():
             parser.error("Build the portable application with cargo build --release first")
-        shutil.copy2(binary, stage / f"visicut-rust{suffix}")
-        server = project / "target/release" / f"visicut-cameraserver{suffix}"
+        shutil.copy2(binary, stage / f"visicutr{suffix}")
+        server = project / "target/release" / f"visicutr-cameraserver{suffix}"
         if not server.is_file():
             parser.error("Build all binaries with cargo build --release --bins first")
         shutil.copy2(server, stage / server.name)
@@ -51,12 +51,12 @@ def main():
                        project.parent / "COPYING", project.parent / "COPYING.LESSER"]:
             shutil.copy2(source, stage / source.name)
         (stage / "START-HERE.txt").write_text(
-            "VisiCutRust - egui interface (the same on Windows, Linux and macOS)\n\n"
-            f"Start visicut-rust{suffix}. No Java is required.\n"
+            "VisiCutR - egui interface (the same on Windows, Linux and macOS)\n\n"
+            f"Start visicutr{suffix}. No Java is required.\n"
             "Features: object assignment, material\n"
             "library, text/shape/sign tools, copies, nesting, job preview with timeline,\n"
             "LTT iLaser 4000 devices, rotary jobs and the calibrated camera background.\n"
-            f"visicut-cameraserver{suffix} serves photos from a capture command.\n"
+            f"visicutr-cameraserver{suffix} serves photos from a capture command.\n"
             "Linux requires a graphical X11/Wayland session, OpenGL/EGL, libxkbcommon,\n"
             "and a desktop portal for file dialogs. Built on Ubuntu 24.04 (glibc 2.39).\n"
             "See README.md and PROTOCOL.md for features and hardware validation status.\n",

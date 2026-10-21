@@ -275,7 +275,7 @@ enum SettingsPage {
     General,
 }
 
-struct VisiCutRust {
+struct VisiCutR {
     project: Project,
     page: Page,
     settings_page: SettingsPage,
@@ -353,9 +353,15 @@ struct VisiCutRust {
     capture: Option<(PathBuf, u32)>,
 }
 
-impl VisiCutRust {
+impl VisiCutR {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let settings = settings::AppSettings::load();
+        // Erster Start nach der Umbenennung: Einstellungen von VisiCutRust übernehmen.
+        let moved = visicut_core::device::migrate_legacy_config();
+        let mut settings = settings::AppSettings::load();
+        if let Some((old, new)) = &moved {
+            settings.moved_config(old, new);
+            let _ = settings.save();
+        }
         i18n::set_language(settings.language());
         // Die Oberfläche ist hell: auch die Titelleiste hell, nicht schwarz auf
         // dunklem Hintergrund.
@@ -517,7 +523,7 @@ impl VisiCutRust {
                     Some(release) => self.update_found = Some(release),
                     None if manual => {
                         self.status = tr!(
-                            "VisiCutRust {version} ist aktuell",
+                            "VisiCutR {version} ist aktuell",
                             version = visicut_core::update::current_version()
                         )
                     }
@@ -541,7 +547,7 @@ impl VisiCutRust {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.label(tr!(
-                    "VisiCutRust {version} ist verfügbar (installiert: {current}).",
+                    "VisiCutR {version} ist verfügbar (installiert: {current}).",
                     version = release.version,
                     current = visicut_core::update::current_version()
                 ));
@@ -924,8 +930,8 @@ impl VisiCutRust {
         self.project.validate_document()?;
         let path = self.project_path.clone().filter(|_| !as_copy).or_else(|| {
             rfd::FileDialog::new()
-                .set_title(tr("VisiCutRust-Projekt sichern"))
-                .add_filter(tr("VisiCutRust Projekt"), &["vcr"])
+                .set_title(tr("VisiCutR-Projekt sichern"))
+                .add_filter(tr("VisiCutR Projekt"), &["vcr"])
                 .set_file_name(format!("{}.vcr", self.project.name))
                 .save_file()
         });
@@ -1241,13 +1247,13 @@ impl VisiCutRust {
             return;
         }
         if let Some(path) = rfd::FileDialog::new()
-            .set_title(tr("Grafik oder VisiCutRust-Projekt öffnen"))
+            .set_title(tr("Grafik oder VisiCutR-Projekt öffnen"))
             .add_filter(
-                tr("Grafik oder VisiCutRust-Projekt"),
+                tr("Grafik oder VisiCutR-Projekt"),
                 &[import::EXTENSIONS, &["vcr", "json"]].concat(),
             )
             .add_filter(tr("Grafik"), import::EXTENSIONS)
-            .add_filter(tr("VisiCutRust-Projekt"), &["vcr", "json"])
+            .add_filter(tr("VisiCutR-Projekt"), &["vcr", "json"])
             .pick_file()
         {
             self.request(ctx, Replace::Open(path));
@@ -1606,7 +1612,7 @@ impl VisiCutRust {
                 let mut auto = !self.settings.update_check_disabled;
                 if ui
                     .checkbox(&mut auto, tr("Alle 14 Tage nach Updates suchen"))
-                    .on_hover_text(tr("Fragt bei GitHub nach einem neuen Release von VisiCutRust; es wird nichts automatisch installiert."))
+                    .on_hover_text(tr("Fragt bei GitHub nach einem neuen Release von VisiCutR; es wird nichts automatisch installiert."))
                     .changed()
                 {
                     self.settings.update_check_disabled = !auto;
@@ -3400,7 +3406,7 @@ enum HandleDrag {
 /// Ergebnis einer Update-Prüfung im Hintergrund.
 type UpdateCheck = std::sync::mpsc::Receiver<Result<Option<visicut_core::update::Release>, String>>;
 
-impl eframe::App for VisiCutRust {
+impl eframe::App for VisiCutR {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         #[cfg(feature = "screenshot")]
         self.capture(ctx);
@@ -3575,7 +3581,7 @@ impl eframe::App for VisiCutRust {
         }
         self.dialogs(ctx);
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
-            "{}{} — VisiCutRust",
+            "{}{} — VisiCutR",
             self.project.name,
             if self.dirty { " *" } else { "" }
         )));
@@ -3584,8 +3590,8 @@ impl eframe::App for VisiCutRust {
 
 /// VisiCut-Symbol für Fenster und Taskleiste (das der Java-Oberfläche).
 fn window_icon() -> Option<egui::IconData> {
-    let png =
-        include_bytes!("../../src/main/resources/de/thomas_oster/visicut/gui/resources/icon.png");
+    // VisiCutR-Logo, erzeugt von scripts/icons.sh.
+    let png = include_bytes!("../resources/icon/icon.png");
     let image = image::load_from_memory(png).ok()?.into_rgba8();
     Some(egui::IconData {
         width: image.width(),
@@ -3607,9 +3613,9 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "VisiCutRust",
+        "VisiCutR",
         options,
-        Box::new(|cc| Ok(Box::new(VisiCutRust::new(cc)))),
+        Box::new(|cc| Ok(Box::new(VisiCutR::new(cc)))),
     )
 }
 
@@ -3619,10 +3625,16 @@ mod tests {
     use visicut_core::project::Part;
 
     #[test]
-    fn window_icon_is_the_visicut_icon() {
-        let icon = window_icon().expect("VisiCut-Symbol lesbar");
-        assert_eq!((icon.width, icon.height), (128, 128));
-        assert_eq!(icon.rgba.len(), 128 * 128 * 4);
+    fn window_icon_is_the_visicutr_logo() {
+        let icon = window_icon().expect("VisiCutR-Logo lesbar");
+        assert_eq!((icon.width, icon.height), (256, 256));
+        assert_eq!(icon.rgba.len(), 256 * 256 * 4);
+        // Mitte der oberen Kante: Akzentfarbe des Logos.
+        let at = |x: usize, y: usize| &icon.rgba[(y * 256 + x) * 4..(y * 256 + x) * 4 + 3];
+        assert_eq!(
+            at(128, 20),
+            [form::ACCENT.r(), form::ACCENT.g(), form::ACCENT.b()]
+        );
     }
 
     #[test]

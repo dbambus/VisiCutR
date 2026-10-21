@@ -200,7 +200,7 @@ pub fn read_plf(path: &Path) -> Result<Imported, String> {
     })
 }
 
-/// Parts that VisiCutRust knows as SVG; their objects have the attributes VisiCut uses.
+/// Parts that VisiCutR knows as SVG; their objects have the attributes VisiCut uses.
 fn is_svg(file: &Path) -> bool {
     file.extension()
         .and_then(|e| e.to_str())
@@ -264,7 +264,7 @@ pub fn read_parametric_svg(path: &Path) -> Result<Imported, String> {
                 values = stored
             ));
         }
-        details.push(tr("Andere Werte lassen sich in VisiCutRust noch nicht eingeben.").into());
+        details.push(tr("Andere Werte lassen sich in VisiCutR noch nicht eingeben.").into());
         warnings.push(tr!(
             "Parametrische SVG: {details}",
             details = details.join(" ")

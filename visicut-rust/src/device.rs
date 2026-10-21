@@ -239,22 +239,56 @@ impl DeviceStore {
     }
 }
 
-/// Per-user settings directory; `VISICUT_RUST_CONFIG_DIR` overrides it (tests).
+/// Per-user settings directory; `VISICUTR_CONFIG_DIR` overrides it (tests).
 pub fn config_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("VISICUT_RUST_CONFIG_DIR") {
+    if let Some(dir) = std::env::var_os("VISICUTR_CONFIG_DIR") {
         return dir.into();
     }
+    let (base, name, _) = config_location();
+    base.join(name)
+}
+
+/// Ordner der Einstellungen, ihr Name und der Name vor der Umbenennung von
+/// VisiCutRust in VisiCutR.
+fn config_location() -> (PathBuf, &'static str, &'static str) {
     let home = || PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
     if cfg!(target_os = "macos") {
-        home().join("Library/Application Support/VisiCutRust")
+        (
+            home().join("Library/Application Support"),
+            "VisiCutR",
+            "VisiCutRust",
+        )
     } else if cfg!(windows) {
-        PathBuf::from(std::env::var_os("APPDATA").unwrap_or_default()).join("VisiCutRust")
+        (
+            PathBuf::from(std::env::var_os("APPDATA").unwrap_or_default()),
+            "VisiCutR",
+            "VisiCutRust",
+        )
     } else {
-        std::env::var_os("XDG_CONFIG_HOME")
+        let base = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
-            .unwrap_or_else(|| home().join(".config"))
-            .join("visicut-rust")
+            .unwrap_or_else(|| home().join(".config"));
+        (base, "visicutr", "visicut-rust")
     }
+}
+
+/// Übernimmt beim ersten Start nach der Umbenennung den Einstellungsordner
+/// von VisiCutRust (Geräte, Materialien, Zwischenstände). Liefert alten und
+/// neuen Ordner, wenn er verschoben wurde.
+pub fn migrate_legacy_config() -> Option<(PathBuf, PathBuf)> {
+    if std::env::var_os("VISICUTR_CONFIG_DIR").is_some() {
+        return None;
+    }
+    let (base, name, legacy) = config_location();
+    move_legacy(&base.join(legacy), &base.join(name))
+}
+
+fn move_legacy(old: &Path, new: &Path) -> Option<(PathBuf, PathBuf)> {
+    if new.exists() || !old.is_dir() {
+        return None;
+    }
+    std::fs::rename(old, new).ok()?;
+    Some((old.to_owned(), new.to_owned()))
 }
 
 fn child<'a>(node: roxmltree::Node<'a, 'a>, name: &str) -> Option<roxmltree::Node<'a, 'a>> {
@@ -383,7 +417,7 @@ pub fn from_visicut_xml(source: &str) -> Result<LaserDevice, String> {
 }
 
 /// Imports LTT devices from a VisiCut device XML, a `.vcsettings`/GitHub
-/// settings archive, or a VisiCutRust device export (JSON).
+/// settings archive, or a VisiCutR device export (JSON).
 pub fn import_bytes(bytes: &[u8]) -> Result<Vec<LaserDevice>, String> {
     if bytes.starts_with(b"PK") {
         return import_archive(bytes);
@@ -564,6 +598,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn legacy_settings_folder_moves_once() {
+        let base = std::env::temp_dir().join(format!("visicutr-migrate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (old, new) = (base.join("VisiCutRust"), base.join("VisiCutR"));
+        std::fs::create_dir_all(old.join("cache")).unwrap();
+        std::fs::write(old.join("devices.json"), "{}").unwrap();
+        assert_eq!(move_legacy(&old, &new), Some((old.clone(), new.clone())));
+        assert!(new.join("devices.json").exists() && new.join("cache").is_dir() && !old.exists());
+        // Ein vorhandener neuer Ordner wird nie überschrieben.
+        std::fs::create_dir_all(&old).unwrap();
+        assert_eq!(move_legacy(&old, &new), None);
+        assert!(old.exists());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
     fn camera_login_and_refresh_come_from_visicut_and_stay_out_of_exports() {
         let xml = include_str!("../reference/FAU-LTT-iLaser-4000.xml")
             .replace("<cameraTiming>0</cameraTiming>", "<cameraTiming>500</cameraTiming><URLUser>laser</URLUser><URLPassword>geheim</URLPassword>");
@@ -576,7 +626,7 @@ mod tests {
         // VisiCut's 0 (every 50 ms) keeps the picture still here.
         assert_eq!(LaserDevice::fau().camera_refresh_ms, 0);
         let path = std::env::temp_dir().join(format!(
-            "visicutrust-devices-{}.vcrdevices",
+            "visicutr-devices-{}.vcrdevices",
             std::process::id()
         ));
         assert!(export(&path, std::slice::from_ref(&device)).unwrap());

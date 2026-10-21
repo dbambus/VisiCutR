@@ -1,8 +1,8 @@
 //! Port of VisiCut's tools/cameraserver: answers every HTTP request with a
 //! fresh photo taken by an external capture command, e.g.
 //!
-//!   visicut-cameraserver -- gphoto2 --capture-image-and-download --stdout
-//!   visicut-cameraserver --output snapshot.jpg -- imagesnap -q snapshot.jpg
+//!   visicutr-cameraserver -- gphoto2 --capture-image-and-download --stdout
+//!   visicutr-cameraserver --output snapshot.jpg -- imagesnap -q snapshot.jpg
 //!
 //! Set the device's camera URL to http://<host>:8088/visicam.jpg.
 use std::{
@@ -23,7 +23,7 @@ struct Options {
 
 fn usage() -> &'static str {
     tr(
-        "Aufruf: visicut-cameraserver [--bind ADRESSE] [--port 8088] \
+        "Aufruf: visicutr-cameraserver [--bind ADRESSE] [--port 8088] \
         [--rotate 0|90|180|270] [--output DATEI] -- AUFNAHMEBEFEHL [ARGUMENTE …]\n\
         Ohne --output muss der Befehl das Bild (JPEG oder PNG) auf stdout schreiben.",
     )
@@ -176,7 +176,7 @@ fn main() {
     println!(
         "{}",
         tr!(
-            "Kameraserver läuft. Kamera-URL in VisiCutRust: \
+            "Kameraserver läuft. Kamera-URL in VisiCutR: \
              http://<dieser Rechner>:{port}/visicam.jpg",
             port = options.port
         )

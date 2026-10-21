@@ -1,11 +1,16 @@
-# Änderungen an VisiCutRust
+# Änderungen an VisiCutR (bis 0.19 VisiCutRust)
 
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
 ## Unveröffentlicht
 
-- **Reststücke erkennen** (Menü **Darstellung**, egui und macOS): findet
+- **Neuer Name VisiCutR** mit eigenem Logo (VC mit hochgestelltem R).
+  Programm `visicutr`, macOS `VisiCutR.app`, Downloads `VisiCutR-…`,
+  Repository `dbambus/VisiCutR`. Der Einstellungsordner von VisiCutRust
+  wird beim ersten Start übernommen. macOS nutzt jetzt dieselbe
+  egui-Oberfläche wie Windows und Linux; die SwiftUI-App entfällt.
+- **Reststücke erkennen** (Knopf neben **Kamera**): findet
   Materialreste im entzerrten Kamerabild und zeigt ihre Umrisse mit Fläche auf
   dem Arbeitsbett. Material wird an der Helligkeit (heller oder dunkler als
   das Bett) oder, zuverlässiger, am Unterschied zu einem gespeicherten Foto

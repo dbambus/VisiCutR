@@ -1,4 +1,4 @@
-# VisiCutRust für Windows, Linux und macOS
+# VisiCutR für Windows, Linux und macOS
 
 egui-Oberfläche, SVG-Verarbeitung und LTT-Treiber in Rust, auf allen drei
 Plattformen gleich. Der Java-Quellbaum bleibt separat.
@@ -6,7 +6,7 @@ Erster Ziel-Lasercutter: LTT iLaser 4000 des FAU FabLabs.
 
 ## Starten
 
-Die lokal gebaute App befindet sich in `dist/VisiCutRust.app`.
+Die lokal gebaute App befindet sich in `dist/VisiCutR.app`.
 Version 0.10.0 benötigt macOS 14 oder neuer, weder Java noch Maven.
 Die macOS-App wird nur für Apple Silicon
 gebaut und veröffentlicht; Intel-Macs werden nicht unterstützt.
@@ -17,7 +17,7 @@ Line Tools benötigt:
 ```sh
 cd visicut-rust
 bash scripts/bundle-macos.sh
-open 'dist/VisiCutRust.app'
+open 'dist/VisiCutR.app'
 ```
 
 Das mitgelieferte `rust-toolchain.toml` wählt Rust 1.90.
@@ -31,7 +31,7 @@ Das Bundle ist lokal ad hoc signiert. Mit
 Skript mit einer Developer ID (Hardened Runtime); die CI notarisiert dann
 auch, wenn die Secrets hinterlegt sind (siehe README im Hauptverzeichnis).
 
-Zum Entwickeln startet `cargo run --release --bin visicut-rust` dieselbe
+Zum Entwickeln startet `cargo run --release --bin visicutr` dieselbe
 Oberfläche direkt.
 
 ## Windows, Linux und GitHub Actions
@@ -44,7 +44,7 @@ Text, Formen, Schilder, Kopien und Nesting,
 Vorschau mit Zeitschätzung und Zeitslider, Geräte mit Maschinenwerten und
 Zeilenversatz-Kalibrierung, Rotationseinheit und Kamera.
 
-Der Workflow **VisiCutRust releases** baut drei native Ziele auf GitHub-gehosteten Runnern:
+Der Workflow **VisiCutR releases** baut drei native Ziele auf GitHub-gehosteten Runnern:
 
 | Ziel | Oberfläche | Download-Artefakt |
 | --- | --- | --- |
@@ -55,10 +55,10 @@ Der Workflow **VisiCutRust releases** baut drei native Ziele auf GitHub-gehostet
 Bei Pull Requests und Änderungen an `master`/`main` laufen Rust-Tests auf
 allen drei Zielen. Linux prüft zusätzlich Formatierung und Clippy; das
 Mac-Ziel baut und signiert das Bundle. TCP-Tests verwenden ausschließlich
-localhost. Die Downloads liegen unter **Actions → VisiCutRust releases →
+localhost. Die Downloads liegen unter **Actions → VisiCutR releases →
 Artifacts** (14 Tage Aufbewahrung). Ein Push auf `master` veröffentlicht
 nach erfolgreichen Builds auf allen drei Zielen ein vollständiges
-[GitHub Release](https://github.com/dbambus/VisiCutRust/releases)
+[GitHub Release](https://github.com/dbambus/VisiCutR/releases)
 `v<Cargo-Version>` mit drei Archiven und `SHA256SUMS.txt`, sofern es für diese
 Version noch keines gibt; die Beschreibung ist der passende Abschnitt aus
 [CHANGELOG.md](CHANGELOG.md). Weitere Pushes mit derselben Version bauen nur
@@ -69,14 +69,14 @@ und einen Changelog-Abschnitt `## <Version> – <Datum>` ergänzen. Tags
 markiert. Ein manueller Lauf auf einem Versionstag wiederholt die
 Veröffentlichung, auf einem Branch baut er nur Artefakte.
 Der macOS-Download heißt
-`VisiCutRust-<Version>-aarch64-apple-darwin.zip`.
+`VisiCutR-<Version>-aarch64-apple-darwin.zip`.
 Weitere Workflows gibt es nicht: Die alten Java-Distributionsbuilds und der
 Auslöser für den externen VisiCut-Buildserver wurden entfernt.
 
 Für lokale portable Builds aus `visicut-rust`:
 
 ```sh
-cargo build --locked --release --bin visicut-rust
+cargo build --locked --release --bin visicutr
 cargo test --locked --all-targets
 ```
 
@@ -344,9 +344,9 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
   `.vcsettings`-Archive und eigene Exporte (`.vcrdevices`). **Herunterladen**
   lädt die Labor-Einstellungen aus VisiCuts Liste und übernimmt nur
   LTT-iLaser-4000-Geräte. **Exportieren** schreibt alle Geräte als JSON.
-- Die Geräteliste liegt unter `~/Library/Application Support/VisiCutRust`
-  (Windows `%APPDATA%\VisiCutRust`, Linux `~/.config/visicut-rust`);
-  `VISICUT_RUST_CONFIG_DIR` setzt einen anderen Ordner.
+- Die Geräteliste liegt unter `~/Library/Application Support/VisiCutR`
+  (Windows `%APPDATA%\VisiCutR`, Linux `~/.config/visicutr`);
+  `VISICUTR_CONFIG_DIR` setzt einen anderen Ordner.
 - **Maschine**: Zeilenversatz-Tabelle für die bidirektionale Gravur
   (10 … 100 %, 1/4000 Zoll), Kurvenbeschleunigung (LibLaserCut 2000 mm/s²
   oder experimentell „Firmware 0,1 g“) und Verweilzeit am Konturstart für die
@@ -387,12 +387,12 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
 - **Passmarken**: Runde Zielscheiben-Aufkleber (Ring mit Punkt) am Rahmen
   werden beim Kalibrieren erkannt und gespeichert. Spätere Kamerabilder
   werden daran nachgeführt, wenn sich die Kamera z. B. mit dem Deckel bewegt.
-- **Kameraserver**: `visicut-cameraserver` ersetzt `tools/cameraserver` und
+- **Kameraserver**: `visicutr-cameraserver` ersetzt `tools/cameraserver` und
   beantwortet jede HTTP-Anfrage mit einem frischen Foto eines
   Aufnahmebefehls, z. B.
-  `visicut-cameraserver -- gphoto2 --capture-image-and-download --stdout` oder
-  `visicut-cameraserver --output snap.jpg -- imagesnap -q snap.jpg`
-  (`--port`, `--rotate 90`). Er liegt in `VisiCutRust.app/Contents/MacOS`
+  `visicutr-cameraserver -- gphoto2 --capture-image-and-download --stdout` oder
+  `visicutr-cameraserver --output snap.jpg -- imagesnap -q snap.jpg`
+  (`--port`, `--rotate 90`). Er liegt in `VisiCutR.app/Contents/MacOS`
   bzw. neben der Windows-/Linux-Programmdatei.
 
 Windows und Linux bieten dieselben Funktionen in der egui-Oberfläche mit
@@ -411,8 +411,8 @@ Geräteliste. Die macOS-App speichert die Sprache in den Benutzereinstellungen;
 der UI-Test läuft immer auf Deutsch.
 
 **Updates**: Beide Oberflächen fragen höchstens alle 14 Tage beim Start bei
-GitHub nach dem neuesten Release von `dbambus/VisiCutRust`
-(`api.github.com/repos/dbambus/VisiCutRust/releases/latest`). Ist es neuer als
+GitHub nach dem neuesten Release von `dbambus/VisiCutR`
+(`api.github.com/repos/dbambus/VisiCutR/releases/latest`). Ist es neuer als
 die laufende Version, erscheint ein Hinweis mit den Release-Notizen und einem
 Link zur Download-Seite; installiert wird nichts automatisch. Abschalten unter
 **Einstellungen → Allgemein** (macOS) bzw. im Einstellungsfenster (Windows,

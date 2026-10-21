@@ -1507,7 +1507,7 @@ fn connect_error(address: SocketAddr, error: &io::Error) -> String {
         format!(
             "{message}\n{}",
             tr(
-                "Ist der Lasercutter eingeschaltet, blockiert macOS vermutlich den Zugriff auf das lokale Netzwerk. Unter Systemeinstellungen → Datenschutz & Sicherheit → Lokales Netzwerk VisiCutRust erlauben und erneut senden."
+                "Ist der Lasercutter eingeschaltet, blockiert macOS vermutlich den Zugriff auf das lokale Netzwerk. Unter Systemeinstellungen → Datenschutz & Sicherheit → Lokales Netzwerk VisiCutR erlauben und erneut senden."
             )
         )
     } else {

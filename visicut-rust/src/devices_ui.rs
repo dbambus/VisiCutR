@@ -861,7 +861,7 @@ impl DeviceUi {
             // Exportiert die gesicherte Liste, nicht den Entwurf.
             if ui.button(tr("Exportieren …")).clicked()
                 && let Some(path) = rfd::FileDialog::new()
-                    .add_filter(tr("VisiCutRust-Lasercutter"), &["vcrdevices"])
+                    .add_filter(tr("VisiCutR-Lasercutter"), &["vcrdevices"])
                     .set_file_name("Lasercutter.vcrdevices")
                     .save_file()
             {

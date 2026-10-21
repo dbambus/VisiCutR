@@ -1,4 +1,4 @@
-//! Update check: asks GitHub for the latest release of dbambus/VisiCutRust
+//! Update check: asks GitHub for the latest release of dbambus/VisiCutR
 //! and compares it with the running version. Both apps check at most every
 //! 14 days unless the user turned it off in the settings.
 use crate::{i18n::tr, tr};
@@ -7,9 +7,9 @@ use std::time::Duration;
 
 /// Latest published release (drafts and pre-releases are not listed here).
 pub const LATEST_RELEASE_API: &str =
-    "https://api.github.com/repos/dbambus/VisiCutRust/releases/latest";
+    "https://api.github.com/repos/dbambus/VisiCutR/releases/latest";
 /// Page with all releases, for the link when no single release is known.
-pub const RELEASES_PAGE: &str = "https://github.com/dbambus/VisiCutRust/releases";
+pub const RELEASES_PAGE: &str = "https://github.com/dbambus/VisiCutR/releases";
 /// Pause between two automatic checks.
 pub const INTERVAL_SECS: u64 = 14 * 24 * 60 * 60;
 
@@ -94,7 +94,7 @@ pub fn check() -> Result<Option<Release>, String> {
     let body = agent
         .get(LATEST_RELEASE_API)
         // GitHub's API requires a user agent.
-        .header("User-Agent", &format!("VisiCutRust/{}", current_version()))
+        .header("User-Agent", &format!("VisiCutR/{}", current_version()))
         .header("Accept", "application/vnd.github+json")
         .call()
         .map_err(|e| tr!("Update-Prüfung fehlgeschlagen: {error}", error = e))?
@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn reads_github_release_answers() {
-        let answer = r#"{"tag_name":"v0.20.0","html_url":"https://github.com/dbambus/VisiCutRust/releases/tag/v0.20.0","body":"- Neu\n","draft":false,"prerelease":false}"#;
+        let answer = r#"{"tag_name":"v0.20.0","html_url":"https://github.com/dbambus/VisiCutR/releases/tag/v0.20.0","body":"- Neu\n","draft":false,"prerelease":false}"#;
         let release = newer_release(answer, "0.19.0").unwrap().unwrap();
         assert_eq!(release.version, "0.20.0");
         assert!(release.url.ends_with("v0.20.0"));

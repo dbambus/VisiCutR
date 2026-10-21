@@ -153,7 +153,7 @@ fn part_files(
             (true, Some(label), _) => label.to_string(),
             (_, _, Some(id)) => id.to_string(),
             _ => {
-                let mut id = format!("visicutrust-{}", index + 1);
+                let mut id = format!("visicutr-{}", index + 1);
                 while ids.contains(&id) {
                     id.push('_');
                 }
@@ -208,7 +208,7 @@ fn part_files(
     }
 
     // Root in millimetres: the content keeps its user units inside a group
-    // that maps them to the part's size, as VisiCutRust draws it.
+    // that maps them to the part's size, as VisiCutR draws it.
     let matrix = user_to_mm(part, &source, root)?;
     let start = root.range().start;
     let tag_end = xml::start_tag_end(&source, start);
@@ -446,7 +446,7 @@ mod tests {
 
     fn round_trip(project: &Project) -> (crate::import::Imported, Vec<String>) {
         let path = std::env::temp_dir().join(format!(
-            "visicutrust-plf-{}-{:?}.plf",
+            "visicutr-plf-{}-{:?}.plf",
             std::process::id(),
             std::thread::current().id()
         ));

@@ -917,5 +917,15 @@
   "Zuordnung „{name}“ nicht übernommen: {error}": "Assegnazione “{name}” non applicata: {error}",
   "Zuordnungen (mappings/*.xml) aus VisiCut-Einstellungen oder einem .vcsettings-Archiv": "Assegnazioni (mappings/*.xml) dalle impostazioni VisiCut o da un archivio .vcsettings",
   "Zuordnungsvorlagen {path} sind beschädigt: {error}": "I modelli di assegnazione {path} sono danneggiati: {error}",
-  "{name} (Standard)": "{name} (predefinito)"
+  "{name} (Standard)": "{name} (predefinito)",
+  "Dateitypen": "Tipi di file",
+  "Zugeordnet": "Associato",
+  "diesem Programm": "a questo programma",
+  "einem anderen Speicherort": "a un’altra posizione",
+  "nein": "no",
+  "Dateitypen zuordnen": "Associa tipi di file",
+  "Dateitypen zugeordnet": "Tipi di file associati",
+  "Zuordnung entfernen": "Rimuovi associazione",
+  "Zuordnung der Dateitypen entfernt": "Associazione dei tipi di file rimossa",
+  "VisiCutR-Projekte öffnen per Doppelklick, PLF und LaserScript, wenn noch kein anderes Programm sie öffnet. SVG, PDF, DXF und EPS stehen unter „Öffnen mit“. Gilt nur für dieses Benutzerkonto; nach dem Verschieben von VisiCutR erneut zuordnen.": "I progetti VisiCutR si aprono con un doppio clic, PLF e LaserScript se nessun altro programma li apre già. SVG, PDF, DXF ed EPS compaiono in «Apri con». Vale solo per questo account utente; associare di nuovo dopo aver spostato VisiCutR."
 }

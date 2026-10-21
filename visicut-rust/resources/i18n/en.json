@@ -917,5 +917,15 @@
   "Zuordnung „{name}“ nicht übernommen: {error}": "Mapping “{name}” not applied: {error}",
   "Zuordnungen (mappings/*.xml) aus VisiCut-Einstellungen oder einem .vcsettings-Archiv": "Mappings (mappings/*.xml) from VisiCut settings or a .vcsettings archive",
   "Zuordnungsvorlagen {path} sind beschädigt: {error}": "Mapping templates {path} are damaged: {error}",
-  "{name} (Standard)": "{name} (default)"
+  "{name} (Standard)": "{name} (default)",
+  "Dateitypen": "File types",
+  "Zugeordnet": "Associated",
+  "diesem Programm": "with this program",
+  "einem anderen Speicherort": "with another location",
+  "nein": "no",
+  "Dateitypen zuordnen": "Associate file types",
+  "Dateitypen zugeordnet": "File types associated",
+  "Zuordnung entfernen": "Remove association",
+  "Zuordnung der Dateitypen entfernt": "File type association removed",
+  "VisiCutR-Projekte öffnen per Doppelklick, PLF und LaserScript, wenn noch kein anderes Programm sie öffnet. SVG, PDF, DXF und EPS stehen unter „Öffnen mit“. Gilt nur für dieses Benutzerkonto; nach dem Verschieben von VisiCutR erneut zuordnen.": "VisiCutR projects open by double-click, PLF and LaserScript if no other program opens them yet. SVG, PDF, DXF and EPS are listed under “Open with”. Applies to this user account only; associate again after moving VisiCutR."
 }

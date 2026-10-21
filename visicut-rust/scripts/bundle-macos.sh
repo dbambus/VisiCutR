@@ -49,10 +49,25 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   <key>CFBundleDocumentTypes</key><array>
     <dict><key>CFBundleTypeName</key><string>VisiCutR Projekt</string>
     <key>CFBundleTypeRole</key><string>Editor</string>
+    <key>LSHandlerRank</key><string>Owner</string>
     <key>LSItemContentTypes</key><array><string>org.visicut.project</string></array></dict>
-    <dict><key>CFBundleTypeName</key><string>SVG</string>
+    <dict><key>CFBundleTypeName</key><string>VisiCut Portable Laser File</string>
     <key>CFBundleTypeRole</key><string>Viewer</string>
-    <key>LSItemContentTypes</key><array><string>public.svg-image</string></array></dict>
+    <key>LSHandlerRank</key><string>Default</string>
+    <key>LSItemContentTypes</key><array><string>de.thomas-oster.visicut.plf</string></array></dict>
+    <dict><key>CFBundleTypeName</key><string>VisiCut LaserScript</string>
+    <key>CFBundleTypeRole</key><string>Viewer</string>
+    <key>LSHandlerRank</key><string>Default</string>
+    <key>LSItemContentTypes</key><array><string>de.thomas-oster.visicut.laserscript</string></array></dict>
+    <dict><key>CFBundleTypeName</key><string>Grafik</string>
+    <key>CFBundleTypeRole</key><string>Viewer</string>
+    <key>LSHandlerRank</key><string>Alternate</string>
+    <key>LSItemContentTypes</key><array>
+      <string>public.svg-image</string>
+      <string>com.adobe.pdf</string>
+      <string>com.adobe.encapsulated-postscript</string>
+      <string>com.autodesk.dxf</string>
+    </array></dict>
   </array>
   <key>UTExportedTypeDeclarations</key><array><dict>
     <key>UTTypeIdentifier</key><string>org.visicut.project</string>
@@ -60,6 +75,20 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
     <key>UTTypeConformsTo</key><array><string>public.json</string></array>
     <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>vcr</string></array></dict>
   </dict></array>
+  <key>UTImportedTypeDeclarations</key><array>
+    <dict><key>UTTypeIdentifier</key><string>de.thomas-oster.visicut.plf</string>
+    <key>UTTypeDescription</key><string>VisiCut Portable Laser File</string>
+    <key>UTTypeConformsTo</key><array><string>public.zip-archive</string></array>
+    <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>plf</string></array></dict></dict>
+    <dict><key>UTTypeIdentifier</key><string>de.thomas-oster.visicut.laserscript</string>
+    <key>UTTypeDescription</key><string>VisiCut LaserScript</string>
+    <key>UTTypeConformsTo</key><array><string>public.plain-text</string></array>
+    <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>ls</string></array></dict></dict>
+    <dict><key>UTTypeIdentifier</key><string>com.autodesk.dxf</string>
+    <key>UTTypeDescription</key><string>DXF</string>
+    <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+    <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>dxf</string></array></dict></dict>
+  </array>
 </dict></plist>
 PLIST
 python3 - "$app/Contents/Info.plist" <<'PY'

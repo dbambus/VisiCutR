@@ -917,5 +917,15 @@
   "Zuordnung „{name}“ nicht übernommen: {error}": "Affectation « {name} » non reprise : {error}",
   "Zuordnungen (mappings/*.xml) aus VisiCut-Einstellungen oder einem .vcsettings-Archiv": "Affectations (mappings/*.xml) issues des paramètres VisiCut ou d'une archive .vcsettings",
   "Zuordnungsvorlagen {path} sind beschädigt: {error}": "Les modèles d'affectation {path} sont endommagés : {error}",
-  "{name} (Standard)": "{name} (par défaut)"
+  "{name} (Standard)": "{name} (par défaut)",
+  "Dateitypen": "Types de fichiers",
+  "Zugeordnet": "Associé",
+  "diesem Programm": "à ce programme",
+  "einem anderen Speicherort": "à un autre emplacement",
+  "nein": "non",
+  "Dateitypen zuordnen": "Associer les types de fichiers",
+  "Dateitypen zugeordnet": "Types de fichiers associés",
+  "Zuordnung entfernen": "Supprimer l’association",
+  "Zuordnung der Dateitypen entfernt": "Association des types de fichiers supprimée",
+  "VisiCutR-Projekte öffnen per Doppelklick, PLF und LaserScript, wenn noch kein anderes Programm sie öffnet. SVG, PDF, DXF und EPS stehen unter „Öffnen mit“. Gilt nur für dieses Benutzerkonto; nach dem Verschieben von VisiCutR erneut zuordnen.": "Les projets VisiCutR s’ouvrent par double-clic, PLF et LaserScript si aucun autre programme ne les ouvre encore. SVG, PDF, DXF et EPS figurent sous « Ouvrir avec ». Ne concerne que ce compte utilisateur ; associer à nouveau après avoir déplacé VisiCutR."
 }

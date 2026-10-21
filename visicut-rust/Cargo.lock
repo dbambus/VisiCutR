@@ -3915,6 +3915,8 @@ dependencies = [
  "hayro-svg",
  "i_overlay",
  "image",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
  "resvg",
  "rfd",
  "roxmltree",
@@ -3922,6 +3924,7 @@ dependencies = [
  "serde_json",
  "sys-locale",
  "ureq",
+ "windows-sys 0.61.2",
  "winresource",
  "zip",
 ]

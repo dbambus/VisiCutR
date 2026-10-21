@@ -917,5 +917,15 @@
   "Zuordnung „{name}“ nicht übernommen: {error}": "Toewijzing „{name}” niet overgenomen: {error}",
   "Zuordnungen (mappings/*.xml) aus VisiCut-Einstellungen oder einem .vcsettings-Archiv": "Toewijzingen (mappings/*.xml) uit VisiCut-instellingen of een .vcsettings-archief",
   "Zuordnungsvorlagen {path} sind beschädigt: {error}": "Toewijzingssjablonen {path} zijn beschadigd: {error}",
-  "{name} (Standard)": "{name} (standaard)"
+  "{name} (Standard)": "{name} (standaard)",
+  "Dateitypen": "Bestandstypen",
+  "Zugeordnet": "Gekoppeld",
+  "diesem Programm": "aan dit programma",
+  "einem anderen Speicherort": "aan een andere locatie",
+  "nein": "nee",
+  "Dateitypen zuordnen": "Bestandstypen koppelen",
+  "Dateitypen zugeordnet": "Bestandstypen gekoppeld",
+  "Zuordnung entfernen": "Koppeling verwijderen",
+  "Zuordnung der Dateitypen entfernt": "Koppeling van bestandstypen verwijderd",
+  "VisiCutR-Projekte öffnen per Doppelklick, PLF und LaserScript, wenn noch kein anderes Programm sie öffnet. SVG, PDF, DXF und EPS stehen unter „Öffnen mit“. Gilt nur für dieses Benutzerkonto; nach dem Verschieben von VisiCutR erneut zuordnen.": "VisiCutR-projecten openen met een dubbelklik, PLF en LaserScript als nog geen ander programma ze opent. SVG, PDF, DXF en EPS staan onder ‘Openen met’. Geldt alleen voor dit gebruikersaccount; na het verplaatsen van VisiCutR opnieuw koppelen."
 }

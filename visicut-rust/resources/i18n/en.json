@@ -175,7 +175,7 @@
   "Importieren …": "Import …",
   "In die Tabelle übernehmen": "Apply to table",
   "Innenradius": "Inner radius",
-  "Innere Konturen zuerst, Reihenfolge wie VisiCut.": "Inner contours first, same order as VisiCut.",
+  "Innere Konturen zuerst, Reihenfolge wie in VisiCut (Java).": "Inner contours first, same order as in VisiCut (Java).",
   "Invertieren (helle Bereiche nachzeichnen)": "Invert (trace light areas)",
   "Jeder Schritt bearbeitet die Objekte, die alle Bedingungen erfüllen. Ein Objekt kann mehrere Schritte durchlaufen; „Rest“ erfasst alles, was sonst nicht bearbeitet oder ignoriert wird.": "Each step processes the objects that meet all of its conditions. An object can pass through several steps; “Rest” covers everything not otherwise processed or ignored.",
   "Job": "Job",

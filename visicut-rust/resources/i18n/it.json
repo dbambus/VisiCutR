@@ -175,7 +175,7 @@
   "Importieren …": "Importa …",
   "In die Tabelle übernehmen": "Inserisci nella tabella",
   "Innenradius": "Raggio interno",
-  "Innere Konturen zuerst, Reihenfolge wie VisiCut.": "Prima i contorni interni, ordine come VisiCut.",
+  "Innere Konturen zuerst, Reihenfolge wie in VisiCut (Java).": "Prima i contorni interni, stesso ordine di VisiCut (Java).",
   "Invertieren (helle Bereiche nachzeichnen)": "Inverti (traccia le aree chiare)",
   "Jeder Schritt bearbeitet die Objekte, die alle Bedingungen erfüllen. Ein Objekt kann mehrere Schritte durchlaufen; „Rest“ erfasst alles, was sonst nicht bearbeitet oder ignoriert wird.": "Ogni passo lavora gli oggetti che soddisfano tutte le condizioni. Un oggetto può attraversare più passi; “Resto” comprende tutto ciò che non viene altrimenti lavorato o ignorato.",
   "Job": "Lavoro",

@@ -175,7 +175,7 @@
   "Importieren …": "Importer …",
   "In die Tabelle übernehmen": "Reporter dans la table",
   "Innenradius": "Rayon intérieur",
-  "Innere Konturen zuerst, Reihenfolge wie VisiCut.": "Contours intérieurs d'abord, ordre comme VisiCut.",
+  "Innere Konturen zuerst, Reihenfolge wie in VisiCut (Java).": "Contours intérieurs d'abord, même ordre que dans VisiCut (Java).",
   "Invertieren (helle Bereiche nachzeichnen)": "Inverser (tracer les zones claires)",
   "Jeder Schritt bearbeitet die Objekte, die alle Bedingungen erfüllen. Ein Objekt kann mehrere Schritte durchlaufen; „Rest“ erfasst alles, was sonst nicht bearbeitet oder ignoriert wird.": "Chaque étape usine les objets qui remplissent toutes les conditions. Un objet peut passer par plusieurs étapes ; « Reste » couvre tout ce qui n'est ni usiné ni ignoré ailleurs.",
   "Job": "Job",

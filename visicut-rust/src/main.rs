@@ -1562,11 +1562,6 @@ impl VisiCutR {
                 ui.add_space(4.0);
                 let enabled = !self.busy();
                 for order in CutOrder::ALL {
-                    // Darunter VisiCuts weitere Reihenfolgen.
-                    if order == CutOrder::File {
-                        form::divider(ui);
-                        ui.add_space(4.0);
-                    }
                     let selected = self.project.cut_order == order;
                     if ui
                         .add_enabled(

@@ -40,7 +40,7 @@ pub fn cut_order_title(order: CutOrder) -> &'static str {
 /// Erklärung einer Schnittreihenfolge (Einstellungen → Job).
 pub fn cut_order_help(order: CutOrder) -> &'static str {
     match order {
-        CutOrder::VisiCut => tr("Innere Konturen zuerst, Reihenfolge wie VisiCut."),
+        CutOrder::VisiCut => tr("Innere Konturen zuerst, Reihenfolge wie in VisiCut (Java)."),
         CutOrder::ShortestTravel => tr(
             "Innere Konturen zuerst, dann jeweils der nächstgelegene Pfad ab dem Referenzpunkt oben rechts.",
         ),

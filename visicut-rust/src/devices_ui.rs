@@ -1248,11 +1248,11 @@ fn detect_crosses(c: &mut Calibration) {
     update_quality(c);
 }
 
-/// Breite der Spalte rechts neben dem Foto im Kalibrierdialog.
+/// Breite der Spalte links neben dem Foto im Kalibrierdialog.
 const PANEL_WIDTH: f32 = 290.0;
 
-/// Spalte rechts im Kalibrierdialog: Objektiv, Kalibrierpunkte, Status und
-/// Bedienhinweise, gestaltet wie die Einstellungsseiten.
+/// Spalte links im Kalibrierdialog: Objektiv, Bedienung, Kalibrierpunkte
+/// und Status, gestaltet wie die Einstellungsseiten.
 fn calibration_panel(ui: &mut egui::Ui, c: &mut Calibration, height: f32) {
     use crate::object_bar::{Icon, list_button, list_footer};
     egui::ScrollArea::vertical()
@@ -1275,6 +1275,9 @@ fn calibration_panel(ui: &mut egui::Ui, c: &mut Calibration, height: f32) {
                 if c.lens != before {
                     update_quality(c);
                 }
+            });
+            crate::form::section(ui, tr("Bedienung"), |ui| {
+                crate::form::caption(ui, tr("1. Kalibrierseite öffnen und markieren.\n2. Foto aufnehmen.\n3. Marker auf die Kreuze ziehen (Nummer = Anzahl Striche).\nMindestens 4 Punkte."));
             });
             crate::form::section(ui, tr("Kalibrierpunkte"), |ui| {
                 let current = [Grid::Fine, Grid::Coarse]
@@ -1376,9 +1379,6 @@ fn calibration_panel(ui: &mut egui::Ui, c: &mut Calibration, height: f32) {
                     }
                 });
             }
-            crate::form::section(ui, tr("Bedienung"), |ui| {
-                crate::form::caption(ui, tr("1. Kalibrierseite öffnen und markieren.\n2. Foto aufnehmen.\n3. Marker auf die Kreuze ziehen (Nummer = Anzahl Striche).\nMindestens 4 Punkte."));
-            });
         });
 }
 
@@ -1544,6 +1544,11 @@ fn calibration_body(
             // Platz für die Knopfzeile darunter.
             (ui.available_height() - ui.spacing().interact_size.y - 18.0).max(420.0),
         );
+        // Spalte links neben dem Foto.
+        ui.vertical(|ui| {
+            ui.set_width(PANEL_WIDTH);
+            calibration_panel(ui, c, space.y);
+        });
         let (rect, response) = ui.allocate_exact_size(space, Sense::click_and_drag());
         let painter = ui.painter().with_clip_rect(rect);
         painter.rect_filled(rect, 0.0, Color32::from_gray(235));
@@ -1690,10 +1695,6 @@ fn calibration_body(
                 Color32::from_gray(120),
             );
         }
-        ui.vertical(|ui| {
-            ui.set_width(PANEL_WIDTH);
-            calibration_panel(ui, c, space.y);
-        });
     });
     ui.add_space(6.0);
     calibration_toolbar(ui, c, close, apply, action);

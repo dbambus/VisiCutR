@@ -3,7 +3,7 @@
 use eframe::egui;
 use visicut_core::{
     device,
-    mapping::{self, Attribute, Filter, Predefined, ValueCounts},
+    mapping::{self, Attribute, Filter, Predefined, Templates, ValueCounts},
     materials::{Library, Material, MaterialProfile},
     project::{CutOrder, JobStep, Operation, ParameterSet, Project},
     raster::{Dithering, RASTER_DPIS, RasterSettings},
@@ -159,10 +159,11 @@ pub fn apply_predefined(library: &Library, project: &mut Project, predefined: &P
     project.steps = predefined
         .rules
         .iter()
-        .map(|(operation, filters, rest)| JobStep {
-            filters: filters.clone(),
-            rest: *rest,
-            ..default_step(library, project, *operation)
+        .map(|rule| JobStep {
+            filters: rule.filters.clone(),
+            rest: rule.rest,
+            outline: rule.outline,
+            ..default_step(library, project, rule.operation)
         })
         .collect();
     project.ignore_filters = predefined.ignore.clone();
@@ -170,8 +171,14 @@ pub fn apply_predefined(library: &Library, project: &mut Project, predefined: &P
 
 /// Switches the assignment mode like macOS `setAssignmentMode`: individual
 /// assignment starts with all objects on the current operation, rules with
-/// the first predefined mapping.
-pub fn set_mode(library: &Library, project: &mut Project, mode: AssignmentMode, objects: usize) {
+/// the default template.
+pub fn set_mode(
+    library: &Library,
+    project: &mut Project,
+    mode: AssignmentMode,
+    objects: usize,
+    template: &Predefined,
+) {
     if mode == assignment_mode(project) {
         return;
     }
@@ -192,11 +199,7 @@ pub fn set_mode(library: &Library, project: &mut Project, mode: AssignmentMode, 
                 })
                 .collect();
         }
-        AssignmentMode::Rules => {
-            if let Some(first) = mapping::predefined().first() {
-                apply_predefined(library, project, first);
-            }
-        }
+        AssignmentMode::Rules => apply_predefined(library, project, template),
     }
 }
 
@@ -727,6 +730,13 @@ fn filters(
 }
 
 /// Material library editor state: draft and selected material.
+enum TemplateAction {
+    StartRename(String),
+    CancelRename,
+    Rename(String, String),
+    Remove(String),
+}
+
 struct Editor {
     draft: Vec<Material>,
     selected: usize,
@@ -751,14 +761,30 @@ pub struct JobUi {
     /// Zeile unter der Maus im vorigen Bild.
     list_hover: Option<usize>,
     scrolled_to: Option<usize>,
+    /// Own mapping templates and the default for new projects.
+    templates: Templates,
+    /// Name field of „Als Vorlage sichern“.
+    template_name: String,
+    /// Own template being renamed: old name and the edited one.
+    renaming: Option<(String, String)>,
+    /// Result of the last template action.
+    template_status: Option<Result<String, String>>,
 }
 
 impl JobUi {
     pub fn load() -> (Self, Option<String>) {
-        let (library, custom, error) = match Library::load(&device::config_dir()) {
+        let (library, custom, mut error) = match Library::load(&device::config_dir()) {
             Ok((library, custom)) => (library, custom, None),
             Err(e) => (Library::bundled(), false, Some(e)),
         };
+        let templates = Templates::load(&device::config_dir()).unwrap_or_else(|e| {
+            error = Some(
+                error
+                    .take()
+                    .map_or(e.clone(), |first| format!("{first}; {e}")),
+            );
+            Templates::default()
+        });
         let ui = Self {
             library,
             custom,
@@ -770,6 +796,10 @@ impl JobUi {
             canvas_hover: None,
             list_hover: None,
             scrolled_to: None,
+            templates,
+            template_name: String::new(),
+            renaming: None,
+            template_status: None,
         };
         (ui, error)
     }
@@ -954,7 +984,8 @@ impl JobUi {
                 .inner;
             if let Some(candidate) = chosen {
                 let count = self.document.objects.len();
-                set_mode(self.active(), project, candidate, count);
+                let template = self.templates.default_template();
+                set_mode(self.active(), project, candidate, count, &template);
                 *dirty = true;
             }
             // A click above may have changed the mode.
@@ -1101,12 +1132,20 @@ impl JobUi {
         self.hovered_object = row_hover.or(self.canvas_hover);
     }
 
-    /// Einstellungen → Job, „Regeln“: Vorlage und Farbtoleranz.
+    /// Einstellungen → Job, „Regeln“: Vorlagen und Farbtoleranz.
     pub fn rules_settings(&mut self, ui: &mut egui::Ui, project: &mut Project, dirty: &mut bool) {
+        let builtin = mapping::predefined().len();
         ui.menu_button(tr("Vorlage übernehmen"), |ui| {
-            for p in mapping::predefined() {
-                if ui.button(p.name).clicked() {
-                    apply_predefined(self.active(), project, &p);
+            for (i, (reference, template)) in self.templates.all().iter().enumerate() {
+                if i == builtin {
+                    ui.separator();
+                }
+                let mut title = template.name.clone();
+                if self.templates.is_default(reference) {
+                    title = tr!("{name} (Standard)", name = title);
+                }
+                if ui.button(title).clicked() {
+                    apply_predefined(self.active(), project, template);
                     *dirty = true;
                 }
             }
@@ -1136,6 +1175,191 @@ impl JobUi {
                      Umwandlung von CMYK nach RGB; Grautöne nach Helligkeit."),
                 );
             });
+    }
+
+    /// Einstellungen → Job, „Eigene Vorlagen“: sichern, Standard für neue
+    /// Projekte, umbenennen, löschen und aus VisiCut importieren.
+    pub fn own_templates(&mut self, ui: &mut egui::Ui, project: &Project) {
+        let templates = self.templates.all();
+        let rules = assignment_mode(project) == AssignmentMode::Rules;
+        let name = self.template_name.trim().to_string();
+        let exists = self.templates.own.iter().any(|p| p.name == name);
+        ui.horizontal(|ui| {
+            ui.add_enabled(
+                rules,
+                egui::TextEdit::singleline(&mut self.template_name)
+                    .hint_text(tr("Name der Vorlage"))
+                    .desired_width(220.0),
+            );
+            let title = if exists {
+                tr("Vorlage ersetzen")
+            } else {
+                tr("Als Vorlage sichern")
+            };
+            if ui
+                .add_enabled(rules && !name.is_empty(), egui::Button::new(title))
+                .clicked()
+            {
+                let template = Predefined::from_project(&name, project);
+                let result = self.templates.store(template);
+                self.finish_template_change(result, tr!("Vorlage „{name}“ gesichert", name = name));
+            }
+        });
+        crate::form::caption(
+            ui,
+            if rules {
+                tr("\
+                    Eine Vorlage enthält die Regel-Schritte mit Bedingungen und Verfahren sowie \
+                 die Ignorierregeln, aber keine Leistung oder Geschwindigkeit: Diese kommen \
+                 weiter aus dem Materialprofil.")
+            } else {
+                tr("Zum Sichern einer Vorlage unter „Vorbereiten“ die Zuordnung „Regeln“ wählen.")
+            },
+        );
+        ui.add_space(4.0);
+        let default = templates
+            .iter()
+            .find(|(r, _)| self.templates.is_default(r))
+            .map(|(_, p)| p.name.clone())
+            .unwrap_or_default();
+        let mut chosen = None;
+        crate::form::row(ui, tr("Standard für neue Projekte"), |ui| {
+            crate::form::Dropdown::from_id_salt("default_template")
+                .selected_text(default)
+                .show_ui(ui, |ui| {
+                    for (reference, template) in &templates {
+                        let selected = self.templates.is_default(reference);
+                        if ui.selectable_label(selected, &template.name).clicked() && !selected {
+                            chosen = Some(reference.clone());
+                        }
+                    }
+                });
+        });
+        if let Some(reference) = chosen {
+            self.templates.default = Some(reference);
+            self.finish_template_change(Ok(()), tr("Standardvorlage gesichert").into());
+        }
+        let mut action = None;
+        for template in &self.templates.own {
+            ui.horizontal(|ui| match &mut self.renaming {
+                Some((old, new)) if *old == template.name => {
+                    let edit = ui.add(egui::TextEdit::singleline(new).desired_width(220.0));
+                    let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if enter
+                        || ui
+                            .small_button("✔")
+                            .on_hover_text(tr("Umbenennen"))
+                            .clicked()
+                    {
+                        action = Some(TemplateAction::Rename(old.clone(), new.clone()));
+                    }
+                    if ui
+                        .small_button("✖")
+                        .on_hover_text(tr("Abbrechen"))
+                        .clicked()
+                    {
+                        action = Some(TemplateAction::CancelRename);
+                    }
+                }
+                _ => {
+                    ui.label(&template.name);
+                    if ui
+                        .add(egui::Button::new("✏").frame(false))
+                        .on_hover_text(tr("Vorlage umbenennen"))
+                        .clicked()
+                    {
+                        action = Some(TemplateAction::StartRename(template.name.clone()));
+                    }
+                    if ui
+                        .add(egui::Button::new("🗑").frame(false))
+                        .on_hover_text(tr("Vorlage löschen"))
+                        .clicked()
+                    {
+                        action = Some(TemplateAction::Remove(template.name.clone()));
+                    }
+                }
+            });
+        }
+        match action {
+            Some(TemplateAction::StartRename(name)) => self.renaming = Some((name.clone(), name)),
+            Some(TemplateAction::CancelRename) => self.renaming = None,
+            Some(TemplateAction::Rename(old, new)) => {
+                let result = self.templates.rename(&old, &new);
+                if result.is_ok() {
+                    self.renaming = None;
+                }
+                let message = tr!("Vorlage „{name}“ umbenannt", name = new.trim());
+                self.finish_template_change(result, message);
+            }
+            Some(TemplateAction::Remove(name)) => {
+                self.templates.remove(&name);
+                self.finish_template_change(Ok(()), tr!("Vorlage „{name}“ gelöscht", name = name));
+            }
+            None => {}
+        }
+        if ui
+            .button(tr("Aus VisiCut importieren …"))
+            .on_hover_text(tr(
+                "Zuordnungen (mappings/*.xml) aus VisiCut-Einstellungen oder einem \
+                 .vcsettings-Archiv",
+            ))
+            .clicked()
+            && let Some(paths) = rfd::FileDialog::new()
+                .add_filter(tr("VisiCut-Zuordnungen"), &["xml", "vcsettings", "zip"])
+                .pick_files()
+        {
+            self.import_templates(&paths);
+        }
+        match &self.template_status {
+            Some(Ok(message)) => crate::form::caption(ui, message.clone()),
+            Some(Err(error)) => {
+                ui.colored_label(WARNING, error);
+            }
+            None => {}
+        }
+    }
+
+    fn import_templates(&mut self, paths: &[std::path::PathBuf]) {
+        let mut names = Vec::new();
+        let mut warnings = Vec::new();
+        for path in paths {
+            let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+            let imported = std::fs::read(path)
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| visicut_core::import::import_templates(&bytes, &file_name));
+            match imported {
+                Ok((templates, notes)) => {
+                    warnings.extend(notes);
+                    for mut template in templates {
+                        // Eigene Vorlagen gleichen Namens bleiben erhalten.
+                        template.name = self.templates.free_name(&template.name);
+                        names.push(template.name.clone());
+                        if let Err(e) = self.templates.store(template) {
+                            warnings.push(e);
+                        }
+                    }
+                }
+                Err(e) => warnings.push(format!("{file_name}: {e}")),
+            }
+        }
+        if names.is_empty() {
+            self.template_status = Some(Err(warnings.join("; ")));
+            return;
+        }
+        let mut message = tr!("Importiert: {names}", names = names.join(", "));
+        if !warnings.is_empty() {
+            message = format!("{message}. {}", warnings.join("; "));
+        }
+        self.finish_template_change(Ok(()), message);
+    }
+
+    /// Sichert die Vorlagen nach einer Änderung und zeigt das Ergebnis.
+    fn finish_template_change(&mut self, result: Result<(), String>, message: String) {
+        self.template_status = Some(
+            result
+                .and_then(|()| self.templates.save(&device::config_dir()))
+                .map(|()| message),
+        );
     }
 
     fn steps(&mut self, ui: &mut egui::Ui, project: &mut Project, dirty: &mut bool) {
@@ -1653,7 +1877,13 @@ mod tests {
         let library = library();
         let mut p = project();
         assert_eq!(assignment_mode(&p), AssignmentMode::Whole);
-        set_mode(&library, &mut p, AssignmentMode::Objects, 3);
+        set_mode(
+            &library,
+            &mut p,
+            AssignmentMode::Objects,
+            3,
+            &mapping::predefined()[0],
+        );
         assert_eq!(assignment_mode(&p), AssignmentMode::Objects);
         let operations: Vec<_> = p.steps.iter().map(|s| s.operation).collect();
         assert_eq!(
@@ -1675,9 +1905,21 @@ mod tests {
         // 3D engraving as the motif operation keeps all objects assigned.
         let mut deep = project();
         deep.operation = Operation::Engrave3d;
-        set_mode(&library, &mut deep, AssignmentMode::Objects, 3);
+        set_mode(
+            &library,
+            &mut deep,
+            AssignmentMode::Objects,
+            3,
+            &mapping::predefined()[0],
+        );
         assert_eq!(assignment(&deep, 2), Some(Operation::Engrave3d));
-        set_mode(&library, &mut deep, AssignmentMode::Whole, 3);
+        set_mode(
+            &library,
+            &mut deep,
+            AssignmentMode::Whole,
+            3,
+            &mapping::predefined()[0],
+        );
         assert!(deep.steps.is_empty());
     }
 
@@ -1685,7 +1927,13 @@ mod tests {
     fn rules_mode_applies_first_template_and_presets_cover_all_steps() {
         let library = library();
         let mut p = project();
-        set_mode(&library, &mut p, AssignmentMode::Rules, 3);
+        set_mode(
+            &library,
+            &mut p,
+            AssignmentMode::Rules,
+            3,
+            &mapping::predefined()[0],
+        );
         assert_eq!(assignment_mode(&p), AssignmentMode::Rules);
         // The first template maps pure red, blue and green.
         assert_eq!(p.steps.len(), mapping::predefined()[0].rules.len());
@@ -1707,11 +1955,56 @@ mod tests {
             .find(|s| s.operation == Operation::Mark)
             .unwrap();
         assert_eq!(mark.power_percent, 1.0);
-        set_mode(&library, &mut p, AssignmentMode::Objects, 3);
+        set_mode(
+            &library,
+            &mut p,
+            AssignmentMode::Objects,
+            3,
+            &mapping::predefined()[0],
+        );
         assert!(p.ignore_filters.is_empty());
         let mut whole = project();
         assert_eq!(apply_presets(&library, &mut whole), 1);
         assert_eq!((whole.power_percent, whole.passes), (30.0, 1));
+    }
+
+    #[test]
+    fn rules_mode_starts_with_the_chosen_default_template() {
+        let library = library();
+        let mut templates = Templates::default();
+        let own = Predefined {
+            name: "Nur Rest schneiden".into(),
+            rules: vec![mapping::Rule {
+                operation: Operation::Cut,
+                filters: None,
+                rest: true,
+                outline: true,
+            }],
+            ignore: vec![vec![Filter {
+                attribute: Attribute::Color,
+                value: "#0000ff".into(),
+                compare: false,
+                inverted: false,
+            }]],
+        };
+        templates.store(own.clone()).unwrap();
+        templates.default = Some(mapping::TemplateRef::Own(own.name.clone()));
+        let mut p = project();
+        set_mode(
+            &library,
+            &mut p,
+            AssignmentMode::Rules,
+            3,
+            &templates.default_template(),
+        );
+        assert_eq!(p.steps.len(), 1);
+        let step = &p.steps[0];
+        assert!(step.rest && step.outline && step.filters.is_none());
+        // Parameters come from the material profile, not from the template.
+        assert_eq!(step.power_percent, 80.0);
+        assert_eq!(p.ignore_filters, own.ignore);
+        // Saved back from the project, the template is the same.
+        assert_eq!(Predefined::from_project(&own.name, &p), own);
     }
 
     #[test]

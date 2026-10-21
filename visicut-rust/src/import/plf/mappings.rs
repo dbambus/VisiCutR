@@ -35,7 +35,7 @@
 //! unbekanntem Filter im Rest macht den Rest ungültig, damit kein Objekt
 //! stillschweigend geschnitten wird.
 
-use crate::mapping::{Attribute, Filter, ObjectAttributes};
+use crate::mapping::{Attribute, Filter, ObjectAttributes, Predefined, Rule};
 use crate::project::{JobStep, Operation};
 use crate::raster::{Dithering, RASTER_DPIS, RasterSettings};
 use crate::{i18n::tr, tr};
@@ -119,9 +119,19 @@ pub struct Translation {
 
 /// Liest `mappings.xml`.
 pub fn parse(bytes: &[u8]) -> Result<Vec<Entry>, String> {
-    let text = String::from_utf8_lossy(bytes);
-    let document = roxmltree::Document::parse(&text).map_err(|e| e.to_string())?;
+    parse_named(bytes).map(|(_, entries)| entries)
+}
+
+/// Liest einen Zuordnungssatz mit seinem Namen (`name`, fehlt in PLF-Dateien).
+fn parse_named(bytes: &[u8]) -> Result<(Option<String>, Vec<Entry>), String> {
+    let source = String::from_utf8_lossy(bytes);
+    let document = roxmltree::Document::parse(&source).map_err(|e| e.to_string())?;
     let root = document.root_element();
+    let name = text(child(root, "name"));
+    parse_set(root).map(|entries| (name, entries))
+}
+
+fn parse_set(root: Node) -> Result<Vec<Entry>, String> {
     if !root.tag_name().name().ends_with("MappingSet") {
         return Err(tr("kein Zuordnungssatz").into());
     }
@@ -669,6 +679,124 @@ fn profile_settings(
     }
 }
 
+/// Zuordnungsvorlagen aus VisiCut-Einstellungen: eine Datei `mappings/<Name>.xml`
+/// oder ein `.vcsettings`-Archiv mit dem Ordner `mappings/`. Liefert die
+/// Vorlagen und Hinweise zu nicht übernommenen Einträgen.
+///
+/// Wie beim PLF-Import: Filtersatz ohne Profil ergibt eine Ignorierregel,
+/// Profil ohne Filtersatz den Rest. Vom Profil zählen nur Verfahren und
+/// „Kontur“; Laser- und Rastereinstellungen kommen aus dem Materialprofil.
+pub fn import_templates(
+    bytes: &[u8],
+    file_name: &str,
+) -> Result<(Vec<Predefined>, Vec<String>), String> {
+    let mut warnings = Vec::new();
+    if !bytes.starts_with(b"PK") {
+        let stem = file_name.strip_suffix(".xml").unwrap_or(file_name);
+        let template = template(bytes, stem, &mut warnings)?;
+        return Ok((vec![template], warnings));
+    }
+    let mut archive =
+        zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
+    let mut templates = Vec::new();
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let name = file.name().map_err(|e| e.to_string())?.to_string();
+        // Einstellungsarchive legen Zuordnungen in mappings/ ab, GitHub davor
+        // einen Ordner.
+        let in_mappings = name.split('/').rev().nth(1) == Some("mappings");
+        if !in_mappings || !name.ends_with(".xml") || file.size() > 5 * 1024 * 1024 {
+            continue;
+        }
+        let mut source = Vec::new();
+        std::io::Read::read_to_end(&mut file, &mut source).map_err(|e| e.to_string())?;
+        let stem = name.rsplit('/').next().unwrap_or(&name);
+        let stem = stem.strip_suffix(".xml").unwrap_or(stem);
+        match template(&source, stem, &mut warnings) {
+            Ok(template) => templates.push(template),
+            Err(error) => warnings.push(tr!(
+                "Zuordnung „{name}“ nicht übernommen: {error}",
+                name = stem,
+                error = error
+            )),
+        }
+    }
+    if templates.is_empty() {
+        return Err(match warnings.is_empty() {
+            true => tr("Archiv enthält keine VisiCut-Zuordnungen").into(),
+            false => warnings.join("; "),
+        });
+    }
+    Ok((templates, warnings))
+}
+
+/// Ein Zuordnungssatz als Vorlage; `fallback` ist der Name ohne `name`-Eintrag.
+fn template(
+    bytes: &[u8],
+    fallback: &str,
+    warnings: &mut Vec<String>,
+) -> Result<Predefined, String> {
+    let (name, entries) = parse_named(bytes)?;
+    let name = name.unwrap_or_else(|| fallback.to_string());
+    let mut template = Predefined {
+        name: name.clone(),
+        rules: Vec::new(),
+        ignore: Vec::new(),
+    };
+    for entry in entries {
+        let filters = match &entry.filters {
+            None => None,
+            Some(list) => match list
+                .iter()
+                .map(|f| convert(f, &name, warnings))
+                .collect::<Result<Vec<_>, _>>()
+            {
+                Ok(filters) => Some(filters),
+                Err(error) => {
+                    warnings.push(tr!(
+                        "Zuordnung in „{name}“ nicht übernommen: {error}",
+                        name = name,
+                        error = error
+                    ));
+                    continue;
+                }
+            },
+        };
+        match (&entry.profile, filters) {
+            (Some(profile), filters) => {
+                let (operation, outline) = match profile {
+                    Profile::Vector {
+                        is_cut,
+                        use_outline,
+                        ..
+                    } => (
+                        if *is_cut {
+                            Operation::Cut
+                        } else {
+                            Operation::Mark
+                        },
+                        *use_outline,
+                    ),
+                    Profile::Raster { .. } => (Operation::Engrave, false),
+                    Profile::Raster3d { .. } => (Operation::Engrave3d, false),
+                };
+                template.rules.push(Rule {
+                    operation,
+                    rest: filters.is_none(),
+                    filters,
+                    outline,
+                });
+            }
+            (None, Some(filters)) => template.ignore.push(filters),
+            (None, None) => {}
+        }
+    }
+    if template.rules.is_empty() {
+        return Err(tr("Die Vorlage enthält keine Regel").into());
+    }
+    Ok(template)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -820,5 +948,86 @@ mod tests {
         assert_eq!(warnings.len(), 2, "{warnings:?}");
         assert!(warnings.iter().any(|w| w.contains("Auflösung 1000")));
         assert!(warnings.iter().any(|w| w.contains("NEAREST")));
+    }
+
+    #[test]
+    fn visicut_mappings_become_templates_from_files_and_archives() {
+        use std::io::Write;
+        // Rule, rest (outline) and 3D engraving; no name: the file name counts.
+        let (templates, warnings) = import_templates(SET.as_bytes(), "Holz.xml").unwrap();
+        assert_eq!(templates.len(), 1);
+        let template = &templates[0];
+        assert_eq!(template.name, "Holz");
+        let operations: Vec<_> = template
+            .rules
+            .iter()
+            .map(|r| (r.operation, r.rest, r.outline))
+            .collect();
+        assert_eq!(
+            operations,
+            [
+                (Operation::Engrave, false, false),
+                (Operation::Mark, true, true),
+                (Operation::Engrave3d, false, false),
+            ]
+        );
+        assert_eq!(
+            template.rules[0].filters.as_deref().unwrap()[0],
+            Filter {
+                attribute: Attribute::StrokeColor,
+                value: "#ff0000".into(),
+                compare: false,
+                inverted: false,
+            }
+        );
+        assert!(template.rules[1].filters.is_none());
+        assert!(template.ignore.is_empty());
+        assert!(!warnings.is_empty(), "Linienstärke als Text wird gemeldet");
+
+        // A filter set without profile is an ignore rule; the set's name wins.
+        let ignore = SET
+            .replace(
+                "</linked-list>\n</com",
+                r#"<mapping><a class="filters"><linked-list><default/><int>1</int>
+                    <filter><inverted>false</inverted><attribute>Type</attribute><value class="string">Text</value></filter>
+                </linked-list></a></mapping>
+                </linked-list><name>Mit Ignorieren</name>
+</com"#,
+            );
+        let (templates, _) = import_templates(ignore.as_bytes(), "datei.xml").unwrap();
+        assert_eq!(templates[0].name, "Mit Ignorieren");
+        assert_eq!(templates[0].rules.len(), 3);
+        assert_eq!(templates[0].ignore[0][0].attribute, Attribute::Type);
+        // "Gravur-Ebene" is unknown: that entry is skipped with a warning.
+        let (templates, warnings) = import_templates(
+            include_str!("testdata/zuordnung.xml").as_bytes(),
+            "datei.xml",
+        )
+        .unwrap();
+        assert_eq!(templates[0].rules.len(), 1);
+        assert_eq!(warnings.len(), 1);
+
+        let mut bytes = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut bytes));
+            let options = zip::write::SimpleFileOptions::default();
+            zip.start_file("settings/mappings/Holz.xml", options)
+                .unwrap();
+            zip.write_all(SET.as_bytes()).unwrap();
+            zip.start_file("settings/mappings/kaputt.xml", options)
+                .unwrap();
+            zip.write_all(b"<kein/>").unwrap();
+            zip.start_file("settings/devices/LTT.xml", options).unwrap();
+            zip.write_all(SET.as_bytes()).unwrap();
+            zip.finish().unwrap();
+        }
+        let (templates, warnings) = import_templates(&bytes, "x.vcsettings").unwrap();
+        assert_eq!(templates.len(), 1);
+        assert_eq!(templates[0].name, "Holz");
+        assert!(
+            warnings.iter().any(|w| w.contains("kaputt")),
+            "{warnings:?}"
+        );
+        assert!(import_templates(b"<kein/>", "a.xml").is_err());
     }
 }

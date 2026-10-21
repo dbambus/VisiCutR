@@ -5,6 +5,14 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
 
 ## Unveröffentlicht
 
+- **Eigene Zuordnungs-Vorlagen** (Einstellungen → Job → Eigene Vorlagen):
+  Regel-Schritte mit Bedingungen, Verfahren und Rest sowie die Ignorierregeln
+  eines Projekts unter einem Namen sichern, umbenennen und löschen. **Vorlage
+  übernehmen** listet eingebaute und eigene Vorlagen; eine davon gilt als
+  **Standard für neue Projekte** beim Wechsel auf „Regeln“ (bisher immer die
+  erste eingebaute). Parameter gehören nicht zur Vorlage, sie kommen weiter aus
+  dem Materialprofil. **Aus VisiCut importieren …** liest Java-Zuordnungen
+  (`mappings/*.xml`) einzeln oder aus einem `.vcsettings`-Archiv.
 - **Neuer Name VisiCutR** mit eigenem Logo (VC mit hochgestelltem R).
   Programm `visicutr`, macOS `VisiCutR.app`, Downloads `VisiCutR-…`,
   Repository `dbambus/VisiCutR`. Der Einstellungsordner von VisiCutRust

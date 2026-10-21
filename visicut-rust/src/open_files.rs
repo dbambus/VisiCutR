@@ -47,6 +47,8 @@ pub fn take() -> Vec<PathBuf> {
     std::mem::take(&mut *PENDING.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
+// Nur das macOS-Ereignis liefert Dateien nachträglich.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn deliver(paths: Vec<PathBuf>) {
     if paths.is_empty() {
         return;

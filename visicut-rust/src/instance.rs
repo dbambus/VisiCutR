@@ -326,10 +326,16 @@ mod tests {
         assert!(send(&forged, &Request::default()).is_err());
         assert_eq!(listener.try_recv(), None);
         // Eine neuere Instanz hat die Adresse überschrieben: nicht löschen.
-        let newer = Listener::start(&dir, || {}).unwrap();
+        let (woken, wake) = std::sync::mpsc::channel();
+        let newer = Listener::start(&dir, move || {
+            let _ = woken.send(());
+        })
+        .unwrap();
         drop(listener);
         assert!(dir.join(FILE).exists());
         assert!(forward(&dir, &Request::default()));
+        // Die Bestätigung kommt vor der Übergabe an die Oberfläche: warten.
+        wake.recv_timeout(REPLY_TIMEOUT).unwrap();
         assert_eq!(newer.try_recv(), Some(Request::default()));
         // Verwaiste Adresse (Absturz): Port ist zu, also selbst starten.
         drop(newer);

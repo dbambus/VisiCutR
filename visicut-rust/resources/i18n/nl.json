@@ -306,7 +306,6 @@
   "Position und Größe": "Positie en grootte",
   "Positive Winkel drehen im Uhrzeigersinn": "Positieve hoeken draaien met de klok mee",
   "Profil entfernen": "Profiel verwijderen",
-  "Profil hinzufügen": "Profiel toevoegen",
   "Projekt geöffnet": "Project geopend",
   "Projekt mit eingebetteter SVG gesichert": "Project met ingebedde SVG opgeslagen",
   "Punkt +": "Punt +",
@@ -939,5 +938,8 @@
   "Kopie des Lasercutters anlegen": "Lasersnijder dupliceren",
   "Lasercutter entfernen": "Lasersnijder verwijderen",
   "Material duplizieren": "Materiaal dupliceren",
-  "Material entfernen": "Materiaal verwijderen"
+  "Material entfernen": "Materiaal verwijderen",
+  "Stärke aller Profile dieser Zeile": "Dikte van alle profielen in deze groep",
+  "Stärke hinzufügen": "Dikte toevoegen",
+  "Verfahren für diese Stärke hinzufügen": "Bewerking voor deze dikte toevoegen"
 }

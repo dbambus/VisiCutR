@@ -306,7 +306,6 @@
   "Position und Größe": "Position and size",
   "Positive Winkel drehen im Uhrzeigersinn": "Positive angles rotate clockwise",
   "Profil entfernen": "Remove profile",
-  "Profil hinzufügen": "Add profile",
   "Projekt geöffnet": "Project opened",
   "Projekt mit eingebetteter SVG gesichert": "Project saved with embedded SVG",
   "Punkt +": "Point +",
@@ -939,5 +938,8 @@
   "Kopie des Lasercutters anlegen": "Duplicate laser cutter",
   "Lasercutter entfernen": "Remove laser cutter",
   "Material duplizieren": "Duplicate material",
-  "Material entfernen": "Remove material"
+  "Material entfernen": "Remove material",
+  "Stärke aller Profile dieser Zeile": "Thickness of all profiles in this group",
+  "Stärke hinzufügen": "Add thickness",
+  "Verfahren für diese Stärke hinzufügen": "Add an operation for this thickness"
 }

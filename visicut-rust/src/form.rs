@@ -66,19 +66,48 @@ pub fn apply_fonts(ctx: &egui::Context) {
         "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ];
-    let Some(data) = CANDIDATES.iter().find_map(|path| std::fs::read(path).ok()) else {
-        return;
-    };
+    // Fetter Schnitt für Überschriften: Datei und Index in einer Sammlung.
+    const BOLD: &[(&str, u32)] = &[
+        ("/System/Library/Fonts/HelveticaNeue.ttc", 1),
+        ("/System/Library/Fonts/Helvetica.ttc", 1),
+        ("C:\\Windows\\Fonts\\segoeuib.ttf", 0),
+        ("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf", 0),
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 0),
+    ];
     let mut fonts = egui::FontDefinitions::default();
-    fonts
-        .font_data
-        .insert("system".to_owned(), egui::FontData::from_owned(data).into());
+    if let Some(data) = CANDIDATES.iter().find_map(|path| std::fs::read(path).ok()) {
+        fonts
+            .font_data
+            .insert("system".to_owned(), egui::FontData::from_owned(data).into());
+        fonts
+            .families
+            .entry(egui::FontFamily::Proportional)
+            .or_default()
+            .insert(0, "system".to_owned());
+    }
+    // Die Familie gibt es immer (sonst bricht egui ab); ohne Fettschnitt
+    // fällt sie auf die normale Schrift zurück.
+    let mut bold = fonts.families[&egui::FontFamily::Proportional].clone();
+    if let Some((data, index)) = BOLD
+        .iter()
+        .find_map(|(path, index)| std::fs::read(path).ok().map(|d| (d, *index)))
+    {
+        let mut font = egui::FontData::from_owned(data);
+        font.index = index;
+        fonts.font_data.insert("bold".to_owned(), font.into());
+        bold.insert(0, "bold".to_owned());
+    }
     fonts
         .families
-        .entry(egui::FontFamily::Proportional)
-        .or_default()
-        .insert(0, "system".to_owned());
+        .insert(egui::FontFamily::Name(BOLD_FAMILY.into()), bold);
     ctx.set_fonts(fonts);
+}
+
+const BOLD_FAMILY: &str = "bold";
+
+/// Fette Schrift in `size` Punkten (Überschriften).
+pub fn bold(size: f32) -> egui::FontId {
+    egui::FontId::new(size, egui::FontFamily::Name(BOLD_FAMILY.into()))
 }
 
 /// Bereich wie „Process“ in Bambu Studio: graue Kopfleiste über die volle
@@ -522,7 +551,12 @@ impl Dropdown {
 /// Überschrift einer Einstellungsseite, darunter eine doppelte Linie über
 /// die ganze Breite.
 pub fn page_heading(ui: &mut egui::Ui, title: &str) {
-    ui.heading(title);
+    let size = ui
+        .style()
+        .text_styles
+        .get(&egui::TextStyle::Heading)
+        .map_or(20.0, |font| font.size);
+    ui.label(RichText::new(title).font(bold(size)));
     ui.add_space(4.0);
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 5.0), egui::Sense::hover());

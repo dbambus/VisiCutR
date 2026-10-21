@@ -306,7 +306,6 @@
   "Position und Größe": "Posizione e dimensioni",
   "Positive Winkel drehen im Uhrzeigersinn": "Gli angoli positivi ruotano in senso orario",
   "Profil entfernen": "Rimuovi profilo",
-  "Profil hinzufügen": "Aggiungi profilo",
   "Projekt geöffnet": "Progetto aperto",
   "Projekt mit eingebetteter SVG gesichert": "Progetto salvato con SVG incorporato",
   "Punkt +": "Punto +",
@@ -939,5 +938,8 @@
   "Kopie des Lasercutters anlegen": "Duplica il laser",
   "Lasercutter entfernen": "Rimuovi il laser",
   "Material duplizieren": "Duplica materiale",
-  "Material entfernen": "Rimuovi materiale"
+  "Material entfernen": "Rimuovi materiale",
+  "Stärke aller Profile dieser Zeile": "Spessore di tutti i profili di questo gruppo",
+  "Stärke hinzufügen": "Aggiungi spessore",
+  "Verfahren für diese Stärke hinzufügen": "Aggiungi una lavorazione per questo spessore"
 }

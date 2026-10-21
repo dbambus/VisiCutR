@@ -316,6 +316,102 @@ pub fn duplicate_material(materials: &mut Vec<Material>, index: usize) -> usize 
     materials.len() - 1
 }
 
+/// Profiltabelle eines Materials: je Stärke eine fette Zeile mit „＋“ für ein
+/// weiteres Verfahren, darunter die Verfahren in ihrer Farbe (wie in der
+/// Seitenleiste) mit Leistung und Geschwindigkeit.
+fn profile_table(ui: &mut egui::Ui, material: &mut Material, drop: &mut Option<usize>) {
+    let groups = profile_groups(&material.profiles);
+    let mut add_to = None;
+    egui::Grid::new("profiles")
+        .num_columns(5)
+        .spacing([10.0, 4.0])
+        .show(ui, |ui| {
+            for title in [
+                tr("Stärke"),
+                tr("Verfahren"),
+                tr("Leistung"),
+                tr("Geschwindigkeit"),
+            ] {
+                ui.label(egui::RichText::new(title).color(egui::Color32::from_gray(110)));
+            }
+            ui.end_row();
+            for (g, (thickness, members)) in groups.iter().enumerate() {
+                if g > 0 {
+                    // Luft zwischen den Stärken.
+                    ui.add_space(6.0);
+                    ui.end_row();
+                }
+                let mut value = *thickness;
+                let changed = ui
+                    .add(
+                        egui::DragValue::new(&mut value)
+                            .range(0.0..=1000.0)
+                            .suffix(" mm"),
+                    )
+                    .on_hover_text(tr("Stärke aller Profile dieser Zeile"))
+                    .changed();
+                if changed {
+                    for i in members {
+                        material.profiles[*i].thickness_mm = value;
+                    }
+                }
+                let complete = members.len() >= Operation::ALL.len();
+                if crate::object_bar::list_button(
+                    ui,
+                    crate::object_bar::Icon::Plus,
+                    !complete,
+                    tr("Verfahren für diese Stärke hinzufügen"),
+                ) {
+                    add_to = Some(*thickness);
+                }
+                ui.end_row();
+                for &i in members {
+                    let profile = &mut material.profiles[i];
+                    ui.label("");
+                    ui.horizontal(|ui| {
+                        let color = crate::preview_ui::operation_color(profile.operation);
+                        let (bar, _) =
+                            ui.allocate_exact_size(egui::vec2(4.0, 20.0), egui::Sense::hover());
+                        ui.painter().rect_filled(bar, 2.0, color);
+                        crate::form::Dropdown::from_id_salt(("profile", i))
+                            .selected_text(
+                                egui::RichText::new(operation_title(profile.operation))
+                                    .color(color),
+                            )
+                            .show_ui(ui, |ui| {
+                                for o in Operation::ALL {
+                                    let text = egui::RichText::new(operation_title(o))
+                                        .color(crate::preview_ui::operation_color(o));
+                                    ui.selectable_value(&mut profile.operation, o, text);
+                                }
+                            });
+                    });
+                    ui.add(
+                        egui::DragValue::new(&mut profile.power_percent)
+                            .range(0.0..=100.0)
+                            .suffix(" %"),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut profile.speed_percent)
+                            .range(0.0..=100.0)
+                            .suffix(" %"),
+                    );
+                    if ui
+                        .add(egui::Button::new("🗑").frame(false))
+                        .on_hover_text(tr("Profil entfernen"))
+                        .clicked()
+                    {
+                        *drop = Some(i);
+                    }
+                    ui.end_row();
+                }
+            }
+        });
+    if let Some(thickness) = add_to {
+        add_operation(material, thickness);
+    }
+}
+
 /// Entfernt das Material `index`; liefert die danach gewählte Position
 /// (dieselbe, am Ende die davor).
 pub fn remove_material(materials: &mut Vec<Material>, index: usize) -> usize {
@@ -325,17 +421,71 @@ pub fn remove_material(materials: &mut Vec<Material>, index: usize) -> usize {
     index.min(materials.len().saturating_sub(1))
 }
 
-/// Neues Profil am Ende: Stärke des letzten (sonst 3 mm), Schneiden mit
-/// 100 % Leistung und 10 % Geschwindigkeit zum Anpassen.
-pub fn add_profile(material: &mut Material) {
-    let thickness = material.profiles.last().map_or(3.0, |p| p.thickness_mm);
-    material.profiles.push(MaterialProfile {
-        thickness_mm: thickness,
-        operation: Operation::Cut,
-        power_percent: 100.0,
-        speed_percent: 10.0,
+/// Profile nach Stärke gruppiert (aufsteigend), je Gruppe die Positionen in
+/// der Reihenfolge der Verfahren (Schneiden, Gravieren, 3D-Gravur, Markieren).
+pub fn profile_groups(profiles: &[MaterialProfile]) -> Vec<(f32, Vec<usize>)> {
+    let mut groups: Vec<(f32, Vec<usize>)> = Vec::new();
+    for (i, p) in profiles.iter().enumerate() {
+        match groups
+            .iter_mut()
+            .find(|(t, _)| (t - p.thickness_mm).abs() < 1e-4)
+        {
+            Some((_, list)) => list.push(i),
+            None => groups.push((p.thickness_mm, vec![i])),
+        }
+    }
+    groups.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let rank = |o: Operation| Operation::ALL.iter().position(|x| *x == o);
+    for (_, list) in &mut groups {
+        list.sort_by_key(|i| (rank(profiles[*i].operation), *i));
+    }
+    groups
+}
+
+/// Neues Profil zum Anpassen mit üblichen Startwerten des Verfahrens.
+fn new_profile(thickness_mm: f32, operation: Operation) -> MaterialProfile {
+    let (power_percent, speed_percent) = match operation {
+        Operation::Cut => (100.0, 10.0),
+        Operation::Engrave => (30.0, 100.0),
+        Operation::Engrave3d => (60.0, 100.0),
+        Operation::Mark => (15.0, 100.0),
+    };
+    MaterialProfile {
+        thickness_mm,
+        operation,
+        power_percent,
+        speed_percent,
         source: None,
-    });
+    }
+}
+
+/// Neue Stärke (1 mm über der größten, sonst 3 mm) mit einem
+/// Schneid-Profil; liefert dessen Position.
+pub fn add_profile(material: &mut Material) -> usize {
+    let thickness = material
+        .profiles
+        .iter()
+        .map(|p| p.thickness_mm)
+        .reduce(f32::max)
+        .map_or(3.0, |t| t + 1.0);
+    material
+        .profiles
+        .push(new_profile(thickness, Operation::Cut));
+    material.profiles.len() - 1
+}
+
+/// Fügt der Stärke das erste noch fehlende Verfahren hinzu; `None`, wenn
+/// es schon alle gibt.
+pub fn add_operation(material: &mut Material, thickness_mm: f32) -> Option<usize> {
+    let present = |o: Operation| {
+        material
+            .profiles
+            .iter()
+            .any(|p| p.operation == o && (p.thickness_mm - thickness_mm).abs() < 1e-4)
+    };
+    let operation = Operation::ALL.into_iter().find(|o| !present(*o))?;
+    material.profiles.push(new_profile(thickness_mm, operation));
+    Some(material.profiles.len() - 1)
 }
 
 /// `#rrggbb` as a colour for swatches.
@@ -1643,49 +1793,7 @@ impl JobUi {
                             .auto_shrink([false, false])
                             .max_height((columns - footer - used).max(80.0))
                             .show(ui, |ui| {
-                                egui::Grid::new("profiles").num_columns(5).show(ui, |ui| {
-                                    ui.label(tr("Stärke"));
-                                    ui.label(tr("Verfahren"));
-                                    ui.label(tr("Leistung"));
-                                    ui.label(tr("Geschwindigkeit"));
-                                    ui.end_row();
-                                    for (j, p) in material.profiles.iter_mut().enumerate() {
-                                        ui.add(
-                                            egui::DragValue::new(&mut p.thickness_mm)
-                                                .range(0.0..=1000.0)
-                                                .suffix(" mm"),
-                                        );
-                                        crate::form::Dropdown::from_id_salt(("profile", j))
-                                            .selected_text(operation_title(p.operation))
-                                            .show_ui(ui, |ui| {
-                                                for o in Operation::ALL {
-                                                    ui.selectable_value(
-                                                        &mut p.operation,
-                                                        o,
-                                                        operation_title(o),
-                                                    );
-                                                }
-                                            });
-                                        ui.add(
-                                            egui::DragValue::new(&mut p.power_percent)
-                                                .range(0.0..=100.0)
-                                                .suffix(" %"),
-                                        );
-                                        ui.add(
-                                            egui::DragValue::new(&mut p.speed_percent)
-                                                .range(0.0..=100.0)
-                                                .suffix(" %"),
-                                        );
-                                        if ui
-                                            .small_button("🗑")
-                                            .on_hover_text(tr("Profil entfernen"))
-                                            .clicked()
-                                        {
-                                            drop = Some(j);
-                                        }
-                                        ui.end_row();
-                                    }
-                                });
+                                profile_table(ui, material, &mut drop);
                             });
                         if let Some(j) = drop {
                             material.profiles.remove(j);
@@ -1695,7 +1803,7 @@ impl JobUi {
                                 ui,
                                 crate::object_bar::Icon::Plus,
                                 true,
-                                tr("Profil hinzufügen"),
+                                tr("Stärke hinzufügen"),
                             )
                         });
                         if add {
@@ -2053,17 +2161,33 @@ mod tests {
         assert_eq!(materials[new].name, "Neues Material");
         assert_eq!(materials[other].name, "Neues Material (2)");
         assert!(materials[new].profiles.is_empty());
-        // Profile: das neue übernimmt die Stärke des letzten, sonst 3 mm.
-        add_profile(&mut materials[new]);
-        materials[new].profiles[0].thickness_mm = 6.0;
-        add_profile(&mut materials[new]);
-        let added = &materials[new].profiles[1];
-        assert_eq!((added.thickness_mm, added.operation), (6.0, Operation::Cut));
+        // Neue Stärke: 3 mm, danach 1 mm über der größten.
+        let first = add_profile(&mut materials[new]);
+        assert_eq!(materials[new].profiles[first].thickness_mm, 3.0);
+        materials[new].profiles[first].thickness_mm = 6.0;
+        let second = add_profile(&mut materials[new]);
+        let added = &materials[new].profiles[second];
+        assert_eq!((added.thickness_mm, added.operation), (7.0, Operation::Cut));
         assert_eq!((added.power_percent, added.speed_percent), (100.0, 10.0));
-        // Gleiche Stärke und gleiches Verfahren wären beim Sichern doppelt.
-        materials[new].profiles[1].operation = Operation::Mark;
-        add_profile(&mut materials[other]);
-        assert_eq!(materials[other].profiles[0].thickness_mm, 3.0);
+        // Weitere Verfahren je Stärke in fester Reihenfolge, bis alle da sind.
+        let mut ops = Vec::new();
+        while let Some(i) = add_operation(&mut materials[new], 6.0) {
+            ops.push(materials[new].profiles[i].operation);
+        }
+        assert_eq!(
+            ops,
+            [Operation::Engrave, Operation::Engrave3d, Operation::Mark]
+        );
+        // Gruppen: aufsteigend nach Stärke, je Gruppe in Verfahrensreihenfolge.
+        let groups = profile_groups(&materials[new].profiles);
+        let thicknesses: Vec<f32> = groups.iter().map(|g| g.0).collect();
+        assert_eq!(thicknesses, [6.0, 7.0]);
+        let order: Vec<Operation> = groups[0]
+            .1
+            .iter()
+            .map(|i| materials[new].profiles[*i].operation)
+            .collect();
+        assert_eq!(order, Operation::ALL);
         // Entfernen: die Auswahl bleibt an der Stelle, am Ende rückt sie vor.
         let count = materials.len();
         let at = remove_material(&mut materials, 1);

@@ -7,7 +7,7 @@
 use crate::device::{self, LaserDevice};
 use crate::mapping::Predefined;
 use crate::materials::{Library, Material, MaterialProfile};
-use crate::project::Operation;
+use crate::project::{Operation, ParameterSet};
 use crate::tr;
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read};
@@ -183,9 +183,10 @@ fn library(entries: &BTreeMap<String, Vec<u8>>, devices: &[&str], lab: &str) -> 
             continue;
         };
         let operation = OPERATIONS[rank].1;
-        let Some((power_percent, speed_percent)) = single_setting(content) else {
+        let Some(mut sets) = settings(content) else {
             continue;
         };
+        let first = sets.remove(0);
         let slot = found
             .entry(material)
             .or_default()
@@ -200,8 +201,10 @@ fn library(entries: &BTreeMap<String, Vec<u8>>, devices: &[&str], lab: &str) -> 
                     MaterialProfile {
                         thickness_mm,
                         operation,
-                        power_percent,
-                        speed_percent,
+                        power_percent: first.power_percent,
+                        speed_percent: first.speed_percent,
+                        passes: first.passes,
+                        additional: sets,
                         source: Some(path.clone()),
                     },
                 ),
@@ -252,29 +255,44 @@ fn operation_rank(operation: Operation) -> usize {
     .unwrap_or(usize::MAX)
 }
 
-/// Leistung und Geschwindigkeit eines Laserprofils mit genau einem
-/// Parametersatz.
-fn single_setting(xml: &[u8]) -> Option<(f32, f32)> {
+/// Höchstens so viele Parametersätze wie ein Schritt aufnimmt.
+const MAX_SETS: usize = 16;
+
+/// Parametersätze eines Laserprofils der Reihe nach; gleiche Sätze
+/// hintereinander werden zu Durchgängen zusammengefasst.
+fn settings(xml: &[u8]) -> Option<Vec<ParameterSet>> {
     let text = std::str::from_utf8(xml).ok()?;
     let document = roxmltree::Document::parse(text).ok()?;
-    let mut sets = document
+    let mut result: Vec<ParameterSet> = Vec::new();
+    for set in document
         .root_element()
         .children()
-        .filter(|n| n.is_element());
-    let set = sets.next()?;
-    if sets.next().is_some() {
-        return None;
+        .filter(|n| n.is_element())
+    {
+        let value = |name: &str| -> Option<f32> {
+            set.children()
+                .find(|n| n.has_tag_name(name))?
+                .text()?
+                .trim()
+                .parse()
+                .ok()
+                .filter(|v: &f32| v.is_finite())
+        };
+        let (power_percent, speed_percent) = (value("power")?, value("speed")?);
+        match result.last_mut() {
+            Some(last)
+                if last.power_percent == power_percent && last.speed_percent == speed_percent =>
+            {
+                last.passes += 1;
+            }
+            _ => result.push(ParameterSet {
+                power_percent,
+                speed_percent,
+                passes: 1,
+            }),
+        }
     }
-    let value = |name: &str| -> Option<f32> {
-        set.children()
-            .find(|n| n.has_tag_name(name))?
-            .text()?
-            .trim()
-            .parse()
-            .ok()
-            .filter(|v: &f32| v.is_finite())
-    };
-    Some((value("power")?, value("speed")?))
+    (!result.is_empty() && result.len() <= MAX_SETS).then_some(result)
 }
 
 fn material_name(xml: &[u8]) -> Option<String> {
@@ -342,7 +360,7 @@ mod tests {
     fn reads_devices_materials_and_mappings_like_visicut() {
         let device = device::from_visicut_xml(DEVICE).unwrap();
         let folder = format!("laserprofiles/{}", device.name.replace(' ', "_32_"));
-        let two_sets = b"<linked-list><a><power>1</power><speed>1</speed></a><a><power>2</power><speed>2</speed></a></linked-list>";
+        let two_sets = b"<linked-list><a><power>1</power><speed>1</speed></a><a><power>1</power><speed>1</speed></a><a><power>2</power><speed>2</speed></a></linked-list>";
         let files: Vec<(String, Vec<u8>)> = vec![
             ("devices/LTT.xml".into(), DEVICE.as_bytes().to_vec()),
             (
@@ -401,16 +419,28 @@ mod tests {
                 )
             })
             .collect();
-        // Zwei Parametersätze bleiben außen vor; „engrave_32_3d“ geht vor „engrave3d“.
+        // „engrave_32_3d“ geht vor „engrave3d“.
         assert_eq!(
             summary,
             [
+                (1.5, Operation::Engrave, 1.0, 1.0),
                 (1.5, Operation::Mark, 10.0, 100.0),
                 (3.0, Operation::Cut, 80.0, 20.0),
                 (3.0, Operation::Engrave3d, 40.0, 60.0),
             ]
         );
-        assert_eq!(lab.profile_count(), 4);
+        // Zwei gleiche Sätze ergeben zwei Durchgänge, dann folgt der dritte.
+        let engrave = &holz.profiles[0];
+        assert_eq!(engrave.passes, 2);
+        assert_eq!(
+            engrave.additional,
+            [ParameterSet {
+                power_percent: 2.0,
+                speed_percent: 2.0,
+                passes: 1
+            }]
+        );
+        assert_eq!(lab.profile_count(), 5);
         // Gleicher Inhalt, gleicher Fingerabdruck; geänderte Werte, neuer.
         let again = read(&archive(&refs), "Testlabor").unwrap();
         assert_eq!(again.fingerprint, lab.fingerprint);
@@ -429,7 +459,7 @@ mod tests {
 
     fn summary_text_mentions_counts(lab: &LabSettings) -> bool {
         let text = summary(lab);
-        text.contains('1') && text.contains('2') && text.contains('4')
+        text.contains('1') && text.contains('2') && text.contains('5')
     }
 
     /// Needs internet access: `cargo test -- --ignored`.

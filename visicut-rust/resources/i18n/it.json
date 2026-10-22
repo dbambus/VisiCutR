@@ -706,6 +706,7 @@
   "{count} Zuordnungen": "{count} assegnazioni",
   "{count} Zuordnungen als Vorlagen": "{count} assegnazioni come modelli",
   "{materials} Materialien mit {profiles} Laserwerten": "{materials} materiali con {profiles} impostazioni laser",
+  "Das Materialprofil hat {count} Parametersätze; alle gelten nur bei der Zuordnung „Einzeln“ oder „Regeln“, hier nur der erste.": "Il profilo del materiale ha {count} set di parametri; tutti valgono solo con l'assegnazione «Singola» o «Regole», qui solo il primo.",
   "Neu laden": "Ricarica",
   "Neu laden: Dateien unverändert": "Ricarica: file invariati",
   "Ein Teil neu geladen": "Una parte ricaricata",

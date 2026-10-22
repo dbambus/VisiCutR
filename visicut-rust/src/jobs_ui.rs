@@ -133,12 +133,18 @@ pub fn preset<'a>(
 pub fn default_step(library: &Library, project: &Project, operation: Operation) -> JobStep {
     let mut step = JobStep::new(operation);
     let safe = operation != Operation::Cut && project.operation != operation;
-    (step.power_percent, step.speed_percent) = match preset(library, project, operation) {
+    let profile = preset(library, project, operation);
+    (step.power_percent, step.speed_percent) = match profile {
         Some(p) => (p.power_percent, p.speed_percent),
         None if safe => (0.0, 100.0),
         None => (project.power_percent, project.speed_percent),
     };
     step.passes = project.passes;
+    // Ein Profil mit mehreren Durchgängen oder Sätzen bringt sie mit.
+    if let Some(p) = profile.filter(|p| p.is_multi()) {
+        step.passes = p.passes;
+        step.additional = p.additional.clone();
+    }
     if operation.is_raster() && project.operation.is_raster() {
         step.raster = project.raster;
     }
@@ -243,7 +249,9 @@ pub fn apply_step_preset(library: &Library, project: &mut Project, index: usize)
         return false;
     };
     let step = &mut project.steps[index];
-    (step.power_percent, step.speed_percent, step.passes) = (p.power_percent, p.speed_percent, 1);
+    (step.power_percent, step.speed_percent, step.passes) =
+        (p.power_percent, p.speed_percent, p.passes);
+    step.additional = p.additional.clone();
     true
 }
 
@@ -254,8 +262,9 @@ pub fn apply_presets(library: &Library, project: &mut Project) -> usize {
         let Some(p) = preset(library, project, project.operation) else {
             return 0;
         };
+        // Das ganze Motiv hat nur einen Parametersatz (siehe `parameters`).
         (project.power_percent, project.speed_percent, project.passes) =
-            (p.power_percent, p.speed_percent, 1);
+            (p.power_percent, p.speed_percent, p.passes);
         return 1;
     }
     (0..project.steps.len())
@@ -440,6 +449,24 @@ fn profile_table(ui: &mut egui::Ui, material: &mut Material, drop: &mut Option<u
                                     ui.selectable_value(&mut profile.operation, o, text);
                                 }
                             });
+                        if profile.is_multi() {
+                            // Die Felder zeigen den ersten Satz; die übrigen stehen im Hinweis.
+                            let sets: Vec<String> = std::iter::once(ParameterSet {
+                                power_percent: profile.power_percent,
+                                speed_percent: profile.speed_percent,
+                                passes: profile.passes,
+                            })
+                            .chain(profile.additional.iter().cloned())
+                            .map(|s| {
+                                format!(
+                                    "{} % · {} % · {}×",
+                                    s.power_percent, s.speed_percent, s.passes
+                                )
+                            })
+                            .collect();
+                            ui.weak(format!("×{}", sets.len()))
+                                .on_hover_text(sets.join("\n"));
+                        }
                     });
                     ui.add_sized(
                         percent,
@@ -512,6 +539,8 @@ fn new_profile(thickness_mm: f32, operation: Operation) -> MaterialProfile {
         operation,
         power_percent,
         speed_percent,
+        passes: 1,
+        additional: Vec::new(),
         source: None,
     }
 }
@@ -822,6 +851,15 @@ fn parameters(
     crate::form::row(ui, tr("Durchgänge"), |ui| {
         changed |= crate::form::unit_value(ui, passes, 1..=100, "", 110.0).changed();
     });
+    if let Some(p) = profile.filter(|p| !p.additional.is_empty()) {
+        crate::form::caption(
+            ui,
+            tr!(
+                "Das Materialprofil hat {count} Parametersätze; alle gelten nur bei der Zuordnung „Einzeln“ oder „Regeln“, hier nur der erste.",
+                count = p.set_count()
+            ),
+        );
+    }
     changed
 }
 
@@ -2000,6 +2038,8 @@ mod tests {
             operation,
             power_percent: power,
             speed_percent: 20.0,
+            passes: 1,
+            additional: Vec::new(),
             source: None,
         }
     }
@@ -2068,6 +2108,37 @@ mod tests {
         assert_eq!(p.thickness_mm, 4.0);
         assert!(choose_material(&library, &mut p, Some("Gold"), None).is_err());
         assert_eq!(p.material, "Pappel");
+    }
+
+    #[test]
+    fn profiles_with_several_sets_carry_them_into_steps() {
+        let mut library = library();
+        let profile = library.materials[0]
+            .profiles
+            .iter_mut()
+            .find(|p| p.operation == Operation::Cut && p.thickness_mm == 3.0)
+            .unwrap();
+        profile.passes = 2;
+        profile.additional = vec![ParameterSet {
+            power_percent: 40.0,
+            speed_percent: 50.0,
+            passes: 1,
+        }];
+        let mut p = project();
+        let step = default_step(&library, &p, Operation::Cut);
+        assert_eq!((step.power_percent, step.passes), (80.0, 2));
+        assert_eq!(step.additional.len(), 1);
+        p.steps = vec![JobStep::new(Operation::Cut)];
+        assert!(apply_step_preset(&library, &mut p, 0));
+        assert_eq!(
+            (p.steps[0].passes, p.steps[0].additional[0].power_percent),
+            (2, 40.0)
+        );
+        // Das ganze Motiv nimmt nur den ersten Satz.
+        p.steps.clear();
+        p.operation = Operation::Cut;
+        apply_presets(&library, &mut p);
+        assert_eq!((p.power_percent, p.passes), (80.0, 2));
     }
 
     #[test]

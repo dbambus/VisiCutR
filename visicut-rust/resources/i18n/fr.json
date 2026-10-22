@@ -706,6 +706,7 @@
   "{count} Zuordnungen": "{count} affectations",
   "{count} Zuordnungen als Vorlagen": "{count} affectations comme modèles",
   "{materials} Materialien mit {profiles} Laserwerten": "{materials} matériaux avec {profiles} réglages laser",
+  "Das Materialprofil hat {count} Parametersätze; alle gelten nur bei der Zuordnung „Einzeln“ oder „Regeln“, hier nur der erste.": "Le profil de matériau a {count} jeux de paramètres ; tous ne s'appliquent qu'avec l'affectation « Individuelle » ou « Règles », ici seulement le premier.",
   "Neu laden": "Recharger",
   "Neu laden: Dateien unverändert": "Recharger : fichiers inchangés",
   "Ein Teil neu geladen": "Une pièce rechargée",

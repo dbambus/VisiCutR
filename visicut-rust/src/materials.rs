@@ -1,7 +1,7 @@
 //! Editable material library (VisiCut's material and laser profile
 //! editors). The bundled FAU catalogue is used until the user saves own
 //! changes to the settings directory.
-use crate::project::Operation;
+use crate::project::{Operation, ParameterSet};
 use crate::{i18n::tr, tr};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -17,9 +17,36 @@ pub struct MaterialProfile {
     pub operation: Operation,
     pub power_percent: f32,
     pub speed_percent: f32,
+    /// Passes of the first parameter set (identical sets in a row in VisiCut).
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub passes: u32,
+    /// Further parameter sets run after the first (several entries in a
+    /// VisiCut laser profile).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub additional: Vec<ParameterSet>,
     /// Origin of imported profiles, e.g. a FAU settings file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+}
+
+fn one() -> u32 {
+    1
+}
+
+fn is_one(value: &u32) -> bool {
+    *value == 1
+}
+
+impl MaterialProfile {
+    /// Number of parameter sets (the first and the additional ones).
+    pub fn set_count(&self) -> usize {
+        1 + self.additional.len()
+    }
+
+    /// Several passes or parameter sets.
+    pub fn is_multi(&self) -> bool {
+        self.passes > 1 || !self.additional.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

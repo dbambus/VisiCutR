@@ -457,8 +457,9 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
   `.vcsettings`-Archive und eigene Exporte (`.vcrdevices`). **Herunterladen**
   lädt die Labor-Einstellungen aus VisiCuts Liste; ein Dialog fragt, was
   übernommen wird: die LTT-iLaser-4000-Geräte (ersetzen gleichnamige), die
-  Materialien mit ihren Laserwerten (ersetzen die Materialbibliothek; nur
-  Profile mit einem Parametersatz, wie `scripts/import-fau-materials.py`) und
+  Materialien mit ihren Laserwerten (ersetzen die Materialbibliothek; ein
+  Laserprofil mit mehreren Einträgen wird zu Durchgängen und weiteren
+  Parametersätzen, die ein Schritt mit diesem Material übernimmt) und
   die Zuordnungen als Vorlagen. Wie in Java-VisiCut prüft VisiCutR danach auf
   Wunsch einmal am Tag beim Start, ob das Labor eine neue Fassung
   veröffentlicht hat, und bietet sie zum Übernehmen an. **Exportieren**

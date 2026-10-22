@@ -281,6 +281,51 @@ pub fn select_material(library: &Library, project: &mut Project, name: Option<&s
     }
 }
 
+/// Material und Dicke aus der Befehlszeile (`--material`, `--thickness`):
+/// Groß- und Kleinschreibung zählen beim Namen nicht; die Dicke muss eines
+/// der Profile des Materials sein. Danach gelten dessen Laserwerte.
+pub fn choose_material(
+    library: &Library,
+    project: &mut Project,
+    name: Option<&str>,
+    thickness_mm: Option<f32>,
+) -> Result<(), String> {
+    if let Some(name) = name {
+        let material = library
+            .materials
+            .iter()
+            .find(|m| m.name.eq_ignore_ascii_case(name.trim()))
+            .ok_or_else(|| {
+                tr!(
+                    "Material „{name}“ gibt es nicht in der Bibliothek",
+                    name = name
+                )
+            })?;
+        let found = material.name.clone();
+        select_material(library, project, Some(&found));
+    }
+    if let Some(mm) = thickness_mm {
+        let list = find_material(library, &project.material)
+            .map(thicknesses)
+            .unwrap_or_default();
+        if !list.iter().any(|t| same_thickness(*t, mm)) {
+            return Err(tr!(
+                "Dicke {mm} mm gibt es für „{material}“ nicht (vorhanden: {list})",
+                mm = mm,
+                material = project.material,
+                list = list
+                    .iter()
+                    .map(|t| format!("{t} mm"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        project.thickness_mm = mm;
+    }
+    apply_presets(library, project);
+    Ok(())
+}
+
 fn unique_name(materials: &[Material], base: &str) -> String {
     let mut name = base.to_string();
     let mut n = 2;
@@ -1985,6 +2030,20 @@ mod tests {
         select_material(&library, &mut p, None);
         assert_eq!(p.material, "Eigenes Material");
         assert!(preset(&library, &p, Operation::Cut).is_none());
+    }
+
+    #[test]
+    fn command_line_chooses_material_and_thickness() {
+        let library = library();
+        let mut p = project();
+        p.material.clear();
+        choose_material(&library, &mut p, Some("pappel"), Some(4.0)).unwrap();
+        assert_eq!((p.material.as_str(), p.thickness_mm), ("Pappel", 4.0));
+        let error = choose_material(&library, &mut p, None, Some(7.0)).unwrap_err();
+        assert!(error.contains("3 mm, 4 mm"), "{error}");
+        assert_eq!(p.thickness_mm, 4.0);
+        assert!(choose_material(&library, &mut p, Some("Gold"), None).is_err());
+        assert_eq!(p.material, "Pappel");
     }
 
     #[test]

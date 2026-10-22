@@ -952,5 +952,19 @@
   "Keine Drehung": "Nessuna rotazione",
   "Nur um 90°": "Solo di 90°",
   "Beliebig (ganze Grad)": "Libera (gradi interi)",
-  "Beliebig: jedes Teil wird zusätzlich so gedreht, dass sein umschließendes Rechteck am kleinsten ist.": "Libera: ogni parte viene inoltre ruotata in modo che il rettangolo che la racchiude sia il più piccolo."
+  "Beliebig: jedes Teil wird zusätzlich so gedreht, dass sein umschließendes Rechteck am kleinsten ist.": "Libera: ogni parte viene inoltre ruotata in modo che il rettangolo che la racchiude sia il più piccolo.",
+  "Anleitung": "Manuale",
+  "Dicke {mm} mm gibt es für „{material}“ nicht (vorhanden: {list})": "Lo spessore {mm} mm non esiste per «{material}» (disponibili: {list})",
+  "Fehler melden …": "Segnala un errore …",
+  "Hilfe": "Aiuto",
+  "Lasercutter „{name}“ ist nicht eingerichtet": "La taglierina laser «{name}» non è configurata",
+  "Material „{name}“ gibt es nicht in der Bibliothek": "Il materiale «{name}» non è nella libreria",
+  "Mausrad über der Arbeitsfläche": "Rotellina del mouse sull'area di lavoro",
+  "Objekt verschieben": "Sposta oggetto",
+  "Originalgröße (1:1)": "Dimensione reale (1:1)",
+  "Pfeiltasten (mit Umschalt: 10 mm)": "Tasti freccia (con Maiusc: 10 mm)",
+  "Senden nicht möglich: {error}": "Invio impossibile: {error}",
+  "Tastenkürzel": "Scorciatoie da tastiera",
+  "Zoomen": "Zoom",
+  "Über VisiCutR": "Informazioni su VisiCutR"
 }

@@ -270,6 +270,26 @@ impl DeviceUi {
         self.save(store, project, status)
     }
 
+    /// Wählt den Lasercutter mit diesem Namen (`--laserdevice`); Groß- und
+    /// Kleinschreibung zählen nicht.
+    pub fn select_named(
+        &mut self,
+        name: &str,
+        project: &mut Project,
+        status: &mut String,
+    ) -> Result<(), String> {
+        let index = self
+            .store
+            .devices
+            .iter()
+            .position(|d| d.name.eq_ignore_ascii_case(name.trim()))
+            .ok_or_else(|| tr!("Lasercutter „{name}“ ist nicht eingerichtet", name = name))?;
+        if index != self.store.selected && !self.select(index, project, status) {
+            return Err(status.clone());
+        }
+        Ok(())
+    }
+
     /// Rotationseinheit (nur bei Geräten, die eine haben). Das Kamerabild
     /// schaltet die Leiste über dem Arbeitsbett.
     pub fn rotary(&self, ui: &mut egui::Ui, project: &mut Project, dirty: &mut bool) {

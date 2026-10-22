@@ -952,5 +952,19 @@
   "Keine Drehung": "No rotation",
   "Nur um 90°": "Only by 90°",
   "Beliebig (ganze Grad)": "Any (whole degrees)",
-  "Beliebig: jedes Teil wird zusätzlich so gedreht, dass sein umschließendes Rechteck am kleinsten ist.": "Any: each part is additionally turned so that its enclosing rectangle is smallest."
+  "Beliebig: jedes Teil wird zusätzlich so gedreht, dass sein umschließendes Rechteck am kleinsten ist.": "Any: each part is additionally turned so that its enclosing rectangle is smallest.",
+  "Anleitung": "Manual",
+  "Dicke {mm} mm gibt es für „{material}“ nicht (vorhanden: {list})": "Thickness {mm} mm does not exist for “{material}” (available: {list})",
+  "Fehler melden …": "Report a bug …",
+  "Hilfe": "Help",
+  "Lasercutter „{name}“ ist nicht eingerichtet": "Laser cutter “{name}” is not set up",
+  "Material „{name}“ gibt es nicht in der Bibliothek": "Material “{name}” is not in the library",
+  "Mausrad über der Arbeitsfläche": "Mouse wheel over the workspace",
+  "Objekt verschieben": "Move object",
+  "Originalgröße (1:1)": "Actual size (1:1)",
+  "Pfeiltasten (mit Umschalt: 10 mm)": "Arrow keys (with Shift: 10 mm)",
+  "Senden nicht möglich: {error}": "Cannot send: {error}",
+  "Tastenkürzel": "Keyboard shortcuts",
+  "Zoomen": "Zoom",
+  "Über VisiCutR": "About VisiCutR"
 }

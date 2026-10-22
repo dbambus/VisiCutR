@@ -362,7 +362,18 @@ haben eigene Instanzen.
 visicutr zeichnung.svg          # öffnen (ersetzt das Projekt)
 visicutr --add teil1.svg teil2.dxf  # als Teile hinzufügen
 visicutr --demo                 # Beispiel, immer in einem neuen Fenster
+visicutr --version              # Version ausgeben
+visicutr --laserdevice "LTT iLaser 4000" --material Pappel --thickness 3 teil.svg
+visicutr --material Pappel --thickness 3 --execute teil.plf
 ```
+
+Wie in Java-VisiCut wählen `--laserdevice`, `--material` und `--thickness`
+Lasercutter, Material und Dicke (Namen ohne Rücksicht auf Groß- und
+Kleinschreibung, die Dicke muss es im Materialprofil geben); die Laserwerte
+kommen dann aus dem Materialprofil. `--execute` zeigt nach dem Öffnen gleich
+die Sende-Bestätigung; anders als in Java sendet VisiCutR nie ohne
+Bestätigung im Fenster. Gab es beim Öffnen einen Fehler, entfällt das Senden.
+`--mapping` wird wie in Java nicht unterstützt.
 
 Mehrere Dateien ohne `--add` werden wie beim Ablegen hinzugefügt. Unter
 macOS liegt das Programm in `VisiCutR.app/Contents/MacOS/visicutr`.
@@ -410,7 +421,8 @@ Der **Rechtsklick auf das Motiv** bietet Duplizieren, Kopien im Raster,
 Nesting, Drehen, Spiegeln, Zentrieren und Löschen. **Entf/⌫** (macOS auch
 ⌘⌫) löscht das Motiv, sobald das Arbeitsbett aktiv ist; einzelne Objekte
 löscht der Rechtsklick in der Objektliste. **Widerrufen** (⌘Z/Strg+Z)
-nimmt die letzte dieser Aktionen zurück.
+nimmt diese Aktionen nacheinander zurück (bis zu 50 Schritte),
+**Wiederholen** (⌘⇧Z/Strg+Umschalt+Z) stellt sie wieder her.
 
 Das bisherige Motiv bleibt dabei unverändert als eingebettetes SVG erhalten,
 Objektnummern und Regeln bleiben gültig. Ein SVG mit DTD-Entitäten

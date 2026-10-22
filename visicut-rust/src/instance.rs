@@ -22,19 +22,45 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Dateien aus der Befehlszeile oder von einem zweiten Start.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Request {
     /// Als Teile hinzufügen statt das Projekt zu ersetzen (`--add`).
     pub add: bool,
     /// Absolute Pfade; leer holt nur das Fenster nach vorn.
     pub files: Vec<PathBuf>,
+    /// Lasercutter, Material und Senden wie in Java-VisiCut.
+    #[serde(default)]
+    pub options: Options,
+}
+
+/// Einstellungen aus der Befehlszeile, angewandt nach dem Öffnen der Dateien.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Options {
+    /// Name des Lasercutters (`--laserdevice`).
+    pub device: Option<String>,
+    /// Name des Materials aus der Bibliothek (`--material`).
+    pub material: Option<String>,
+    /// Materialdicke in mm (`--thickness`).
+    pub thickness_mm: Option<f32>,
+    /// Gleich zum Senden bereitmachen (`--execute`); gesendet wird erst nach
+    /// der Bestätigung im Fenster.
+    pub execute: bool,
+}
+
+impl Options {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// Ausgewertete Befehlszeile.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Launch {
     /// Beispiel öffnen (`--demo`).
     pub demo: bool,
+    /// Nur ausgeben und beenden (`--version`).
+    pub print: Option<String>,
     /// Bildschirmaufnahme (`--capture`, `--page`): eigene Instanz, nichts
     /// weitergeben und keinen Port belegen.
     pub standalone: bool,
@@ -44,15 +70,20 @@ pub struct Launch {
 impl Launch {
     /// Ob die Dateien an eine laufende Oberfläche gehen sollen.
     pub fn forwards(&self) -> bool {
-        !self.demo && !self.standalone
+        !self.demo && !self.standalone && self.print.is_none()
     }
 }
 
 /// Hilfe für `--help` und falsche Aufrufe.
-pub const USAGE: &str = "Aufruf: visicutr [--add] [DATEI …] | visicutr --demo\n  \
-DATEI     Projekt oder Grafik öffnen (mehrere werden als Teile hinzugefügt)\n  \
---add     Grafiken als Teile zum offenen Projekt hinzufügen\n  \
---demo    Beispiel öffnen\n\
+pub const USAGE: &str = "Aufruf: visicutr [OPTIONEN] [DATEI …] | visicutr --demo | visicutr --version\n  \
+DATEI                 Projekt oder Grafik öffnen (mehrere werden als Teile hinzugefügt)\n  \
+--add                 Grafiken als Teile zum offenen Projekt hinzufügen\n  \
+--laserdevice NAME    Lasercutter wählen\n  \
+--material NAME       Material aus der Bibliothek wählen, z. B. \"Acrylglas\"\n  \
+--thickness MM        Materialdicke in mm, z. B. 3 oder 2.5\n  \
+--execute             nach dem Öffnen gleich die Sende-Bestätigung zeigen\n  \
+--demo                Beispiel öffnen\n  \
+-v, --version         Version ausgeben\n\
 Läuft VisiCutR schon, öffnet das dortige Fenster die Dateien.";
 
 /// Wertet die Argumente ohne Programmnamen aus. Relative Pfade gelten ab
@@ -66,9 +97,32 @@ pub fn parse(arguments: impl IntoIterator<Item = String>, cwd: &Path) -> Result<
             launch.request.files.push(cwd.join(argument));
             continue;
         }
+        let mut value = |name: &str| value(&mut arguments, name);
+        let options = &mut launch.request.options;
         match argument.as_str() {
             "--" => only_files = true,
             "--add" => launch.request.add = true,
+            "--laserdevice" => options.device = Some(value("--laserdevice")?),
+            "--material" => options.material = Some(value("--material")?),
+            "--thickness" => {
+                let text = value("--thickness")?;
+                let mm = text
+                    .replace(',', ".")
+                    .parse::<f32>()
+                    .ok()
+                    .filter(|mm| mm.is_finite() && *mm > 0.0)
+                    .ok_or_else(|| format!("Ungültige Dicke {text}\n{USAGE}"))?;
+                options.thickness_mm = Some(mm);
+            }
+            "--execute" => options.execute = true,
+            "-v" | "--version" => {
+                launch.print = Some(format!("VisiCutR {}", crate::update::current_version()));
+            }
+            "--mapping" => {
+                return Err(format!(
+                    "--mapping wird nicht unterstützt; Zuordnungen kommen aus dem Material\n{USAGE}"
+                ));
+            }
             "--demo" => launch.demo = true,
             // Bildschirmaufnahmen (Feature `screenshot`) mit Wert.
             "--capture" | "--page" => {
@@ -83,6 +137,13 @@ pub fn parse(arguments: impl IntoIterator<Item = String>, cwd: &Path) -> Result<
         }
     }
     Ok(launch)
+}
+
+/// Wert einer Option wie `--material NAME`.
+fn value(arguments: &mut impl Iterator<Item = String>, name: &str) -> Result<String, String> {
+    arguments
+        .next()
+        .ok_or_else(|| format!("{name} braucht einen Wert\n{USAGE}"))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -268,6 +329,39 @@ mod tests {
     }
 
     #[test]
+    fn parses_device_material_thickness_and_execute_like_java() {
+        let launch = parse(
+            args(&[
+                "--laserdevice",
+                "LTT iLaser 4000",
+                "--material",
+                "Acrylglas",
+                "--thickness",
+                "2,5",
+                "--execute",
+                "teil.plf",
+            ]),
+            Path::new("/a"),
+        )
+        .unwrap();
+        let options = &launch.request.options;
+        assert_eq!(options.device.as_deref(), Some("LTT iLaser 4000"));
+        assert_eq!(options.material.as_deref(), Some("Acrylglas"));
+        assert_eq!(options.thickness_mm, Some(2.5));
+        assert!(options.execute && !options.is_empty());
+        assert_eq!(launch.request.files, [PathBuf::from("/a/teil.plf")]);
+        assert!(parse(args(&["--material"]), Path::new("/")).is_err());
+        assert!(parse(args(&["--thickness", "dick"]), Path::new("/")).is_err());
+        assert!(parse(args(&["--thickness", "-1"]), Path::new("/")).is_err());
+        let version = parse(args(&["--version"]), Path::new("/")).unwrap();
+        assert!(!version.forwards());
+        assert!(version.print.unwrap().starts_with("VisiCutR "));
+        // Ältere Instanzen schicken keine Optionen mit.
+        let old: Request = serde_json::from_str(r#"{"add":false,"files":[]}"#).unwrap();
+        assert!(old.options.is_empty());
+    }
+
+    #[test]
     fn capture_options_skip_their_value_and_stay_local() {
         let launch = parse(
             args(&["--capture", "bild.png", "--page", "job"]),
@@ -291,6 +385,10 @@ mod tests {
         let request = Request {
             add: true,
             files: vec![PathBuf::from("/tmp/ä b.svg")],
+            options: Options {
+                material: Some("Pappel".into()),
+                ..Options::default()
+            },
         };
         // Niemand läuft: selbst starten.
         assert!(!forward(&dir, &request));

@@ -952,5 +952,19 @@
   "Keine Drehung": "Aucune rotation",
   "Nur um 90°": "Seulement de 90°",
   "Beliebig (ganze Grad)": "Libre (degrés entiers)",
-  "Beliebig: jedes Teil wird zusätzlich so gedreht, dass sein umschließendes Rechteck am kleinsten ist.": "Libre : chaque pièce est en plus tournée pour que son rectangle englobant soit le plus petit."
+  "Beliebig: jedes Teil wird zusätzlich so gedreht, dass sein umschließendes Rechteck am kleinsten ist.": "Libre : chaque pièce est en plus tournée pour que son rectangle englobant soit le plus petit.",
+  "Anleitung": "Mode d'emploi",
+  "Dicke {mm} mm gibt es für „{material}“ nicht (vorhanden: {list})": "L'épaisseur {mm} mm n'existe pas pour « {material} » (disponibles : {list})",
+  "Fehler melden …": "Signaler un bug …",
+  "Hilfe": "Aide",
+  "Lasercutter „{name}“ ist nicht eingerichtet": "La découpeuse laser « {name} » n'est pas configurée",
+  "Material „{name}“ gibt es nicht in der Bibliothek": "Le matériau « {name} » n'est pas dans la bibliothèque",
+  "Mausrad über der Arbeitsfläche": "Molette de la souris sur la zone de travail",
+  "Objekt verschieben": "Déplacer l'objet",
+  "Originalgröße (1:1)": "Taille réelle (1:1)",
+  "Pfeiltasten (mit Umschalt: 10 mm)": "Touches fléchées (avec Maj : 10 mm)",
+  "Senden nicht möglich: {error}": "Envoi impossible : {error}",
+  "Tastenkürzel": "Raccourcis clavier",
+  "Zoomen": "Zoomer",
+  "Über VisiCutR": "À propos de VisiCutR"
 }

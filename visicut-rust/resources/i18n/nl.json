@@ -952,5 +952,19 @@
   "Keine Drehung": "Niet draaien",
   "Nur um 90°": "Alleen 90°",
   "Beliebig (ganze Grad)": "Vrij (hele graden)",
-  "Beliebig: jedes Teil wird zusätzlich so gedreht, dass sein umschließendes Rechteck am kleinsten ist.": "Vrij: elk onderdeel wordt bovendien zo gedraaid dat de omsluitende rechthoek het kleinst is."
+  "Beliebig: jedes Teil wird zusätzlich so gedreht, dass sein umschließendes Rechteck am kleinsten ist.": "Vrij: elk onderdeel wordt bovendien zo gedraaid dat de omsluitende rechthoek het kleinst is.",
+  "Anleitung": "Handleiding",
+  "Dicke {mm} mm gibt es für „{material}“ nicht (vorhanden: {list})": "Dikte {mm} mm bestaat niet voor “{material}” (beschikbaar: {list})",
+  "Fehler melden …": "Fout melden …",
+  "Hilfe": "Help",
+  "Lasercutter „{name}“ ist nicht eingerichtet": "Lasersnijder “{name}” is niet ingesteld",
+  "Material „{name}“ gibt es nicht in der Bibliothek": "Materiaal “{name}” staat niet in de bibliotheek",
+  "Mausrad über der Arbeitsfläche": "Muiswiel boven het werkvlak",
+  "Objekt verschieben": "Object verplaatsen",
+  "Originalgröße (1:1)": "Werkelijke grootte (1:1)",
+  "Pfeiltasten (mit Umschalt: 10 mm)": "Pijltoetsen (met Shift: 10 mm)",
+  "Senden nicht möglich: {error}": "Verzenden niet mogelijk: {error}",
+  "Tastenkürzel": "Sneltoetsen",
+  "Zoomen": "Zoomen",
+  "Über VisiCutR": "Over VisiCutR"
 }

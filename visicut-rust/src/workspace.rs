@@ -3,9 +3,12 @@
 use std::path::{Path, PathBuf};
 use visicut_core::{ltt::PreparedStep, project::Project, tr};
 
-/// Zoomstufen wie in der macOS-Oberfläche: 50 % bis 300 % in 25-%-Schritten.
+/// Zoomstufen relativ zum ganzen Bett: 50 % bis 800 % in 25-%-Schritten.
 pub const ZOOM_MIN: f32 = 0.5;
-pub const ZOOM_MAX: f32 = 3.0;
+pub const ZOOM_MAX: f32 = 8.0;
+/// Bildschirmpunkte je Millimeter bei Originalgröße (96 dpi wie im Browser;
+/// die tatsächliche Pixeldichte des Bildschirms ist nicht bekannt).
+const ACTUAL_SIZE: f32 = 96.0 / 25.4;
 const ZOOM_STEP: f32 = 0.25;
 
 pub fn zoom_in(zoom: f32) -> f32 {
@@ -14,6 +17,12 @@ pub fn zoom_in(zoom: f32) -> f32 {
 
 pub fn zoom_out(zoom: f32) -> f32 {
     snap_zoom(zoom - ZOOM_STEP)
+}
+
+/// Zoom, bei dem ein Millimeter etwa einen Millimeter auf dem Bildschirm
+/// einnimmt; `fit` ist der Maßstab für das ganze Bett.
+pub fn actual_size_zoom(fit: f32) -> f32 {
+    (ACTUAL_SIZE / fit.max(0.01)).clamp(ZOOM_MIN, ZOOM_MAX)
 }
 
 fn snap_zoom(zoom: f32) -> f32 {
@@ -274,6 +283,9 @@ mod tests {
         assert_eq!(zoom_in(ZOOM_MAX), ZOOM_MAX);
         assert_eq!(zoom_out(ZOOM_MIN), ZOOM_MIN);
         assert_eq!(zoom_in(1.1), 1.25);
+        // 1:1 bei 96 dpi: Bett passt mit 1 Punkt je mm, also gut 3,8-fach.
+        assert!((actual_size_zoom(1.0) - 3.7795).abs() < 1e-3);
+        assert_eq!(actual_size_zoom(100.0), ZOOM_MIN);
     }
 
     fn close(a: [f32; 4], b: [f32; 4]) -> bool {

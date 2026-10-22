@@ -3,6 +3,18 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## Unveröffentlicht
+
+- **Mehrstufiges Widerrufen:** Widerrufen und Wiederholen über bis zu 50
+  Schritte statt nur einem.
+- **Befehlszeile wie Java-VisiCut:** `--laserdevice`, `--material`,
+  `--thickness` und `--execute` (zeigt gleich die Sende-Bestätigung) sowie
+  `--version`; auch an ein bereits laufendes Fenster.
+- **Hilfe** im Datei-Menü: Anleitung (F1), Tastenkürzel, Fehler melden und
+  Über VisiCutR.
+- **Zoom 1:1** (⌘1/Strg+1, Knopf „1:1“): Originalgröße bei 96 dpi; Zoom
+  jetzt bis 800 %.
+
 ## 0.20.1 – 22.10.2026
 
 - **Schnittgeometrie wie Java-VisiCut:** Die Transformationen vom SVG nach mm

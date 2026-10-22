@@ -58,6 +58,13 @@ enum Command {
     ZoomIn,
     ZoomOut,
     ZoomFit,
+    /// Originalgröße: ein Millimeter etwa ein Millimeter auf dem Bildschirm.
+    ZoomActual,
+    /// Hilfe-Menü.
+    Manual,
+    Shortcuts,
+    ReportBug,
+    About,
     Materials,
     Preview,
     Send,
@@ -92,7 +99,7 @@ const COMMAND_SHIFT: Modifiers = Modifiers::COMMAND.plus(Modifiers::SHIFT);
 impl Command {
     /// Reihenfolge der Tastaturprüfung: Kürzel mit Umschalt zuerst, weil egui
     /// zusätzliche Umschalttasten beim Vergleich ignoriert.
-    const KEYBOARD: [Command; 16] = [
+    const KEYBOARD: [Command; 18] = [
         Self::AddPart,
         Self::SaveAs,
         Self::Export,
@@ -106,9 +113,11 @@ impl Command {
         Self::Devices,
         Self::ToggleCamera,
         Self::ZoomFit,
+        Self::ZoomActual,
         Self::ZoomIn,
         Self::ZoomOut,
         Self::ToggleGrid,
+        Self::Manual,
     ];
 
     fn title(self) -> &'static str {
@@ -133,6 +142,11 @@ impl Command {
             Self::ZoomIn => tr("Vergrößern"),
             Self::ZoomOut => tr("Verkleinern"),
             Self::ZoomFit => tr("Zoom zurücksetzen"),
+            Self::ZoomActual => tr("Originalgröße (1:1)"),
+            Self::Manual => tr("Anleitung"),
+            Self::Shortcuts => tr("Tastenkürzel"),
+            Self::ReportBug => tr("Fehler melden …"),
+            Self::About => tr("Über VisiCutR"),
             Self::Materials => tr("Materialbibliothek …"),
             Self::Preview => tr("Vorschau & Zeit …"),
             Self::Send => tr("An Lasercutter senden …"),
@@ -172,6 +186,8 @@ impl Command {
             Self::ZoomIn => (Modifiers::COMMAND, Key::Plus),
             Self::ZoomOut => (Modifiers::COMMAND, Key::Minus),
             Self::ZoomFit => (Modifiers::COMMAND, Key::Num0),
+            Self::ZoomActual => (Modifiers::COMMAND, Key::Num1),
+            Self::Manual => (Modifiers::NONE, Key::F1),
             Self::Materials => (COMMAND_SHIFT, Key::M),
             Self::Preview => (COMMAND_SHIFT, Key::P),
             Self::ToggleGrid => (Modifiers::COMMAND, Key::G),
@@ -183,6 +199,9 @@ impl Command {
             Self::Demo
             | Self::Vectorize
             | Self::Remnants
+            | Self::Shortcuts
+            | Self::ReportBug
+            | Self::About
             | Self::Center
             | Self::Send
             | Self::Text
@@ -241,6 +260,44 @@ struct Snapshot {
     project: Project,
     texture: Option<egui::TextureHandle>,
     part_textures: Vec<Option<egui::TextureHandle>>,
+}
+
+/// Reihenfolge im Fenster „Tastenkürzel“.
+const SHORTCUT_LIST: [Command; 22] = [
+    Command::New,
+    Command::Open,
+    Command::AddPart,
+    Command::Save,
+    Command::SaveAs,
+    Command::Export,
+    Command::Undo,
+    Command::Redo,
+    Command::Duplicate,
+    Command::Delete,
+    Command::ZoomIn,
+    Command::ZoomOut,
+    Command::ZoomFit,
+    Command::ZoomActual,
+    Command::ToggleGrid,
+    Command::ToggleCamera,
+    Command::RefreshCamera,
+    Command::Materials,
+    Command::Preview,
+    Command::Devices,
+    Command::Manual,
+    Command::Quit,
+];
+
+/// Widerrufbare Schritte; ältere fallen weg.
+const UNDO_STEPS: usize = 50;
+
+/// Legt `snapshot` auf den Stapel und entfernt den ältesten Stand, wenn er
+/// mehr als `UNDO_STEPS` hält.
+fn push_limited<T>(stack: &mut Vec<T>, snapshot: T) {
+    stack.push(snapshot);
+    if stack.len() > UNDO_STEPS {
+        stack.remove(0);
+    }
 }
 
 /// Name eines Teils für Listen; ohne Namen „Teil 2“ (Position in der Liste).
@@ -362,10 +419,13 @@ struct VisiCutR {
     vectorize: vectorize_ui::VectorizeUi,
     remnants: remnant_ui::RemnantUi,
     compose: compose_ui::ComposeUi,
-    /// Stand vor der letzten Werkzeug- oder Löschaktion (ein Schritt).
-    undo: Option<Snapshot>,
-    /// Stand vor dem letzten Widerrufen; verfällt mit der nächsten Aktion.
-    redo: Option<Snapshot>,
+    /// Stände vor den letzten Werkzeug- oder Löschaktionen, der jüngste
+    /// zuletzt (höchstens `UNDO_STEPS`).
+    undo: Vec<Snapshot>,
+    /// Stände vor dem Widerrufen; verfallen mit der nächsten Aktion.
+    redo: Vec<Snapshot>,
+    /// Fenster mit den Tastenkürzeln.
+    show_shortcuts: bool,
     /// Bezugspunkt für X/Y und Größenänderungen (0, ½ oder 1 je Achse).
     reference: [f32; 2],
     rotate_deg: f32,
@@ -380,6 +440,9 @@ struct VisiCutR {
     instance: Option<instance::Listener>,
     /// Übergebene Dateien, die auf das Ende eines Dialogs warten.
     handed_over: Option<instance::Request>,
+    /// Lasercutter, Material und Senden aus der Befehlszeile; warten, bis
+    /// die Dateien geöffnet sind.
+    launch_options: Option<instance::Options>,
     /// Stand der Inkscape-Erweiterung (Einstellungen), erst bei Bedarf geprüft.
     inkscape: Option<inkscape::Status>,
     #[cfg(feature = "screenshot")]
@@ -447,8 +510,9 @@ impl VisiCutR {
             vectorize: vectorize_ui::VectorizeUi::default(),
             remnants: remnant_ui::RemnantUi::default(),
             compose: compose_ui::ComposeUi::default(),
-            undo: None,
-            redo: None,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            show_shortcuts: false,
             reference: [0.0, 0.0],
             rotate_deg: 0.0,
             handle_drag: None,
@@ -457,6 +521,7 @@ impl VisiCutR {
             update_found: None,
             instance: None,
             handed_over: None,
+            launch_options: None,
             inkscape: None,
             #[cfg(feature = "screenshot")]
             capture: None,
@@ -634,6 +699,10 @@ impl VisiCutR {
 
     /// Fehler und Warnungen: Statuszeile und ein Hinweisdialog.
     fn report(&mut self, message: String) {
+        // Nach einem Fehler (etwa beim Öffnen) nicht das falsche Projekt senden.
+        if let Some(options) = &mut self.launch_options {
+            options.execute = false;
+        }
         self.status = message.lines().next().unwrap_or_default().to_owned();
         self.alert = Some(match self.alert.take() {
             Some(previous) if previous != message => format!("{previous}\n\n{message}"),
@@ -896,7 +965,11 @@ impl VisiCutR {
     /// Dateien aus der Befehlszeile oder von einem späteren Start: mit
     /// `--add` oder mehreren Dateien wie abgelegt, sonst ersetzt die Datei das
     /// Projekt.
-    fn open_request(&mut self, ctx: &egui::Context, request: instance::Request) {
+    fn open_request(&mut self, ctx: &egui::Context, mut request: instance::Request) {
+        let options = std::mem::take(&mut request.options);
+        if !options.is_empty() {
+            self.launch_options = Some(options);
+        }
         match <[PathBuf; 1]>::try_from(request.files) {
             Ok([path]) if !request.add => self.request(ctx, Replace::Open(path)),
             Ok(files) => self.drop_files(ctx, files.into()),
@@ -905,10 +978,53 @@ impl VisiCutR {
         }
     }
 
+    /// Wendet Lasercutter, Material und Dicke aus der Befehlszeile an; mit
+    /// `--execute` folgt die Sende-Bestätigung.
+    fn apply_launch_options(&mut self, options: instance::Options) {
+        let mut problems = Vec::new();
+        if let Some(name) = &options.device
+            && let Err(e) = self
+                .devices
+                .select_named(name, &mut self.project, &mut self.status)
+        {
+            problems.push(e);
+        }
+        if options.material.is_some() || options.thickness_mm.is_some() {
+            match jobs_ui::choose_material(
+                self.jobs.active(),
+                &mut self.project,
+                options.material.as_deref(),
+                options.thickness_mm,
+            ) {
+                Ok(()) => self.dirty = true,
+                Err(e) => problems.push(e),
+            }
+        }
+        if !problems.is_empty() {
+            self.report(problems.join("\n"));
+            return;
+        }
+        if options.execute {
+            match self.project.validate() {
+                Ok(()) => {
+                    self.sendable = !self.busy();
+                    self.send();
+                }
+                Err(e) => self.report(tr!("Senden nicht möglich: {error}", error = e)),
+            }
+        }
+    }
+
     /// Vom Betriebssystem übergebene Dateien: eine wird geöffnet (mit
     /// Rückfrage bei ungesicherten Änderungen), mehrere wie abgelegt.
     fn open_files(&mut self, ctx: &egui::Context, files: Vec<PathBuf>) {
-        self.open_request(ctx, instance::Request { add: false, files });
+        self.open_request(
+            ctx,
+            instance::Request {
+                files,
+                ..Default::default()
+            },
+        );
     }
 
     /// Abgelegte Dateien: Grafiken kommen als neue Teile hinzu (ohne Motiv
@@ -1254,10 +1370,11 @@ impl VisiCutR {
     }
 
     /// Merkt den Stand vor einer Werkzeug- oder Löschaktion für Widerrufen;
-    /// ein widerrufener Schritt lässt sich danach nicht mehr wiederholen.
+    /// widerrufene Schritte lassen sich danach nicht mehr wiederholen.
     fn checkpoint(&mut self) {
-        self.undo = Some(self.snapshot());
-        self.redo = None;
+        let snapshot = self.snapshot();
+        push_limited(&mut self.undo, snapshot);
+        self.redo.clear();
     }
 
     fn restore(&mut self, snapshot: Snapshot) {
@@ -1268,16 +1385,18 @@ impl VisiCutR {
     }
 
     fn undo_last(&mut self) {
-        if let Some(snapshot) = self.undo.take() {
-            self.redo = Some(self.snapshot());
+        if let Some(snapshot) = self.undo.pop() {
+            let current = self.snapshot();
+            push_limited(&mut self.redo, current);
             self.restore(snapshot);
             self.status = tr("Letzte Änderung widerrufen").into();
         }
     }
 
     fn redo_last(&mut self) {
-        if let Some(snapshot) = self.redo.take() {
-            self.undo = Some(self.snapshot());
+        if let Some(snapshot) = self.redo.pop() {
+            let current = self.snapshot();
+            push_limited(&mut self.undo, current);
             self.restore(snapshot);
             self.status = tr("Änderung wiederhergestellt").into();
         }
@@ -1926,8 +2045,8 @@ impl VisiCutR {
             Command::ClearRecent => !self.settings.recent.is_empty(),
             Command::ClearCache => !session::states(&session::dir()).is_empty(),
             Command::Device(_) => !self.busy(),
-            Command::Undo => self.undo.is_some() && !self.busy(),
-            Command::Redo => self.redo.is_some() && !self.busy(),
+            Command::Undo => !self.undo.is_empty() && !self.busy(),
+            Command::Redo => !self.redo.is_empty() && !self.busy(),
             Command::Center | Command::ExportPlf => self.texture.is_some() && !self.busy(),
             Command::ToggleCamera => self.devices.has_camera(),
             Command::RefreshCamera => self.devices.camera_shown() && !self.devices.camera_loading(),
@@ -1939,6 +2058,11 @@ impl VisiCutR {
             | Command::Quit
             | Command::ToggleGrid
             | Command::ZoomFit
+            | Command::ZoomActual
+            | Command::Manual
+            | Command::Shortcuts
+            | Command::ReportBug
+            | Command::About
             | Command::Materials => true,
         }
     }
@@ -1973,6 +2097,19 @@ impl VisiCutR {
             Command::ZoomIn => self.zoom = workspace::zoom_in(self.zoom),
             Command::ZoomOut => self.zoom = workspace::zoom_out(self.zoom),
             Command::ZoomFit => self.zoom = 1.0,
+            Command::ZoomActual => {
+                self.zoom = workspace::actual_size_zoom(self.view_scale / self.zoom)
+            }
+            Command::Manual => ctx.open_url(egui::OpenUrl::new_tab(format!(
+                "{}#readme",
+                visicut_core::update::REPOSITORY
+            ))),
+            Command::ReportBug => ctx.open_url(egui::OpenUrl::new_tab(format!(
+                "{}/issues/new",
+                visicut_core::update::REPOSITORY
+            ))),
+            Command::Shortcuts => self.show_shortcuts = true,
+            Command::About => self.show_settings(SettingsPage::General),
             Command::Materials => self.show_settings(SettingsPage::Materials),
             Command::Preview => self.show_preview = true,
             Command::Send => self.send(),
@@ -2155,7 +2292,62 @@ impl VisiCutR {
             self.menu_item(ui, command, clicked);
         }
         ui.separator();
+        ui.menu_button(tr("Hilfe"), |ui| {
+            for command in [
+                Command::Manual,
+                Command::Shortcuts,
+                Command::ReportBug,
+                Command::About,
+            ] {
+                self.menu_item(ui, command, clicked);
+            }
+        });
+        ui.separator();
         self.menu_item(ui, Command::Quit, clicked);
+    }
+
+    /// Fenster mit allen Tastenkürzeln.
+    fn shortcuts_window(&mut self, ctx: &egui::Context) {
+        if !self.show_shortcuts {
+            return;
+        }
+        let mut open = true;
+        form::tool_window(
+            ctx,
+            "shortcuts",
+            tr("Tastenkürzel"),
+            360.0,
+            &mut open,
+            |ui| {
+                egui::Grid::new("shortcut_list")
+                    .num_columns(2)
+                    .spacing([16.0, 4.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for command in SHORTCUT_LIST {
+                            if let Some(shortcut) = command.shortcut() {
+                                ui.label(command.title().trim_end_matches(" …"));
+                                ui.label(
+                                    egui::RichText::new(ctx.format_shortcut(&shortcut)).strong(),
+                                );
+                                ui.end_row();
+                            }
+                        }
+                        for (title, keys) in [
+                            (
+                                tr("Objekt verschieben"),
+                                tr("Pfeiltasten (mit Umschalt: 10 mm)"),
+                            ),
+                            (tr("Zoomen"), tr("Mausrad über der Arbeitsfläche")),
+                        ] {
+                            ui.label(title);
+                            ui.label(egui::RichText::new(keys).strong());
+                            ui.end_row();
+                        }
+                    });
+            },
+        );
+        self.show_shortcuts = open;
     }
 
     /// Seitenleiste in der Reihenfolge der macOS-Oberfläche: Teile, Material,
@@ -2577,6 +2769,7 @@ impl VisiCutR {
                 };
                 let mut chosen = Vec::new();
                 chosen.extend(tool(ui, Command::ZoomFit, tr("Zurücksetzen")));
+                chosen.extend(tool(ui, Command::ZoomActual, "1:1"));
                 chosen.extend(tool(ui, Command::ZoomIn, "+"));
                 ui.label(format!("{:.0} %", self.zoom * 100.0));
                 chosen.extend(tool(ui, Command::ZoomOut, "−"));
@@ -3694,6 +3887,14 @@ impl eframe::App for VisiCutR {
         {
             self.open_request(ctx, request);
         }
+        if !self.modal_open()
+            && !self.busy()
+            && self.pending_import.is_none()
+            && self.handed_over.is_none()
+            && let Some(options) = self.launch_options.take()
+        {
+            self.apply_launch_options(options);
+        }
         if !self.modal_open() && !self.busy() {
             let opened = open_files::take();
             self.open_files(ctx, opened);
@@ -3725,6 +3926,7 @@ impl eframe::App for VisiCutR {
             .forget_stale(self.devices.camera_image().as_ref());
         self.poll_update(ctx);
         self.update_window(ctx);
+        self.shortcuts_window(ctx);
         let device_action = self
             .devices
             .windows(ctx, &mut self.project, &mut self.status);
@@ -3862,6 +4064,10 @@ fn main() -> eframe::Result {
             std::process::exit(2);
         }
     };
+    if let Some(text) = &launch.print {
+        println!("{text}");
+        return Ok(());
+    }
     // Läuft VisiCutR schon, öffnet das dortige Fenster die Dateien.
     if launch.forwards() && instance::forward(&visicut_core::device::config_dir(), &launch.request)
     {

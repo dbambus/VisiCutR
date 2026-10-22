@@ -43,6 +43,9 @@ import org.freehep.postscript.PSInputFile;
 import org.freehep.postscript.Processor;
 import org.w3c.dom.DOMImplementation;
 import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 /**
  *
@@ -54,6 +57,45 @@ public class EPSImporter extends AbstractImporter
   public FileFilter getFileFilter()
   {
     return new ExtensionFilter(".eps", "Encapsulated PostScript (*.eps)");
+  }
+
+  /**
+   * Removes white rectangles covering the whole page from the generated SVG.
+   */
+  private static void removePageBackground(Element root, Dimension page)
+  {
+    NodeList rects = root.getElementsByTagName("rect");
+    for (int i = rects.getLength() - 1; i >= 0; i--)
+    {
+      Element rect = (Element) rects.item(i);
+      Node parent = rect.getParentNode();
+      boolean white = "white".equals(rect.getAttribute("fill"))
+        || (parent instanceof Element && "white".equals(((Element) parent).getAttribute("fill")));
+      if (white
+        && isNear(rect.getAttribute("x"), 0)
+        && isNear(rect.getAttribute("y"), 0)
+        && isNear(rect.getAttribute("width"), page.width)
+        && isNear(rect.getAttribute("height"), page.height))
+      {
+        parent.removeChild(rect);
+        if (!parent.hasChildNodes() && parent.getParentNode() != null)
+        {
+          parent.getParentNode().removeChild(parent);
+        }
+      }
+    }
+  }
+
+  private static boolean isNear(String text, double value)
+  {
+    try
+    {
+      return Math.abs(Double.parseDouble(text) - value) < 0.5;
+    }
+    catch (NumberFormatException e)
+    {
+      return false;
+    }
   }
 
   /**
@@ -122,7 +164,12 @@ public class EPSImporter extends AbstractImporter
       processor.process();
       File tmp = File.createTempFile("temp", "svg");
       tmp.deleteOnExit();
-      svgGenerator.stream(new FileWriter(tmp));
+      // The PostScript interpreter erases the page with a white rectangle
+      // (PSDevice.erasePage). It is no part of the drawing and would be
+      // imported, and then cut, as a shape of its own.
+      Element root = svgGenerator.getRoot();
+      removePageBackground(root, d);
+      svgGenerator.stream(root, new FileWriter(tmp));
       GraphicSet result = new SVGImporter().importSetFromFile(tmp, warnings);
       //Assume the EPS has been created with 72DPI (from Inkscape)
       double px2mm = Util.inch2mm(1d/72d);

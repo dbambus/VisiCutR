@@ -34,7 +34,9 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.swing.filechooser.FileFilter;
 
+import java.awt.geom.AffineTransform;
 import org.kabeja.dxf.DXFDocument;
+import org.kabeja.dxf.DXFHeader;
 import org.kabeja.parser.Parser;
 import org.kabeja.parser.DXFParser;
 import org.kabeja.parser.ParserBuilder;
@@ -59,6 +61,7 @@ public class DXFImporter extends AbstractImporter
       Parser parser = ParserBuilder.createDefaultParser();
       parser.parse(new FileInputStream(inputFile), DXFParser.DEFAULT_ENCODING);
       final DXFDocument doc = parser.getDocument();
+      double unitMm = drawingUnitMm(doc, warnings);
 
       PipedInputStream in = new PipedInputStream();
       PipedOutputStream out = new PipedOutputStream(in);
@@ -93,12 +96,62 @@ public class DXFImporter extends AbstractImporter
       SVGImporter svgimp = new SVGImporter();
       //TODO Check which resolution it exports and adapt it to mm
       result = svgimp.importSetFromFile(in, inputFile.getName(), 1/Util.mm2inch(1), warnings);
+      if (unitMm != 1)
+      {
+        AffineTransform scaled = new AffineTransform(result.getBasicTransform());
+        scaled.preConcatenate(AffineTransform.getScaleInstance(unitMm, unitMm));
+        result.setBasicTransform(scaled);
+      }
     }
     catch (Exception ex)
     {
       Logger.getLogger(DXFImporter.class.getName()).log(Level.SEVERE, null, ex);
     }
     return result;
+  }
+
+  /**
+   * Millimetres per drawing unit from the $INSUNITS header variable; kabeja
+   * emits the coordinates unchanged, so they are scaled here. Without the
+   * variable the units are millimetres as before.
+   */
+  private static double drawingUnitMm(DXFDocument doc, List<String> warnings)
+  {
+    DXFHeader header = doc.getDXFHeader();
+    if (header == null || !header.hasVariable("$INSUNITS"))
+    {
+      return 1;
+    }
+    int units;
+    try
+    {
+      units = header.getVariable("$INSUNITS").getIntegerValue("70");
+    }
+    catch (RuntimeException ex)
+    {
+      return 1;
+    }
+    switch (units)
+    {
+      case 0: return 1; // unitless
+      case 1: return 25.4; // inches
+      case 2: return 304.8; // feet
+      case 4: return 1; // millimetres
+      case 5: return 10; // centimetres
+      case 6: return 1000; // metres
+      case 8: return 0.0000254; // microinches
+      case 9: return 0.0254; // mils
+      case 10: return 914.4; // yards
+      case 11: return 1e-7; // angstroms
+      case 12: return 1e-6; // nanometres
+      case 13: return 0.001; // microns
+      case 14: return 100; // decimetres
+      case 15: return 10000; // decametres
+      case 16: return 100000; // hectometres
+      default:
+        warnings.add("DXF: unsupported $INSUNITS " + units + ", coordinates are taken as millimetres");
+        return 1;
+    }
   }
 
   public FileFilter getFileFilter()

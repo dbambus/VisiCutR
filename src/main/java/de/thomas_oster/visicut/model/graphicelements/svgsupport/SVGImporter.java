@@ -317,18 +317,9 @@ public class SVGImporter extends AbstractImporter
     try
     {
       StyleAttribute sty = new StyleAttribute();
-      double x=0;
-      double y=0;
+      // x and y of the outermost svg element have no effect (SVG 1.1, 5.1.2)
       double width=0;
       double height=0;
-      if (root.getPres(sty.setName("x")))
-      {
-        x = numberWithUnitsToMm(sty.getNumberWithUnits(), svgResolution);
-      }
-      if (root.getPres(sty.setName("y")))
-      {
-        y = numberWithUnitsToMm(sty.getNumberWithUnits(), svgResolution);
-      }
       if (root.getPres(sty.setName("width")))
       {
         width = numberWithUnitsToMm(sty.getNumberWithUnits(), svgResolution);
@@ -348,9 +339,10 @@ public class SVGImporter extends AbstractImporter
       if (width != 0 && height != 0 && root.getPres(sty.setName("viewBox")))
       {
         float[] coords = sty.getFloatList();
-        Rectangle2D coordinateBox = new Rectangle2D.Double(x,y,width,height);
+        Rectangle2D coordinateBox = new Rectangle2D.Double(0, 0, width, height);
         Rectangle2D viewBox = new Rectangle2D.Float(coords[0], coords[1], coords[2], coords[3]);
-        return Helper.getTransform(viewBox, coordinateBox);
+        String aspect = root.getPres(sty.setName("preserveAspectRatio")) ? sty.getStringValue() : "";
+        return viewBoxTransform(viewBox, coordinateBox, aspect);
       }
     }
     catch (SVGException ex)
@@ -359,6 +351,45 @@ public class SVGImporter extends AbstractImporter
     }
     double px2mm = Util.inch2mm(1/svgResolution);
     return AffineTransform.getScaleInstance(px2mm, px2mm);
+  }
+
+  /**
+   * Maps the viewBox into the viewport like a browser does: with a uniform
+   * scale ("meet": the whole viewBox is visible, "slice": the viewport is
+   * covered), aligned as preserveAspectRatio says (default xMidYMid meet),
+   * or stretched to the viewport for "none".
+   */
+  static AffineTransform viewBoxTransform(Rectangle2D viewBox, Rectangle2D viewport, String preserveAspectRatio)
+  {
+    String align = "xMidYMid";
+    boolean slice = false;
+    for (String word : preserveAspectRatio.trim().split("\\s+"))
+    {
+      if ("meet".equals(word) || "slice".equals(word))
+      {
+        slice = "slice".equals(word);
+      }
+      else if (!word.isEmpty() && !"defer".equals(word))
+      {
+        align = word;
+      }
+    }
+    double sx = viewport.getWidth() / viewBox.getWidth();
+    double sy = viewport.getHeight() / viewBox.getHeight();
+    // Stretching, or scales equal up to rounding: as before, per axis.
+    if ("none".equals(align) || Math.abs(sx - sy) <= 1e-9 * Math.abs(sx))
+    {
+      return Helper.getTransform(viewBox, viewport);
+    }
+    double s = slice ? Math.max(sx, sy) : Math.min(sx, sy);
+    double extraWidth = viewport.getWidth() - viewBox.getWidth() * s;
+    double extraHeight = viewport.getHeight() - viewBox.getHeight() * s;
+    double ox = align.startsWith("xMid") ? extraWidth / 2 : align.startsWith("xMax") ? extraWidth : 0;
+    double oy = align.endsWith("YMid") ? extraHeight / 2 : align.endsWith("YMax") ? extraHeight : 0;
+    AffineTransform result = AffineTransform.getTranslateInstance(
+      viewport.getX() + ox - viewBox.getX() * s, viewport.getY() + oy - viewBox.getY() * s);
+    result.scale(s, s);
+    return result;
   }
 
   @Override

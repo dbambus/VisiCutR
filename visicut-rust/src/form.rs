@@ -588,9 +588,10 @@ pub fn tool_window(
                 return;
             }
             let panel = egui::CentralPanel::default().show(ctx, |ui| {
-                let top = ui.min_rect().top();
-                run(ui);
-                (top, ui.min_rect().bottom())
+                // Nur den Inhalt messen: das Panel selbst reicht immer bis zum
+                // Fensterrand, damit würde das Fenster nie kleiner.
+                let content = ui.scope(&mut run).response.rect;
+                (content.top(), content.bottom())
             });
             // Fensterhöhe an den Inhalt anpassen, unten so viel Rand wie oben.
             let (top, bottom) = panel.inner;

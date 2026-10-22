@@ -9,6 +9,8 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
   und Nesting mit Rahmen in der Akzentfarbe, Titel mit Symbol, Feldern wie in
   der Seitenleiste (Einheit im Feld) und „Abbrechen“ / „Einfügen“ rechts
   unten. Formen werden über gezeichnete Symbole gewählt statt über Wörter.
+  Zusatzfenster werden wieder kleiner, wenn ihr Inhalt schrumpft (etwa beim
+  Wechsel von Rechteck auf Vieleck).
 - **Text, Formen und Schilder als eigene Teile:** Liegt schon etwas auf dem
   Bett, wird jedes neu erstellte Element ein eigenes Teil. Ein zweites Schild
   landete bisher im gewählten Teil und ließ sich nur mit dem ersten zusammen

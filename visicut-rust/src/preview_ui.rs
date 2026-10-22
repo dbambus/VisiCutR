@@ -827,19 +827,32 @@ fn summary(
         ui.label(tr("geschätzte Bearbeitungszeit"));
         crate::form::caption(
             ui,
-            tr!(
-                "{size} · {count} Einzelaufträge ({jobs}) · {host}:{port}",
-                size = bytes(ready.bytes),
-                count = job.jobs.len(),
-                jobs = job
+            {
+                let jobs = job
                     .jobs
                     .iter()
                     .map(|j| j.name.as_str())
                     .collect::<Vec<_>>()
-                    .join(" › "),
-                host = project.hostname,
-                port = project.port
-            ),
+                    .join(" › ");
+                if job.jobs.len() == 1 {
+                    tr!(
+                        "{size} · 1 Auftrag ({jobs}) · {host}:{port}",
+                        size = bytes(ready.bytes),
+                        jobs = jobs,
+                        host = project.hostname,
+                        port = project.port
+                    )
+                } else {
+                    tr!(
+                        "{size} · {count} Einzelaufträge ({jobs}) · {host}:{port}",
+                        size = bytes(ready.bytes),
+                        count = job.jobs.len(),
+                        jobs = jobs,
+                        host = project.hostname,
+                        port = project.port
+                    )
+                }
+            },
         );
         for warning in &job.warnings {
             egui::Frame::group(ui.style())
@@ -893,6 +906,8 @@ fn summary(
                 if *single_job {
                     tr("Ein Auftrag mit allen Verfahren: Gravuren zuerst, dann Markieren und Schneiden.")
                         .to_string()
+                } else if job.jobs.len() == 1 {
+                    tr("Ein Auftrag · Engrav → Eng3D → Mark → Cut.").to_string()
                 } else {
                     tr!(
                         "{count} Einzelaufträge · Engrav → Eng3D → Mark → Cut; jeder wird am Gerät einzeln gestartet.",

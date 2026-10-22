@@ -480,6 +480,8 @@
   "{path} ist nicht lesbar: {error}": "{path} is niet leesbaar: {error}",
   "{path}: Datei ist zu groß": "{path}: bestand is te groot",
   "{pieces} doppelte Abschnitte ({length} mm) entfernt": "{pieces} dubbele segmenten ({length} mm) verwijderd",
+  "{size} · 1 Auftrag ({jobs}) · {host}:{port}": "{size} · 1 taak ({jobs}) · {host}:{port}",
+  "Ein Auftrag · Engrav → Eng3D → Mark → Cut.": "Eén opdracht · Engrav → Eng3D → Mark → Cut.",
   "{size} · {count} Einzelaufträge ({jobs}) · {host}:{port}": "{size} · {count} afzonderlijke taken ({jobs}) · {host}:{port}",
   "Änderungen an „{name}“ sichern?": "Wijzigingen in „{name}“ opslaan?",
   "Änderungen verwerfen und das vektorisierte Bild übernehmen?": "Wijzigingen verwerpen en de gevectoriseerde afbeelding overnemen?",

@@ -480,6 +480,8 @@
   "{path} ist nicht lesbar: {error}": "{path} est illisible : {error}",
   "{path}: Datei ist zu groß": "{path} : fichier trop volumineux",
   "{pieces} doppelte Abschnitte ({length} mm) entfernt": "{pieces} segments en double ({length} mm) supprimés",
+  "{size} · 1 Auftrag ({jobs}) · {host}:{port}": "{size} · 1 job ({jobs}) · {host}:{port}",
+  "Ein Auftrag · Engrav → Eng3D → Mark → Cut.": "Une tâche · Engrav → Eng3D → Mark → Cut.",
   "{size} · {count} Einzelaufträge ({jobs}) · {host}:{port}": "{size} · {count} jobs séparés ({jobs}) · {host}:{port}",
   "Änderungen an „{name}“ sichern?": "Enregistrer les modifications de « {name} » ?",
   "Änderungen verwerfen und das vektorisierte Bild übernehmen?": "Abandonner les modifications et appliquer l'image vectorisée ?",

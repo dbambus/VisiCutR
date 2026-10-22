@@ -202,8 +202,14 @@ impl ComposeUi {
     }
 
     fn compose(&self, tool: Tool, project: &Project) -> Composed {
+        // Jedes neue Element wird ein eigenes Teil (siehe `add_objects_as_part`).
+        let name = match tool {
+            Tool::Text => tr("Text"),
+            Tool::Shape => tr("Form"),
+            _ => tr("Schild"),
+        };
         let add = |objects: Vec<NewObject>| {
-            compose::add_objects(project, &objects).map(|(p, _)| (p, Vec::new()))
+            compose::add_objects_as_part(project, &objects, name).map(|p| (p, Vec::new()))
         };
         match tool {
             Tool::Text => {

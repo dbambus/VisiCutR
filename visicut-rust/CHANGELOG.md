@@ -3,6 +3,13 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## Unveröffentlicht
+
+- **Text, Formen und Schilder als eigene Teile:** Liegt schon etwas auf dem
+  Bett, wird jedes neu erstellte Element ein eigenes Teil. Ein zweites Schild
+  landete bisher im gewählten Teil und ließ sich nur mit dem ersten zusammen
+  verschieben. Neue Teile bekommen die Werte aus dem Materialprofil.
+
 ## 1.0.0-rc.1 – 22.10.2026
 
 Erster Release-Kandidat für VisiCutR 1.0, die Rust-Neuentwicklung von

@@ -706,6 +706,7 @@
   "{count} Zuordnungen als Vorlagen": "{count} mappings as templates",
   "{materials} Materialien mit {profiles} Laserwerten": "{materials} materials with {profiles} laser settings",
   "Das Materialprofil hat {count} Parametersätze; alle gelten nur bei der Zuordnung „Einzeln“ oder „Regeln“, hier nur der erste.": "The material profile has {count} parameter sets; all of them apply only with the “Individual” or “Rules” assignment, here only the first.",
+  "Form": "Shape",
   "Neu laden": "Reload",
   "Neu laden: Dateien unverändert": "Reload: files unchanged",
   "Ein Teil neu geladen": "One part reloaded",

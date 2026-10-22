@@ -271,6 +271,37 @@ pub fn sign(sign: &Sign) -> Result<Vec<NewObject>, String> {
 /// Adds elements to the motif. In the individual assignment the new objects
 /// join the step of their operation (a new step if there is none); rules
 /// match them by their colour. Returns the project and the new object ids.
+/// Inserts newly created elements (text, shape, sign). With artwork on the
+/// bed they become a part of their own named `name`, so they move and are
+/// assigned independently of what is already there; otherwise they start
+/// the motif.
+pub fn add_objects_as_part(
+    project: &Project,
+    objects: &[NewObject],
+    name: &str,
+) -> Result<Project, String> {
+    if !project.has_artwork() {
+        let (mut result, _) = add_objects(project, objects)?;
+        result.part_name = name.to_string();
+        return Ok(result);
+    }
+    let empty = Project {
+        svg: String::new(),
+        steps: Vec::new(),
+        ignore_filters: Vec::new(),
+        parts: Vec::new(),
+        active_part: 0,
+        part_name: name.to_string(),
+        part_source_file: None,
+        part_parametric: None,
+        ..project.clone()
+    };
+    let (created, _) = add_objects(&empty, objects)?;
+    let mut result = project.clone();
+    result.add_part(created.active());
+    Ok(result)
+}
+
 pub fn add_objects(
     project: &Project,
     objects: &[NewObject],
@@ -2438,6 +2469,27 @@ mod tests {
         assert_eq!((count, notes), (1, Vec::<String>::new()));
         assert!(reloaded.svg.contains(r#"width="35""#) && reloaded.svg.contains(r#"height="20""#));
         assert!(set_parameters(&Project::default(), Vec::new()).is_err());
+    }
+
+    #[test]
+    fn new_signs_become_parts_of_their_own() {
+        let sign = super::sign(&Sign::default()).unwrap();
+        let first = add_objects_as_part(&Project::default(), &sign, "Schild").unwrap();
+        assert_eq!(first.part_count(), 1);
+        let moved: Vec<NewObject> = sign
+            .iter()
+            .cloned()
+            .map(|o| NewObject {
+                x_mm: o.x_mm + 200.0,
+                ..o
+            })
+            .collect();
+        let second = add_objects_as_part(&first, &moved, "Schild").unwrap();
+        assert_eq!(second.part_count(), 2);
+        // Das erste Schild bleibt unverändert, das zweite ist gewählt.
+        assert_eq!(second.parts[0].svg, first.svg);
+        assert_eq!(second.active_part, 1);
+        assert!(second.x_mm > first.x_mm + 150.0);
     }
 
     #[test]

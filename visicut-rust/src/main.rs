@@ -1646,14 +1646,22 @@ impl VisiCutR {
         self.checkpoint();
         let same_part = project.active_part == self.project.active_part
             && project.parts.len() == self.project.parts.len();
+        // Ein neues Teil (etwa ein Schild) bekommt für alle Schritte das Profil.
+        let new_part = project.parts.len() > self.project.parts.len();
         let old_steps = if same_part {
             self.project.steps.len()
+        } else if new_part {
+            0
         } else {
             project.steps.len()
         };
-        let old_objects = visicut_core::selection::objects(&self.project.svg)
-            .map(|o| o.len())
-            .unwrap_or(0);
+        let old_objects = if new_part {
+            0
+        } else {
+            visicut_core::selection::objects(&self.project.svg)
+                .map(|o| o.len())
+                .unwrap_or(0)
+        };
         self.project = project;
         (self.texture, self.part_textures) = textures;
         for index in old_steps..self.project.steps.len() {

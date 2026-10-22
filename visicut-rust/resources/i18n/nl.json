@@ -706,6 +706,7 @@
   "{count} Zuordnungen als Vorlagen": "{count} toewijzingen als sjablonen",
   "{materials} Materialien mit {profiles} Laserwerten": "{materials} materialen met {profiles} laserinstellingen",
   "Das Materialprofil hat {count} Parametersätze; alle gelten nur bei der Zuordnung „Einzeln“ oder „Regeln“, hier nur der erste.": "Het materiaalprofiel heeft {count} parametersets; alle gelden alleen bij de toewijzing ‘Afzonderlijk’ of ‘Regels’, hier alleen de eerste.",
+  "Form": "Vorm",
   "Neu laden": "Opnieuw laden",
   "Neu laden: Dateien unverändert": "Opnieuw laden: bestanden ongewijzigd",
   "Ein Teil neu geladen": "Eén onderdeel opnieuw geladen",

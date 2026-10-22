@@ -62,216 +62,189 @@ public class GCodeImporter extends AbstractImporter
   
   //current mode 0=move, 1=line, 2=arc cw, 3=arc ccw
   private int g_mode = 0;
-  //if using absolute coordinates
+  //if using absolute coordinates (G90, default) or relative ones (G91)
   private boolean absolute = true;
-  //last position for relative coordinates
+  //if I/J are absolute (G90.1) instead of relative to the arc start (G91.1, default)
+  private boolean absoluteArcs = false;
+  //last position
   private double last_x = 0;
   private double last_y = 0;
-  //positions for current operation
-  private double x = 0;
-  private double y = 0;
-  private double cx = 0;
-  private double cy = 0;
-  private Double r = null;
   //factor for converting coordinates to mm
   private double unit2mm = 1;
-  
-  private Pattern command_pattern = Pattern.compile("[A-Z]-?[0-9]+[,.]?[0-9]*");
-  
+  // a word: letter and number, e.g. G01, X-1.5, Y.25 or F1000
+  private Pattern command_pattern = Pattern.compile("[A-Z][-+]?(?:[0-9]+[,.]?[0-9]*|[,.][0-9]+)");
+
   /**
-   * returns the coordinate e.g. from X or Y commands
-   * assumes the first character to be the control
-   * character
+   * returns the number of a word, e.g. "-1,5" of "X-1,5"
    */
-  private double getCoordinate(String cmd)
+  private double parseNumber(String text)
   {
-    cmd = cmd.substring(1).replace(",",".");
-    if (cmd.endsWith("."))
+    text = text.replace(",", ".");
+    if (text.endsWith("."))
     {
-      cmd = cmd.substring(0, cmd.length()-1);
+      text = text.substring(0, text.length() - 1);
     }
-    return unit2mm*Double.parseDouble(cmd);
+    return Double.parseDouble(text);
   }
-  
+
+  /**
+   * Appends an arc from the current point around the centre to (x, y),
+   * clockwise for G02, counter-clockwise for G03.
+   */
+  private void appendArc(GeneralPath resultingShape, double cx, double cy, double x, double y, boolean clockwise)
+  {
+    double radius = Math.sqrt((last_x - cx) * (last_x - cx) + (last_y - cy) * (last_y - cy));
+    if (Math.abs(radius - Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy))) >= 0.1)
+    {
+      System.err.println("GCODE-WARNING: No real circle");
+    }
+    double start = Math.atan2(last_y - cy, last_x - cx);
+    //convert to positive angle
+    if (start < 0) start += 2 * Math.PI;
+    double end = Math.atan2(y - cy, x - cx);
+    //convert to positive angle
+    if (end < 0) end += 2 * Math.PI;
+    double extend = start - end;
+    //convert to negative angle
+    if (extend > 0) extend -= 2 * Math.PI;
+    Arc2D arc = new Arc2D.Double();
+    if (clockwise)
+    {
+      //strange stuff with the angles, but it seems to work
+      arc.setArcByCenter(cx, cy, radius, -Math.toDegrees(start) - 360, Math.toDegrees(extend) + 360, Arc2D.OPEN);
+    }
+    else
+    {
+      //no idea why the start coordinate has to be negative, but seems to work
+      arc.setArcByCenter(cx, cy, radius, -Math.toDegrees(start), Math.toDegrees(extend), Arc2D.OPEN);
+    }
+    resultingShape.append(arc, true);
+  }
+
   @Override
   public GraphicSet importSetFromFile(File inputFile, List<String> warnings) throws ImportException
   {
-    try
+    try (BufferedReader reader = new BufferedReader(new FileReader(inputFile)))
     {
-      BufferedReader reader = new BufferedReader(new FileReader(inputFile));
       GraphicSet result = new GraphicSet();
       GeneralPath resultingShape = new GeneralPath();
       resultingShape.moveTo(0, 0);
-      String line = reader.readLine();
-      while (line != null)
+      String line;
+      while ((line = reader.readLine()) != null)
       {
-        //is set if this line issues a move event
+        // comments in parentheses and after a semicolon; words may be lower case
+        line = line.replaceAll("\\([^)]*\\)", " ");
+        int semicolon = line.indexOf(';');
+        if (semicolon >= 0)
+        {
+          line = line.substring(0, semicolon);
+        }
+        line = line.toUpperCase();
+        Double x = null, y = null, i = null, j = null, r = null;
         boolean actionTriggered = false;
-        r = null;
         Matcher matcher = command_pattern.matcher(line);
-        while (matcher.find()) 
+        while (matcher.find())
         {
           String cmd = matcher.group();
           try
           {
-            if (cmd.startsWith("G0") && cmd.length() == 3)
+            double value = parseNumber(cmd.substring(1));
+            switch (cmd.charAt(0))
             {
-               g_mode = Integer.parseInt(cmd.substring(2));
-            }
-            else if ("G20".equals(cmd))
-            {
-              //switch to inch-mode
-              unit2mm = Util.inch2mm(1);
-            }
-            else if ("G21".equals(cmd))
-            {
-              //mm-mode
-              unit2mm = 1;
-            }
-            else if (cmd.startsWith("X"))
-            {
-              x = getCoordinate(cmd);
-              actionTriggered = true;
-            }
-            else if (cmd.startsWith("Y"))
-            {
-              y = getCoordinate(cmd);
-              actionTriggered = true;
-            }
-            else if (cmd.startsWith("I"))
-            {
-              cx = getCoordinate(cmd);
-            }
-            else if (cmd.startsWith("J"))
-            {
-              cy = getCoordinate(cmd);
-            }
-            else if (cmd.startsWith("R"))
-            {
-              r = getCoordinate(cmd);
+              case 'G':
+                switch ((int) Math.round(value * 10))
+                {
+                  case 0: g_mode = 0; break;
+                  case 10: g_mode = 1; break;
+                  case 20: g_mode = 2; break;
+                  case 30: g_mode = 3; break;
+                  case 200: unit2mm = Util.inch2mm(1); break;
+                  case 210: unit2mm = 1; break;
+                  case 900: absolute = true; break;
+                  case 910: absolute = false; break;
+                  case 901: absoluteArcs = true; break;
+                  case 911: absoluteArcs = false; break;
+                  default: break;
+                }
+                break;
+              case 'X': x = unit2mm * value; actionTriggered = true; break;
+              case 'Y': y = unit2mm * value; actionTriggered = true; break;
+              case 'I': i = unit2mm * value; break;
+              case 'J': j = unit2mm * value; break;
+              case 'R': r = unit2mm * value; break;
+              default: break;
             }
           }
           catch (NumberFormatException e)
           {
-            warnings.add("Illegal G-Code: "+cmd);
+            warnings.add("Illegal G-Code: " + cmd);
           }
         }
-        if (actionTriggered)
+        if (!actionTriggered)
         {
-          
-          if (g_mode == 0)
+          continue;
+        }
+        // a missing coordinate keeps its value (absolute) or does not move (relative)
+        double tx = absolute ? (x != null ? x : last_x) : last_x + (x != null ? x : 0);
+        double ty = absolute ? (y != null ? y : last_y) : last_y + (y != null ? y : 0);
+        if (g_mode == 0)
+        {
+          resultingShape.moveTo(tx, ty);
+        }
+        else if (g_mode == 1)
+        {
+          resultingShape.lineTo(tx, ty);
+        }
+        else
+        {
+          double cx, cy;
+          if (r != null)
           {
-            if (absolute)
+            // centre from the radius: a positive radius takes the shorter arc,
+            // a negative one the longer (as grbl does)
+            double dx = tx - last_x;
+            double dy = ty - last_y;
+            double chord = Math.sqrt(dx * dx + dy * dy);
+            if (chord < 1e-9)
             {
-              resultingShape.moveTo(x, y);
+              warnings.add("G-Code: full circle with R is ambiguous, skipped");
+              continue;
             }
-            else
+            double height = 4 * r * r - chord * chord;
+            if (height < 0)
             {
-              resultingShape.moveTo(last_x+x, last_y+y);
-            }
-          }
-          else if (g_mode == 1)
-          {
-            if (absolute)
-            {
-              resultingShape.lineTo(x, y);
-            }
-            else
-            {
-              resultingShape.lineTo(last_x+x, last_y+y);
-            }
-          }
-          else if (g_mode == 2)
-          {
-            if (absolute)
-            {
-              double ax,ay,aw,ah,start,end,extend,radius;
-              if (r != null)
+              if (2 * Math.abs(r) - chord < -0.1)
               {
-                radius = r;
-                //TODO: Circle cw from last_x/last_y to x/y with radius r
+                warnings.add("G-Code: arc radius smaller than half the distance of its end points");
               }
-              else
-              {
-                double mid_x = cx;
-                double mid_y = cy;
-                radius = Math.sqrt((last_x-cx)*(last_x-cx)+(last_y-cy)*(last_y-cy));
-                if (Math.abs(radius - Math.sqrt((x-cx)*(x-cx)+(y-cy)*(y-cy))) >= 0.1)
-                {
-                  System.err.println("GCODE-WARNING: No real circle");
-                }
-                start = Math.atan2(last_y-mid_y, last_x-mid_x);
-                //convert to positive angle
-                if (start < 0) start += 2*Math.PI;
-                end = Math.atan2(y-mid_y, x-mid_x);
-                //convert to positive angle
-                if (end < 0) end += 2*Math.PI;
-                extend = start-end;
-                //convert to negative angle
-                if (extend > 0) extend-=2*Math.PI;
-                //strange stuff with the angles, but it seems to work
-                Arc2D arc = new Arc2D.Double();
-                arc.setArcByCenter(cx, cy, radius, -Math.toDegrees(start)-360, Math.toDegrees(extend)+360, Arc2D.OPEN);
-                resultingShape.append(arc, true);
-              }         
+              height = 0;
             }
-            else
+            double factor = Math.sqrt(height) / chord;
+            if (g_mode == 2)
             {
-              //TODO
+              factor = -factor;
             }
+            if (r < 0)
+            {
+              factor = -factor;
+            }
+            cx = last_x + 0.5 * (dx - dy * factor);
+            cy = last_y + 0.5 * (dy + dx * factor);
           }
-          else if (g_mode == 3)
+          else if (absoluteArcs)
           {
-            if (absolute)
-            {
-              double ax,ay,aw,ah,start,end,extend,radius;
-              if (r != null)
-              {
-                radius = r;
-                //TODO: Circle cw from last_x/last_y to x/y with radius r
-              }
-              else
-              {
-                //TODO: Circle cw from last_x/last_y to x/y with center last_x+cx/last_y+cy
-                double mid_x = cx;
-                double mid_y = cy;
-                radius = Math.sqrt((last_x-cx)*(last_x-cx)+(last_y-cy)*(last_y-cy));
-                if (Math.abs(radius - Math.sqrt((x-cx)*(x-cx)+(y-cy)*(y-cy))) >= 0.1)
-                {
-                  System.err.println("GCODE-WARNING: No real circle");
-                }
-                start = Math.atan2(last_y-mid_y, last_x-mid_x);
-                //convert to positive angle
-                if (start < 0) start += 2*Math.PI;
-                end = Math.atan2(y-mid_y, x-mid_x);
-                //convert to positive angle
-                if (end < 0) end += 2*Math.PI;
-                extend = start-end;
-                //convert to negative angle
-                if (extend > 0) extend-=2*Math.PI;
-                //no idea why the start coordinate has to be negative, but seems to work
-                Arc2D arc = new Arc2D.Double();
-                arc.setArcByCenter(cx, cy, radius, -Math.toDegrees(start), Math.toDegrees(extend), Arc2D.OPEN);
-                resultingShape.append(arc, true);
-              }         
-            }
-            else
-            {
-              //TODO
-            }
-          }
-          if (absolute)
-          {
-            last_x = x;
-            last_y = y;
+            cx = i != null ? i : last_x;
+            cy = j != null ? j : last_y;
           }
           else
           {
-            last_x += x;
-            last_y += y;
+            cx = last_x + (i != null ? i : 0);
+            cy = last_y + (j != null ? j : 0);
           }
+          appendArc(resultingShape, cx, cy, tx, ty, g_mode == 2);
         }
-        line = reader.readLine();
+        last_x = tx;
+        last_y = ty;
       }
       result.add(new GCodeShape(resultingShape, inputFile));
       result.setBasicTransform(new AffineTransform());

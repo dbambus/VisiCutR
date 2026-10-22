@@ -45,7 +45,9 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.io.InputStreamReader;
 import java.net.URI;
 import java.util.List;
@@ -134,7 +136,12 @@ public class SVGImporter extends AbstractImporter
     {
       u.clear();
       Logger.getLogger(SVGConst.SVG_LOGGER).addHandler(svgImportLoggerHandler);
-      URI svg = u.loadSVG(in, Helper.toPathName(name));   
+      // Latin-1 keeps every byte, the replacements only touch ASCII.
+      byte[] bytes = in.readAllBytes();
+      String text = new String(bytes, StandardCharsets.ISO_8859_1);
+      String fixed = workAroundSalamander(text);
+      InputStream source = new ByteArrayInputStream(fixed.equals(text) ? bytes : fixed.getBytes(StandardCharsets.ISO_8859_1));
+      URI svg = u.loadSVG(source, Helper.toPathName(name));   
       root = u.getDiagram(svg).getRoot();
       GraphicSet result = new GraphicSet();
       result.setBasicTransform(determineTransformation(root, svgResolution));
@@ -156,6 +163,63 @@ public class SVGImporter extends AbstractImporter
     {
       throw new ImportException(e);
     }
+  }
+
+  private static final Pattern SKEW = Pattern.compile(
+    "skew([XY])\\(\\s*([-+]?[0-9]*\\.?[0-9]+(?:[eE][-+]?[0-9]+)?)\\s*\\)");
+  private static final Pattern USE_OR_IMAGE = Pattern.compile("<(?:use|image)\\b[^>]*>");
+  private static final Pattern PLAIN_HREF = Pattern.compile("(\\s)href(\\s*=)");
+  private static final Pattern PICAS = Pattern.compile("((?:width|height)\\s*=\\s*[\"'])([0-9.]+)pc([\"'])");
+
+  /**
+   * Rewrites constructs that svgSalamander gets wrong before it parses them:
+   * skewX/skewY shear by the angle in radians instead of its tangent, href
+   * without the xlink prefix (SVG 2) is not resolved, and the unit pc is
+   * unknown.
+   */
+  static String workAroundSalamander(String svg)
+  {
+    StringBuffer out = new StringBuffer();
+    Matcher skew = SKEW.matcher(svg);
+    while (skew.find())
+    {
+      double tangent = Math.tan(Math.toRadians(Double.parseDouble(skew.group(2))));
+      String matrix = "X".equals(skew.group(1))
+        ? "matrix(1 0 " + tangent + " 1 0 0)" : "matrix(1 " + tangent + " 0 1 0 0)";
+      skew.appendReplacement(out, Matcher.quoteReplacement(matrix));
+    }
+    skew.appendTail(out);
+    svg = out.toString();
+
+    out = new StringBuffer();
+    boolean prefixed = false;
+    Matcher tag = USE_OR_IMAGE.matcher(svg);
+    while (tag.find())
+    {
+      String element = tag.group();
+      if (!element.contains("xlink:href") && PLAIN_HREF.matcher(element).find())
+      {
+        element = PLAIN_HREF.matcher(element).replaceFirst("$1xlink:href$2");
+        prefixed = true;
+      }
+      tag.appendReplacement(out, Matcher.quoteReplacement(element));
+    }
+    tag.appendTail(out);
+    svg = out.toString();
+    if (prefixed && !svg.contains("xmlns:xlink"))
+    {
+      svg = svg.replaceFirst("<svg\\b", "<svg xmlns:xlink=\"http://www.w3.org/1999/xlink\"");
+    }
+
+    out = new StringBuffer();
+    Matcher picas = PICAS.matcher(svg);
+    while (picas.find())
+    {
+      double points = Double.parseDouble(picas.group(2)) * 12;
+      picas.appendReplacement(out, Matcher.quoteReplacement(picas.group(1) + points + "pt" + picas.group(3)));
+    }
+    picas.appendTail(out);
+    return out.toString();
   }
 
   /**

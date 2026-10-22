@@ -187,7 +187,9 @@ Wiederholung nach Fehlern.
   ist ein eigener Rasterteil mit Farbcode, Einstellungen bei Änderung und
   Beginn nach rechts.
   Abweichungen: Die geordnete Matrix nutzt 255 statt 256, damit reines Weiß
-  nicht gepunktet wird; „Zufall“ ist reproduzierbar statt ungeseedet. Kanten,
+  nicht gepunktet wird (LibLaserCut macht das seit „Ordered dithering: keep
+  pure white white“ ebenso, die Ausgabe ist byte-gleich); „Zufall“ ist
+  reproduzierbar statt ungeseedet. Kanten,
   die nicht auf ganzen Pixeln liegen, rastern Java2D und tiny-skia
   unterschiedlich (Pixelmitte bzw. Teilabdeckung); einzelne Randpixel können
   daher abweichen.

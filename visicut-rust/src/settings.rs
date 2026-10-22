@@ -22,6 +22,27 @@ pub struct AppSettings {
     pub update_check_disabled: bool,
     /// Zeit der letzten Update-Prüfung in Sekunden seit 1970.
     pub last_update_check: u64,
+    /// Labor, dessen Einstellungen beim Start auf eine neue Fassung geprüft
+    /// werden (wie VisiCuts LabSettings).
+    pub lab: Option<LabSubscription>,
+}
+
+/// Übernommene Labor-Einstellungen und ihr Stand.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LabSubscription {
+    pub name: String,
+    pub url: String,
+    /// Fingerabdruck der übernommenen Fassung (`lab::LabSettings`).
+    pub fingerprint: String,
+    /// Letzte Prüfung in Sekunden seit 1970.
+    pub last_check: u64,
+}
+
+impl LabSubscription {
+    /// Einmal am Tag prüfen.
+    pub fn is_due(&self, now: u64) -> bool {
+        now.saturating_sub(self.last_check) >= 24 * 60 * 60
+    }
 }
 
 impl AppSettings {

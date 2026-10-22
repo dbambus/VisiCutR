@@ -230,6 +230,50 @@ impl Command {
     }
 }
 
+/// Erläuterung unter einer Checkbox, bündig mit deren Beschriftung.
+fn indented_caption(ui: &mut egui::Ui, text: &str) {
+    egui::Frame::new()
+        .inner_margin(egui::Margin {
+            left: 18,
+            bottom: 4,
+            ..Default::default()
+        })
+        .show(ui, |ui| form::caption(ui, text));
+}
+
+/// Geladene Labor-Einstellungen und was davon übernommen wird.
+struct LabOffer {
+    name: String,
+    url: String,
+    settings: visicut_core::lab::LabSettings,
+    /// Neue Fassung eines abonnierten Labors (Prüfung beim Start).
+    update: bool,
+    devices: bool,
+    materials: bool,
+    templates: bool,
+    watch: bool,
+}
+
+impl LabOffer {
+    fn new(
+        name: String,
+        url: String,
+        settings: visicut_core::lab::LabSettings,
+        update: bool,
+    ) -> Self {
+        Self {
+            name,
+            url,
+            settings,
+            update,
+            devices: true,
+            materials: true,
+            templates: true,
+            watch: true,
+        }
+    }
+}
+
 /// Aktionen, die ungesicherte Änderungen verwerfen würden.
 enum Replace {
     New,
@@ -467,6 +511,10 @@ struct VisiCutR {
     /// Laufende Update-Prüfung (`true`: von Hand gestartet) und gefundenes Release.
     update_check: Option<(bool, UpdateCheck)>,
     update_found: Option<visicut_core::update::Release>,
+    /// Geladene Labor-Einstellungen, die der Dialog zum Übernehmen anbietet.
+    lab_offer: Option<LabOffer>,
+    /// Laufende Prüfung der abonnierten Labor-Einstellungen beim Start.
+    lab_check: Option<std::sync::mpsc::Receiver<Result<visicut_core::lab::LabSettings, String>>>,
     /// Nimmt Dateien späterer Starts und der Inkscape-Erweiterung entgegen.
     instance: Option<instance::Listener>,
     /// Übergebene Dateien, die auf das Ende eines Dialogs warten.
@@ -552,6 +600,8 @@ impl VisiCutR {
             settings,
             update_check: None,
             update_found: None,
+            lab_offer: None,
+            lab_check: None,
             instance: None,
             handed_over: None,
             launch_options: None,
@@ -570,6 +620,19 @@ impl VisiCutR {
             )
         {
             app.start_update_check(false);
+        }
+        // Einmal am Tag nach einer neuen Fassung der Labor-Einstellungen fragen.
+        if let Some(lab) = app
+            .settings
+            .lab
+            .clone()
+            .filter(|lab| lab.is_due(visicut_core::update::now_secs()))
+        {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(visicut_core::lab::download(&lab.name, &lab.url));
+            });
+            app.lab_check = Some(rx);
         }
         if let Some(error) = device_error {
             app.report(tr!(
@@ -683,6 +746,209 @@ impl VisiCutR {
         }
     }
 
+    /// Heruntergeladene Labor-Einstellungen und das Ergebnis der Prüfung beim
+    /// Start: Ist etwas neu, fragt ein Dialog, was übernommen wird.
+    fn poll_lab(&mut self, ctx: &egui::Context) {
+        if let Some((name, url, settings)) = self.devices.downloaded.take() {
+            self.lab_offer = Some(LabOffer::new(name, url, settings, false));
+        }
+        let Some(receiver) = &self.lab_check else {
+            return;
+        };
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(500));
+                return;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => return self.lab_check = None,
+        };
+        self.lab_check = None;
+        let Some(lab) = &mut self.settings.lab else {
+            return;
+        };
+        match result {
+            Ok(settings) => {
+                lab.last_check = visicut_core::update::now_secs();
+                if settings.fingerprint != lab.fingerprint && self.lab_offer.is_none() {
+                    self.lab_offer = Some(LabOffer::new(
+                        lab.name.clone(),
+                        lab.url.clone(),
+                        settings,
+                        true,
+                    ));
+                }
+                self.save_settings();
+            }
+            // Ohne Netz nur ein Hinweis in der Statuszeile; morgen wieder.
+            Err(e) => {
+                self.status = tr!(
+                    "Labor-Einstellungen von „{name}“ nicht prüfbar: {error}",
+                    name = lab.name,
+                    error = e
+                )
+            }
+        }
+    }
+
+    /// Fragt, welche Teile der Labor-Einstellungen übernommen werden.
+    fn lab_window(&mut self, ctx: &egui::Context) {
+        let Some(mut offer) = self.lab_offer.take() else {
+            return;
+        };
+        let mut apply = false;
+        let mut cancel = false;
+        let outer = egui::Frame::popup(&ctx.style()).inner_margin(5.0);
+        let modal = egui::Modal::new(egui::Id::new("lab"))
+            .frame(outer)
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .stroke(egui::Stroke::new(2.0, form::ACCENT))
+                    .corner_radius(7.0)
+                    .inner_margin(egui::Margin::symmetric(18, 14))
+                    .show(ui, |ui| {
+                        ui.set_width(460.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                egui::RichText::new(if offer.update {
+                                    tr("Neue Labor-Einstellungen")
+                                } else {
+                                    tr("Labor-Einstellungen übernehmen")
+                                })
+                                .font(form::bold(20.0)),
+                            );
+                            ui.add_space(4.0);
+                            ui.weak(&offer.name);
+                        });
+                        ui.add_space(10.0);
+                        let settings = &offer.settings;
+                        ui.checkbox(
+                            &mut offer.devices,
+                            tr!("{count} Lasercutter", count = settings.devices.len()),
+                        );
+                        indented_caption(ui, tr("Ersetzt Lasercutter gleichen Namens."));
+                        if let Some(library) = &settings.library {
+                            ui.checkbox(
+                                &mut offer.materials,
+                                tr!(
+                                    "{materials} Materialien mit {profiles} Laserwerten",
+                                    materials = library.materials.len(),
+                                    profiles = settings.profile_count()
+                                ),
+                            );
+                            indented_caption(
+                                ui,
+                                tr("Ersetzt die Materialbibliothek samt eigener Änderungen."),
+                            );
+                        }
+                        if !settings.templates.is_empty() {
+                            ui.checkbox(
+                                &mut offer.templates,
+                                tr!(
+                                    "{count} Zuordnungen als Vorlagen",
+                                    count = settings.templates.len()
+                                ),
+                            );
+                        }
+                        ui.add_space(6.0);
+                        ui.checkbox(
+                            &mut offer.watch,
+                            tr("Beim Start nach neuen Fassungen suchen"),
+                        );
+                        if !settings.warnings.is_empty() {
+                            ui.add_space(6.0);
+                            egui::CollapsingHeader::new(tr!(
+                                "{count} Hinweise",
+                                count = settings.warnings.len()
+                            ))
+                            .show(ui, |ui| {
+                                for warning in &settings.warnings {
+                                    form::caption(ui, warning.clone());
+                                }
+                            });
+                        }
+                        ui.add_space(12.0);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            apply = ui
+                                .add_enabled(
+                                    offer.devices
+                                        || offer.materials
+                                        || offer.templates
+                                        || offer.watch,
+                                    form::primary_button(tr("Übernehmen")),
+                                )
+                                .clicked();
+                            cancel = ui
+                                .add(
+                                    egui::Button::new(if offer.update {
+                                        tr("Später")
+                                    } else {
+                                        tr("Abbrechen")
+                                    })
+                                    .min_size(egui::vec2(0.0, 28.0)),
+                                )
+                                .clicked();
+                        });
+                    });
+            });
+        if apply {
+            self.adopt_lab(offer);
+        } else if !cancel && !modal.should_close() {
+            self.lab_offer = Some(offer);
+        }
+    }
+
+    fn adopt_lab(&mut self, offer: LabOffer) {
+        let LabOffer {
+            name,
+            url,
+            settings,
+            devices,
+            materials,
+            templates,
+            watch,
+            ..
+        } = offer;
+        let mut done = Vec::new();
+        let mut problems = Vec::new();
+        if devices
+            && self
+                .devices
+                .adopt_lab(settings.devices, &mut self.project, &mut self.status)
+                .is_some()
+        {
+            done.push(tr("Lasercutter"));
+        }
+        if materials && let Some(library) = settings.library {
+            match self.jobs.adopt_library(library) {
+                Ok(()) => done.push(tr("Materialien")),
+                Err(e) => problems.push(e),
+            }
+        }
+        if templates && !settings.templates.is_empty() {
+            match self.jobs.adopt_templates(settings.templates) {
+                Ok(_) => done.push(tr("Zuordnungen")),
+                Err(e) => problems.push(e),
+            }
+        }
+        self.settings.lab = watch.then(|| settings::LabSubscription {
+            name: name.clone(),
+            url,
+            fingerprint: settings.fingerprint,
+            last_check: visicut_core::update::now_secs(),
+        });
+        self.save_settings();
+        if !problems.is_empty() {
+            self.report(problems.join("\n"));
+        } else if !done.is_empty() {
+            self.status = tr!(
+                "Von „{name}“ übernommen: {parts}",
+                name = name,
+                parts = done.join(", ")
+            );
+        }
+    }
+
     /// Hinweis auf ein neues Release mit Link zur Download-Seite.
     fn update_window(&mut self, ctx: &egui::Context) {
         let Some(release) = &self.update_found else {
@@ -754,6 +1020,7 @@ impl VisiCutR {
             || self.overwrite.is_some()
             || self.confirm_clear_cache.is_some()
             || self.confirm_send.is_some()
+            || self.lab_offer.is_some()
     }
 
     fn reset_project(&mut self) {
@@ -4189,6 +4456,8 @@ impl eframe::App for VisiCutR {
             .forget_stale(self.devices.camera_image().as_ref());
         self.poll_update(ctx);
         self.update_window(ctx);
+        self.poll_lab(ctx);
+        self.lab_window(ctx);
         self.shortcuts_window(ctx);
         let device_action = self
             .devices

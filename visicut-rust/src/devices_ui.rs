@@ -25,7 +25,7 @@ fn camera_refresh_help() -> &'static str {
 }
 
 type Pending = Receiver<Result<image::RgbaImage, String>>;
-type Download = Receiver<Result<Vec<LaserDevice>, String>>;
+type Download = Receiver<Result<visicut_core::lab::LabSettings, String>>;
 
 /// Arbeitsbett des LTT iLaser 4000 in mm. Die Geräteimporte lehnen andere
 /// Maße ab, deshalb legt das Gerät die Bettgröße fest (wie macOS).
@@ -124,7 +124,10 @@ pub struct DeviceUi {
     calibration: Option<Calibration>,
     shift_test: Option<ShiftTest>,
     /// Laufender Download von Labor-Einstellungen (Laborname, Ergebnis).
-    download: Option<(String, Download)>,
+    download: Option<(String, &'static str, Download)>,
+    /// Fertig geladene Labor-Einstellungen (Name, Adresse); die Oberfläche
+    /// fragt, was davon übernommen wird.
+    pub downloaded: Option<(String, String, visicut_core::lab::LabSettings)>,
 }
 
 impl DeviceUi {
@@ -150,6 +153,7 @@ impl DeviceUi {
             calibration: None,
             shift_test: None,
             download: None,
+            downloaded: None,
         };
         (ui, error)
     }
@@ -372,7 +376,7 @@ impl DeviceUi {
                 _ => self.refresh_camera(project),
             }
         }
-        self.poll_download(ctx, project, status);
+        self.poll_download(ctx, status);
         let mut action = None;
         if let Some(calibration) = self.calibration.as_mut().filter(|c| !c.parked) {
             let mut close = false;
@@ -439,19 +443,20 @@ impl DeviceUi {
             return;
         }
         let (tx, rx) = channel();
+        let lab = name.to_owned();
         std::thread::spawn(move || {
-            let _ = tx.send(device::download(url));
+            let _ = tx.send(visicut_core::lab::download(&lab, url));
         });
-        self.download = Some((name.to_owned(), rx));
+        self.download = Some((name.to_owned(), url, rx));
         *status = tr!(
             "Einstellungen von „{name}“ werden heruntergeladen …",
             name = name
         );
     }
 
-    /// Sichert fertige Downloads und übernimmt sie in den Entwurf der Verwaltung.
-    fn poll_download(&mut self, ctx: &egui::Context, project: &mut Project, status: &mut String) {
-        let Some((name, receiver)) = &self.download else {
+    /// Fertige Downloads gehen an die Oberfläche, die fragt, was übernommen wird.
+    fn poll_download(&mut self, ctx: &egui::Context, status: &mut String) {
+        let Some((name, url, receiver)) = &self.download else {
             return;
         };
         let result = match receiver.try_recv() {
@@ -462,17 +467,12 @@ impl DeviceUi {
             }
             Err(TryRecvError::Disconnected) => Err(tr("Download unerwartet abgebrochen").into()),
         };
-        let name = name.clone();
+        let (name, url) = (name.clone(), url.to_string());
         self.download = None;
         match result {
-            Ok(devices) => {
-                if let Some(added) = self.adopt(devices, project, status) {
-                    *status = tr!(
-                        "{added} LTT iLaser 4000 von „{name}“ importiert",
-                        added = added,
-                        name = name
-                    );
-                }
+            Ok(settings) => {
+                status.clear();
+                self.downloaded = Some((name, url, settings));
             }
             Err(e) => {
                 *status = tr!(
@@ -846,10 +846,28 @@ impl DeviceUi {
         Some(added)
     }
 
+    /// Lasercutter eines Labors: gleichnamige werden ersetzt. Liefert die
+    /// Zahl der ersetzten, `None` wenn nicht gesichert werden konnte.
+    pub fn adopt_lab(
+        &mut self,
+        devices: Vec<LaserDevice>,
+        project: &mut Project,
+        status: &mut String,
+    ) -> Option<usize> {
+        let mut store = self.store.clone();
+        let replaced = store.replace(devices);
+        if !self.save(store, project, status) {
+            return None;
+        }
+        // Eine offene Verwaltung zeigt die neue Liste.
+        self.draft = None;
+        Some(replaced)
+    }
+
     /// Importieren, Herunterladen und Exportieren der Geräteliste
     /// (Einstellungen → Allgemein). Importe werden sofort gesichert.
     pub fn transfer(&mut self, ui: &mut egui::Ui, project: &mut Project, status: &mut String) {
-        let downloading = self.download.as_ref().map(|(name, _)| name.clone());
+        let downloading = self.download.as_ref().map(|(name, _, _)| name.clone());
         let mut download = None;
         ui.horizontal(|ui| {
             if ui.button(tr("Importieren …")).clicked()

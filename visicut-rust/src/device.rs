@@ -201,6 +201,22 @@ impl DeviceStore {
         count
     }
 
+    /// Geräte eines Labors: ersetzt gleichnamige, die übrigen kommen ans
+    /// Ende. Liefert, wie viele ersetzt wurden.
+    pub fn replace(&mut self, devices: Vec<LaserDevice>) -> usize {
+        let mut replaced = 0;
+        for device in devices {
+            match self.devices.iter_mut().find(|d| d.name == device.name) {
+                Some(existing) => {
+                    *existing = device;
+                    replaced += 1;
+                }
+                None => self.devices.push(device),
+            }
+        }
+        replaced
+    }
+
     /// Kopie des Geräts `index` unter einem freien Namen am Ende der Liste;
     /// liefert ihre Position.
     pub fn duplicate(&mut self, index: usize) -> usize {

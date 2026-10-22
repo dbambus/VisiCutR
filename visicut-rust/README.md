@@ -455,8 +455,14 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
 
 - **Importieren** liest VisiCut-Gerätedateien (`devices/*.xml`),
   `.vcsettings`-Archive und eigene Exporte (`.vcrdevices`). **Herunterladen**
-  lädt die Labor-Einstellungen aus VisiCuts Liste und übernimmt nur
-  LTT-iLaser-4000-Geräte. **Exportieren** schreibt alle Geräte als JSON.
+  lädt die Labor-Einstellungen aus VisiCuts Liste; ein Dialog fragt, was
+  übernommen wird: die LTT-iLaser-4000-Geräte (ersetzen gleichnamige), die
+  Materialien mit ihren Laserwerten (ersetzen die Materialbibliothek; nur
+  Profile mit einem Parametersatz, wie `scripts/import-fau-materials.py`) und
+  die Zuordnungen als Vorlagen. Wie in Java-VisiCut prüft VisiCutR danach auf
+  Wunsch einmal am Tag beim Start, ob das Labor eine neue Fassung
+  veröffentlicht hat, und bietet sie zum Übernehmen an. **Exportieren**
+  schreibt alle Geräte als JSON.
 - Die Geräteliste liegt unter `~/Library/Application Support/VisiCutR`
   (Windows `%APPDATA%\VisiCutR`, Linux `~/.config/visicutr`);
   `VISICUTR_CONFIG_DIR` setzt einen anderen Ordner.

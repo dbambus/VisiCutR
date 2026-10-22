@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 const FILE: &str = "materials.json";
+/// `source` der mitgelieferten FAU-Bibliothek.
+pub const BUNDLED_SOURCE: &str = "fau-fablab/visicut-settings";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -154,6 +156,11 @@ impl Library {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundled_source_is_known() {
+        assert_eq!(Library::bundled().source, BUNDLED_SOURCE);
+    }
 
     #[test]
     fn bundled_catalogue_includes_mark_and_3d_profiles() {

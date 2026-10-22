@@ -5,6 +5,10 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
 
 ## Unveröffentlicht
 
+- **Labor-Einstellungen vollständig:** „Herunterladen“ übernimmt neben den
+  Lasercuttern auch Materialien mit Laserwerten und die Zuordnungen; ein
+  Dialog fragt, was übernommen wird. Auf Wunsch prüft VisiCutR wie
+  Java-VisiCut einmal am Tag beim Start, ob das Labor eine neue Fassung hat.
 - **Sicherer ohne Materialprofil:** Gravieren und 3D-Gravur starten wie
   Markieren mit 0 % Leistung, wenn das Material kein Profil dafür hat, statt
   die Schneidwerte zu übernehmen.

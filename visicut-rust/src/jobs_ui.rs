@@ -1171,6 +1171,29 @@ impl JobUi {
     }
 
     /// Material profile for a new step, if the library has one.
+    /// Materialbibliothek eines Labors: ersetzt die bisherige und wird gesichert.
+    pub fn adopt_library(&mut self, library: Library) -> Result<(), String> {
+        library.save(&device::config_dir())?;
+        self.library = library;
+        self.custom = true;
+        // Eine offene Bearbeitung zeigt die neue Bibliothek.
+        self.editor = None;
+        Ok(())
+    }
+
+    /// Zuordnungen eines Labors als Vorlagen; gleichnamige werden ersetzt,
+    /// damit eine neue Fassung die alte ablöst.
+    pub fn adopt_templates(&mut self, templates: Vec<Predefined>) -> Result<usize, String> {
+        let mut count = 0;
+        for template in templates {
+            if self.templates.store(template).is_ok() {
+                count += 1;
+            }
+        }
+        self.templates.save(&device::config_dir())?;
+        Ok(count)
+    }
+
     pub fn apply_preset_to(&self, project: &mut Project, index: usize) {
         apply_step_preset(self.active(), project, index);
     }
@@ -1910,11 +1933,14 @@ impl JobUi {
                             Err(e) => *status = e,
                         }
                     }
-                    ui.small(if self.custom {
-                        tr("Eigene Bibliothek")
+                    let origin = if !self.custom {
+                        tr("FAU-Bibliothek").to_string()
+                    } else if self.library.source != visicut_core::materials::BUNDLED_SOURCE {
+                        tr!("Bibliothek von „{lab}“", lab = self.library.source)
                     } else {
-                        tr("FAU-Bibliothek")
-                    });
+                        tr("Eigene Bibliothek").to_string()
+                    };
+                    ui.weak(origin);
                     let changed = draft != self.library.materials;
                     if ui
                         .add_enabled(changed, egui::Button::new(tr("Verwerfen")))

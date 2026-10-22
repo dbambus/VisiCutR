@@ -184,13 +184,14 @@ pub fn unit_value<N: egui::emath::Numeric>(
                 widget.weak_bg_fill = Color32::TRANSPARENT;
                 widget.bg_fill = Color32::TRANSPARENT;
             }
-            ui.add_sized(
-                field.size(),
-                egui::DragValue::new(value)
-                    .speed(0.1)
-                    .range(range)
-                    .max_decimals(2),
-            )
+            let drag = egui::DragValue::new(value).speed(0.1).range(range);
+            // Ganzzahlen (etwa Durchgänge) ohne Nachkommastellen.
+            let drag = if N::INTEGRAL {
+                drag.fixed_decimals(0)
+            } else {
+                drag.max_decimals(2)
+            };
+            ui.add_sized(field.size(), drag)
         })
         .inner;
     let active = response.hovered() || response.has_focus() || response.dragged();

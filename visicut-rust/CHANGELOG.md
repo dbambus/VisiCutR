@@ -3,7 +3,7 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
-## Unveröffentlicht
+## 0.20.0 – 22.10.2026
 
 - **Inkscape-Anbindung** wie in Java-VisiCut: Die Erweiterung „Add to
   VisiCutR“ / „Open in VisiCutR“ (Erweiterungen → Lasercut Path) schickt die
@@ -42,6 +42,20 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
   zuordnen** trägt die portable EXE für das eigene Konto ein und entfernt sie
   wieder. Linux: `install-desktop.sh` im tar.gz legt Menüeintrag und
   MIME-Typen in `~/.local/share` an.
+- **Kamera-Kalibrierung:** Objektivkorrektur (Profil Raspberry Pi Camera v2
+  oder allgemein), Raster 5 × 3 oder 3 × 2, automatische Kreuzerkennung,
+  Nachführung an VisiCam-Passmarken, Zoom; eigenes, frei verschiebbares
+  Fenster mit Status als Kopfleiste.
+- **Zusatzfenster** (Text, Form, Schild, Kopien, Nesting, Vektorisieren,
+  Reststücke, Zeilenversatz) öffnen als eigene Fenster.
+- **Nesting:** Drehen keine / nur 90° / beliebig (ganze Grad, kleinstes
+  umschließendes Rechteck).
+- **Drehen** nur in ganzen Grad über ein festes Eingabefeld (Enter wendet an).
+- **Einstellungen** überarbeitet: Seiten mit Überschrift, Allgemein zuerst,
+  Info mit GitHub und Lizenz, eigene Seite Software-Add-ins, einheitliche
+  Feldgrößen, Listen mit Knöpfen +, Duplizieren und −, Materialprofile nach
+  Dicke gruppiert und nach Verfahren gefärbt, Regeln und Vorlagen in einem
+  Bereich; ähnliche Farben (Farbton ±35°) werden in Regeln gleich behandelt.
 
 ## 0.19.0 – 16.10.2026
 

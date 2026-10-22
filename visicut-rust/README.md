@@ -120,6 +120,9 @@ legt das Skript Menüeintrag, MIME-Typen (`application/x-visicutr-project`,
    behalten ihre Zuordnung. Die Seitenleiste listet die Teile, ein Klick auf
    ein Teil (in der Liste oder auf dem Bett) wählt es, und alle Einstellungen
    für Position, Bearbeitung und Zuordnung gelten für das gewählte Teil.
+   **Datei → Neu laden** (⌘R/Strg+R) liest die Dateien aller Teile erneut
+   ein, etwa nach einer Änderung in Inkscape; Lage, Maßstab und Zuordnung
+   bleiben, in VisiCutR geänderte Objekte werden ersetzt (⌘Z holt sie zurück).
    **Teil duplizieren** legt eine versetzte Kopie an, **Löschen** entfernt das
    gewählte Teil. Beim Senden werden alle Teile zusammengeführt, je Verfahren
    ein LTT-Auftrag; die Vorschau zeigt alle Teile. Widerrufen nimmt das ganze

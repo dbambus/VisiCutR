@@ -40,6 +40,8 @@ enum Command {
     Open,
     /// Grafiken als neue Teile hinzufügen.
     AddPart,
+    /// Geänderte Quelldateien der Teile neu einlesen.
+    Reload,
     Demo,
     Vectorize,
     Save,
@@ -125,6 +127,7 @@ impl Command {
             Self::New => tr("Neues Projekt"),
             Self::Open => tr("Öffnen …"),
             Self::AddPart => tr("Hinzufügen …"),
+            Self::Reload => tr("Neu laden"),
             Self::Demo => tr("Beispiel öffnen"),
             Self::Vectorize => tr("Bitmap vektorisieren …"),
             Self::Save => tr("Sichern"),
@@ -176,6 +179,7 @@ impl Command {
             Self::New => (Modifiers::COMMAND, Key::N),
             Self::Open => (Modifiers::COMMAND, Key::O),
             Self::AddPart => (COMMAND_SHIFT, Key::O),
+            Self::Reload => (Modifiers::COMMAND, Key::R),
             Self::Save => (Modifiers::COMMAND, Key::S),
             Self::SaveAs => (COMMAND_SHIFT, Key::S),
             Self::Export => (COMMAND_SHIFT, Key::E),
@@ -288,10 +292,11 @@ impl ViewGroup {
 }
 
 /// Reihenfolge im Fenster „Tastenkürzel“.
-const SHORTCUT_LIST: [Command; 22] = [
+const SHORTCUT_LIST: [Command; 23] = [
     Command::New,
     Command::Open,
     Command::AddPart,
+    Command::Reload,
     Command::Save,
     Command::SaveAs,
     Command::Export,
@@ -894,6 +899,7 @@ impl VisiCutR {
         let preview = svg::render(&source)?;
         self.project.svg = source;
         self.project.part_name = name.clone();
+        self.project.part_source_file = None;
         self.project.name = name;
         self.project.width_mm = preview.width_mm;
         self.project.height_mm = preview.height_mm;
@@ -919,6 +925,7 @@ impl VisiCutR {
     ) -> Result<(), String> {
         let name = path.file_stem().unwrap_or_default().to_string_lossy();
         self.import(ctx, imported.svg, name.into(), imported.steps)?;
+        self.project.part_source_file = Some(path.display().to_string());
         self.status = tr!(
             "{file} importiert · Originalmaße übernommen",
             file = path.file_name().unwrap_or_default().to_string_lossy()
@@ -1280,6 +1287,26 @@ impl VisiCutR {
     /// die Werte der Materialbibliothek.
     /// Andere Teile bleiben erhalten; neue Teile (Hinzufügen) bringen ihre
     /// eigenen Schritte mit.
+    /// Liest die Dateien aller Teile neu ein (nach Änderungen etwa in
+    /// Inkscape); Lage, Maßstab und Zuordnung bleiben.
+    fn reload(&mut self, ctx: &egui::Context) {
+        let (project, changed, notes) =
+            visicut_core::compose::reload_parts(&self.project, self.fit_policy == Some(true));
+        if changed == 0 {
+            self.status = tr("Neu laden: Dateien unverändert").into();
+            if !notes.is_empty() {
+                self.report(notes.join("\n"));
+            }
+            return;
+        }
+        self.apply_composed(ctx, project, notes);
+        self.status = if changed == 1 {
+            tr("Ein Teil neu geladen").into()
+        } else {
+            tr!("{count} Teile neu geladen", count = changed)
+        };
+    }
+
     fn apply_composed(&mut self, ctx: &egui::Context, project: Project, notes: Vec<String>) {
         let textures = match self.textures_for(ctx, &project) {
             Ok(textures) => textures,
@@ -2055,6 +2082,14 @@ impl VisiCutR {
             | Command::Vectorize
             | Command::Devices => !self.busy(),
             Command::Export | Command::Send | Command::Preview => self.sendable,
+            Command::Reload => {
+                !self.busy()
+                    && self
+                        .project
+                        .all_parts()
+                        .iter()
+                        .any(|p| p.source_file.is_some())
+            }
             Command::Text | Command::Shape | Command::Sign => !self.busy(),
             Command::Array
             | Command::Nest
@@ -2100,6 +2135,7 @@ impl VisiCutR {
             Command::New => self.request(ctx, Replace::New),
             Command::Open => self.choose_file(ctx),
             Command::AddPart => self.choose_parts(ctx),
+            Command::Reload => self.reload(ctx),
             Command::Demo => self.request(ctx, Replace::Demo),
             Command::Vectorize => self.vectorize.pick(&mut self.status),
             Command::Save | Command::SaveAs => {
@@ -2280,6 +2316,7 @@ impl VisiCutR {
             Command::New,
             Command::Open,
             Command::AddPart,
+            Command::Reload,
             Command::Demo,
             Command::Vectorize,
         ] {

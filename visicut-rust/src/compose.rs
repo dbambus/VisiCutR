@@ -758,6 +758,7 @@ pub fn add_part(
         steps,
         raster: project.raster,
         ignore_filters: Vec::new(),
+        source_file: None,
     });
     Ok((result, notes))
 }
@@ -782,7 +783,8 @@ pub fn add_files_as_parts(
                 .then(|| crate::svg_import::fit_to_content(&imported.svg))
                 .flatten()
                 .unwrap_or(imported.svg);
-            let (next, more) = add_part(&result, &stem, &svg, imported.steps)?;
+            let (mut next, more) = add_part(&result, &stem, &svg, imported.steps)?;
+            next.part_source_file = Some(path.display().to_string());
             Ok((next, imported.warnings, more))
         });
         match appended {
@@ -799,6 +801,76 @@ pub fn add_files_as_parts(
         return Err(notes.join("\n"));
     }
     Ok((result, notes))
+}
+
+/// Reads every part that remembers its file again (VisiCut's „Neu laden“
+/// after changing the drawing in Inkscape). Position, scale and assignment
+/// stay; only the drawing is replaced. Returns the number of parts whose
+/// drawing changed; missing or unreadable files are reported in the notes.
+pub fn reload_parts(project: &Project, whole_drawing: bool) -> (Project, usize, Vec<String>) {
+    let size_mm = |source: &str| {
+        usvg::Tree::from_str(source, &svg::options())
+            .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))
+            .map(|tree| {
+                let size = tree.size();
+                (size.width() * 25.4 / 96.0, size.height() * 25.4 / 96.0)
+            })
+    };
+    let mut all = project.all_parts();
+    let mut changed = 0;
+    let mut notes = Vec::new();
+    for part in &mut all {
+        let Some(file) = part.source_file.clone() else {
+            continue;
+        };
+        let path = std::path::Path::new(&file);
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        let imported = match crate::import::read_file(path) {
+            Ok(imported) => imported,
+            Err(e) => {
+                notes.push(format!("{name}: {e}"));
+                continue;
+            }
+        };
+        let svg = whole_drawing
+            .then(|| crate::svg_import::fit_to_content(&imported.svg))
+            .flatten()
+            .unwrap_or(imported.svg);
+        if svg == part.svg {
+            continue;
+        }
+        let (new_w, new_h) = match size_mm(&svg) {
+            Ok(size) => size,
+            Err(e) => {
+                notes.push(format!("{name}: {e}"));
+                continue;
+            }
+        };
+        // Eine skalierte Grafik behält ihren Maßstab.
+        let (scale_x, scale_y) = size_mm(&part.svg)
+            .ok()
+            .filter(|(w, h)| *w > 0.0 && *h > 0.0)
+            .map_or((1.0, 1.0), |(w, h)| (part.width_mm / w, part.height_mm / h));
+        part.width_mm = new_w * scale_x;
+        part.height_mm = new_h * scale_y;
+        // Einzeln zugeordnete Objekte, die es nicht mehr gibt, fallen weg.
+        let objects = selection::objects(&svg).map_or(0, |o| o.len());
+        for step in &mut part.steps {
+            step.objects.retain(|o| *o < objects);
+        }
+        part.svg = svg;
+        notes.extend(
+            imported
+                .warnings
+                .into_iter()
+                .map(|w| format!("{name}: {w}")),
+        );
+        changed += 1;
+    }
+    let mut result = project.clone();
+    let active = result.active_part;
+    result.set_all_parts(all, active);
+    (result, changed, notes)
 }
 
 /// Imports files one after another with [`append`] into the active part.
@@ -2182,6 +2254,45 @@ mod tests {
         ltt::prepare(&copies).unwrap();
         assert!(array(&project, 1, 1, 0.0, 0.0).is_err());
         assert!(array(&project, 30, 30, 0.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn reload_keeps_position_scale_and_rules() {
+        let dir = std::env::temp_dir().join(format!("visicutr-reload-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("teil.svg");
+        let drawing = |w: u32| {
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}mm" height="10mm" viewBox="0 0 {w} 10"><rect width="{w}" height="10" fill="none" stroke="red"/></svg>"#
+            )
+        };
+        std::fs::write(&file, drawing(20)).unwrap();
+        let project = Project {
+            svg: drawing(20),
+            part_source_file: Some(file.display().to_string()),
+            x_mm: 30.0,
+            y_mm: 40.0,
+            // Auf das Doppelte skaliert.
+            width_mm: 40.0,
+            height_mm: 20.0,
+            ..Project::default()
+        };
+        let (same, changed, notes) = reload_parts(&project, false);
+        assert_eq!((changed, notes.len()), (0, 0));
+        assert_eq!(same.svg, project.svg);
+        std::fs::write(&file, drawing(30)).unwrap();
+        let (reloaded, changed, notes) = reload_parts(&project, false);
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!((changed, notes), (1, Vec::<String>::new()));
+        assert!(reloaded.svg.contains(r#"width="30mm""#));
+        assert_eq!((reloaded.x_mm, reloaded.y_mm), (30.0, 40.0));
+        assert!((reloaded.width_mm - 60.0).abs() < 0.01);
+        assert!((reloaded.height_mm - 20.0).abs() < 0.01);
+        assert_eq!(reloaded.part_source_file, project.part_source_file);
+        // Fehlt die Datei, bleibt alles wie es war.
+        let (kept, changed, notes) = reload_parts(&reloaded, false);
+        assert_eq!((changed, notes.len()), (0, 1));
+        assert_eq!(kept.svg, reloaded.svg);
     }
 
     #[test]

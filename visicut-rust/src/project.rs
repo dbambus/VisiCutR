@@ -55,6 +55,9 @@ pub struct Project {
     /// `ignore_filters` above always belong to the active part.
     #[serde(default)]
     pub part_name: String,
+    /// File the active part was imported from, for „Neu laden“.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_source_file: Option<String>,
     /// Position of the active part in the list of all parts.
     #[serde(default)]
     pub active_part: usize,
@@ -85,6 +88,9 @@ pub struct Part {
     pub raster: RasterSettings,
     #[serde(default)]
     pub ignore_filters: Vec<Vec<Filter>>,
+    /// File the part was imported from, for „Neu laden“.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_file: Option<String>,
 }
 
 /// Engrave shift table of the FAU device (`engraveShiftList`) for 10 %, 20 %,
@@ -337,6 +343,8 @@ struct ProjectFile {
     #[serde(default)]
     part_name: String,
     #[serde(default)]
+    part_source_file: Option<String>,
+    #[serde(default)]
     active_part: usize,
     #[serde(default)]
     parts: Vec<Part>,
@@ -389,6 +397,7 @@ impl TryFrom<ProjectFile> for Project {
             similar_colors: file.similar_colors,
             machine: file.machine,
             part_name: file.part_name,
+            part_source_file: file.part_source_file,
             active_part: file.active_part.min(file.parts.len()),
             parts: file.parts,
         })
@@ -471,6 +480,7 @@ impl Default for Project {
             similar_colors: true,
             machine: MachineSettings::default(),
             part_name: String::new(),
+            part_source_file: None,
             active_part: 0,
             parts: Vec::new(),
         }
@@ -550,6 +560,7 @@ impl Project {
             steps: self.steps.clone(),
             raster: self.raster,
             ignore_filters: self.ignore_filters.clone(),
+            source_file: self.part_source_file.clone(),
         }
     }
 
@@ -567,6 +578,7 @@ impl Project {
         self.steps = part.steps;
         self.raster = part.raster;
         self.ignore_filters = part.ignore_filters;
+        self.part_source_file = part.source_file;
     }
 
     /// All parts in list order (empty without artwork).
@@ -579,13 +591,15 @@ impl Project {
         all
     }
 
-    fn set_all_parts(&mut self, mut all: Vec<Part>, active: usize) {
+    /// Replaces all parts (list order); the one at `active` becomes active.
+    pub fn set_all_parts(&mut self, mut all: Vec<Part>, active: usize) {
         if all.is_empty() {
             let empty = Part {
                 name: String::new(),
                 svg: String::new(),
                 steps: Vec::new(),
                 ignore_filters: Vec::new(),
+                source_file: None,
                 ..self.active()
             };
             self.set_active(empty);
@@ -664,6 +678,7 @@ impl Project {
             similar_colors: self.similar_colors,
             machine: self.machine.clone(),
             part_name: String::new(),
+            part_source_file: None,
             active_part: 0,
             parts: Vec::new(),
         };

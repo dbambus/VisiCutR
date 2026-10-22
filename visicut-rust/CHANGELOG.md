@@ -12,6 +12,9 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
   `--version`; auch an ein bereits laufendes Fenster.
 - **Hilfe** im Datei-Menü: Anleitung (F1), Tastenkürzel, Fehler melden und
   Über VisiCutR.
+- **Neu laden** (Datei-Menü, ⌘R/Strg+R): Teile merken sich ihre Datei und
+  lassen sich nach Änderungen etwa in Inkscape neu einlesen; Lage, Maßstab und
+  Zuordnung bleiben.
 - **Zoom 1:1** (⌘1/Strg+1, Knopf „1:1“): Originalgröße bei 96 dpi; Zoom
   jetzt bis 800 %.
 

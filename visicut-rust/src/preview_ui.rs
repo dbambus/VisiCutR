@@ -788,10 +788,20 @@ fn summary(
     let job = &ready.job;
     let mut action = None;
     egui::TopBottomPanel::bottom("preview_actions")
-        .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(0, 8)))
+        // Rand unten, damit der hervorgehobene Knopf nicht abgeschnitten wird.
+        .frame(egui::Frame::new().inner_margin(egui::Margin {
+            left: 0,
+            right: 0,
+            top: 8,
+            bottom: 12,
+        }))
         .show_inside(ui, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button(tr("LTT exportieren …")).clicked() {
+            ui.horizontal_centered(|ui| {
+                // So hoch wie „An Lasercutter senden …“.
+                if ui
+                    .add(egui::Button::new(tr("LTT exportieren …")).min_size(egui::vec2(0.0, 28.0)))
+                    .clicked()
+                {
                     action = Some(Action::Export);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

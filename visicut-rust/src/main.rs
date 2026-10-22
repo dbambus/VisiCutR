@@ -262,6 +262,31 @@ struct Snapshot {
     part_textures: Vec<Option<egui::TextureHandle>>,
 }
 
+/// Knopfgruppen rechts über der Arbeitsfläche, von links nach rechts.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ViewGroup {
+    Remnants,
+    Camera,
+    Grid,
+    Zoom,
+    Actual,
+    Fit,
+}
+
+impl ViewGroup {
+    /// Einträge im Menü „…“, wenn die Gruppe nicht mehr in die Leiste passt.
+    fn commands(self) -> &'static [Command] {
+        match self {
+            Self::Remnants => &[Command::Remnants],
+            Self::Camera => &[Command::ToggleCamera, Command::RefreshCamera],
+            Self::Grid => &[Command::ToggleGrid],
+            Self::Zoom => &[Command::ZoomIn, Command::ZoomOut],
+            Self::Actual => &[Command::ZoomActual],
+            Self::Fit => &[Command::ZoomFit],
+        }
+    }
+}
+
 /// Reihenfolge im Fenster „Tastenkürzel“.
 const SHORTCUT_LIST: [Command; 22] = [
     Command::New,
@@ -2756,7 +2781,77 @@ impl VisiCutR {
                     }
                 ));
             });
+            // Gruppen von links nach rechts; was nicht neben den Titel passt,
+            // wandert von rechts beginnend in das Menü „…“.
+            let camera = format!("📷 {}", tr("Kamera"));
+            let zoom = format!("{:.0} %", self.zoom * 100.0);
+            let has_camera = self.devices.has_camera();
+            let mut groups: Vec<(ViewGroup, Vec<&str>)> = Vec::new();
+            if has_camera {
+                groups.push((ViewGroup::Remnants, vec![Command::Remnants.title()]));
+                let mut texts = vec![camera.as_str()];
+                if self.devices.camera_shown() {
+                    texts.push("⟳");
+                }
+                groups.push((ViewGroup::Camera, texts));
+            }
+            groups.push((ViewGroup::Grid, vec![tr("Raster")]));
+            groups.push((ViewGroup::Zoom, vec!["−", &zoom, "+"]));
+            groups.push((ViewGroup::Actual, vec!["1:1"]));
+            groups.push((ViewGroup::Fit, vec![tr("Zurücksetzen")]));
+            let spacing = ui.spacing().item_spacing.x;
+            let padding = ui.spacing().button_padding.x * 2.0;
+            let font = egui::TextStyle::Button.resolve(ui.style());
+            let text_width = |text: &str| {
+                ui.fonts_mut(|f| {
+                    f.layout_no_wrap(text.to_owned(), font.clone(), Color32::BLACK)
+                        .size()
+                        .x
+                })
+            };
+            let widths: Vec<f32> = groups
+                .iter()
+                .map(|(group, texts)| {
+                    let extra = if *group == ViewGroup::Zoom { 6.0 } else { 0.0 };
+                    texts
+                        .iter()
+                        .map(|t| text_width(t) + padding + spacing)
+                        .sum::<f32>()
+                        + extra
+                })
+                .collect();
+            let available = ui.available_width() - 24.0;
+            let overflow = text_width("…") + padding + spacing;
+            let mut shown = groups.len();
+            while shown > 0 {
+                let needed: f32 = widths[..shown].iter().sum::<f32>()
+                    + if shown < groups.len() { overflow } else { 0.0 };
+                if needed <= available {
+                    break;
+                }
+                shown -= 1;
+            }
+            let hidden: Vec<ViewGroup> = groups[shown..].iter().map(|(g, _)| *g).collect();
+            let visible: Vec<ViewGroup> = groups[..shown].iter().map(|(g, _)| *g).collect();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let mut chosen = Vec::new();
+                if !hidden.is_empty() {
+                    let more = ui.button("…").on_hover_text(tr("Weitere Ansichtsoptionen"));
+                    egui::Popup::menu(&more).show(|ui| {
+                        let mut picked = None;
+                        for group in &hidden {
+                            for command in group.commands() {
+                                if *command == Command::RefreshCamera
+                                    && !self.devices.camera_shown()
+                                {
+                                    continue;
+                                }
+                                self.menu_item(ui, *command, &mut picked);
+                            }
+                        }
+                        chosen.extend(picked);
+                    });
+                }
                 let tool = |ui: &mut egui::Ui, command: Command, text: &str| {
                     let mut hover = command.title().to_owned();
                     if let Some(shortcut) = command.shortcut() {
@@ -2767,13 +2862,6 @@ impl VisiCutR {
                         .clicked()
                         .then_some(command)
                 };
-                let mut chosen = Vec::new();
-                chosen.extend(tool(ui, Command::ZoomFit, tr("Zurücksetzen")));
-                chosen.extend(tool(ui, Command::ZoomActual, "1:1"));
-                chosen.extend(tool(ui, Command::ZoomIn, "+"));
-                ui.label(format!("{:.0} %", self.zoom * 100.0));
-                chosen.extend(tool(ui, Command::ZoomOut, "−"));
-                ui.add_space(6.0);
                 // Umschalter wie die Symbolschalter unter macOS.
                 let toggle = |ui: &mut egui::Ui, command: Command, text: &str, on: bool| {
                     ui.add_enabled(self.enabled(command), egui::Button::new(text).selected(on))
@@ -2781,23 +2869,38 @@ impl VisiCutR {
                         .clicked()
                         .then_some(command)
                 };
-                chosen.extend(toggle(
-                    ui,
-                    Command::ToggleGrid,
-                    tr("Raster"),
-                    self.show_grid,
-                ));
-                if self.devices.has_camera() {
-                    if self.devices.camera_loading() {
-                        ui.spinner();
-                    } else if self.devices.camera_shown() {
-                        chosen.extend(tool(ui, Command::RefreshCamera, "⟳"));
+                for group in visible.iter().rev() {
+                    match group {
+                        ViewGroup::Fit => {
+                            chosen.extend(tool(ui, Command::ZoomFit, tr("Zurücksetzen")))
+                        }
+                        ViewGroup::Actual => chosen.extend(tool(ui, Command::ZoomActual, "1:1")),
+                        ViewGroup::Zoom => {
+                            chosen.extend(tool(ui, Command::ZoomIn, "+"));
+                            ui.label(&zoom);
+                            chosen.extend(tool(ui, Command::ZoomOut, "−"));
+                            ui.add_space(6.0);
+                        }
+                        ViewGroup::Grid => chosen.extend(toggle(
+                            ui,
+                            Command::ToggleGrid,
+                            tr("Raster"),
+                            self.show_grid,
+                        )),
+                        ViewGroup::Camera => {
+                            if self.devices.camera_loading() {
+                                ui.spinner();
+                            } else if self.devices.camera_shown() {
+                                chosen.extend(tool(ui, Command::RefreshCamera, "⟳"));
+                            }
+                            let shown = self.devices.camera_shown();
+                            chosen.extend(toggle(ui, Command::ToggleCamera, &camera, shown));
+                        }
+                        // Reststücke im Kamerabild erkennen.
+                        ViewGroup::Remnants => {
+                            chosen.extend(tool(ui, Command::Remnants, Command::Remnants.title()))
+                        }
                     }
-                    let shown = self.devices.camera_shown();
-                    let camera = format!("📷 {}", tr("Kamera"));
-                    chosen.extend(toggle(ui, Command::ToggleCamera, &camera, shown));
-                    // Reststücke im Kamerabild erkennen (früher Menü „Darstellung“).
-                    chosen.extend(tool(ui, Command::Remnants, Command::Remnants.title()));
                 }
                 if let Some(command) = chosen.pop() {
                     *clicked = Some(command);

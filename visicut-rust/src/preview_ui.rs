@@ -169,7 +169,7 @@ impl PreviewUi {
                         egui::RichText::new(tr(
                             "Rot: Schnitt · Blau: Gravur · Orange: 3D · Violett: Markieren",
                         ))
-                        .size(11.5)
+                        .size(crate::form::CAPTION_SIZE)
                         .color(Color32::from_gray(95)),
                     );
                     ui.checkbox(&mut self.show_processing, tr("Bearbeitung anzeigen"));
@@ -1172,7 +1172,7 @@ fn paint_simulation(
             Pos2::new(rect.center().x, rect.top() + 12.0),
             egui::Align2::CENTER_CENTER,
             tr("Anfahrt außerhalb des Ausschnitts"),
-            egui::FontId::proportional(11.0),
+            egui::FontId::proportional(crate::form::CAPTION_SIZE),
             Color32::GRAY,
         );
     }

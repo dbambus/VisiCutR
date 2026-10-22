@@ -248,12 +248,15 @@ pub fn row<R>(
     .inner
 }
 
-/// Kleiner grauer Erläuterungstext, umbrechend.
+/// Größe der Erläuterungstexte: etwa wie der Fließtext, nur grau.
+pub const CAPTION_SIZE: f32 = 13.0;
+
+/// Grauer Erläuterungstext, umbrechend.
 pub fn caption(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.add(
         egui::Label::new(
             RichText::new(text.into())
-                .size(11.5)
+                .size(CAPTION_SIZE)
                 .color(Color32::from_gray(75)),
         )
         .wrap(),

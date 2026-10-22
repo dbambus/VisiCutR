@@ -131,6 +131,15 @@ fn number(value: f64) -> String {
 }
 
 fn valid(dpi_x: f64, dpi_y: f64) -> Option<(f64, f64)> {
+    // Files store whole pixels per metre: 2835 px/m means 72 DPI, not 72.009.
+    let snap = |dpi: f64| {
+        if (dpi - dpi.round()).abs() < 0.05 {
+            dpi.round()
+        } else {
+            dpi
+        }
+    };
+    let (dpi_x, dpi_y) = (snap(dpi_x), snap(dpi_y));
     (DPI_RANGE.contains(&dpi_x) && DPI_RANGE.contains(&dpi_y)).then_some((dpi_x, dpi_y))
 }
 
@@ -271,6 +280,18 @@ mod tests {
     fn size_mm(svg: &str) -> (f32, f32) {
         let preview = crate::svg::render(svg).unwrap();
         (preview.width_mm, preview.height_mm)
+    }
+
+    #[test]
+    fn rounds_stored_resolutions_to_whole_dpi() {
+        // 2835 px/m is how every tool stores 72 DPI.
+        assert_eq!(valid(2835.0 * 0.0254, 2835.0 * 0.0254), Some((72.0, 72.0)));
+        assert_eq!(
+            valid(11811.0 * 0.0254, 3780.0 * 0.0254),
+            Some((300.0, 96.0))
+        );
+        assert_eq!(valid(72.3, 72.3), Some((72.3, 72.3)));
+        assert_eq!(valid(0.5, 72.0), None);
     }
 
     fn encoded(image: DynamicImage, format: ImageFormat) -> Vec<u8> {

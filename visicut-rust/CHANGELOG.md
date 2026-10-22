@@ -3,6 +3,30 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## 0.20.1 – 22.10.2026
+
+- **Schnittgeometrie wie Java-VisiCut:** Die Transformationen vom SVG nach mm
+  werden in f64 berechnet, der viewBox-Maßstab exakt aus Breite und Höhe in mm.
+  Bisher verschob die f32-Rechnung von usvg bei punktreichen Dateien einzelne
+  Punkte um einen 500-DPI-Pixel (0,05 mm) und änderte damit Stützpunkte und
+  Geschwindigkeitsplanung der Kurven.
+- **Dokumentgröße wie VisiCut** (`determineResolution`): SVG-Dateien ohne
+  viewBox oder mit Größe in px bekommen 90 DPI, ab Inkscape 0.92 96 DPI, bei
+  Illustrator-Exporten 72 DPI; Dateien mit mm-Größe und viewBox bleiben exakt.
+  Alte Inkscape-Dateien (vor 0.92) kamen bisher 6,7 % zu klein.
+- **Haarlinien:** Konturen mit `stroke-width="0"` (Konvention mancher CAD- und
+  Corel-Exporte) werden wie in VisiCut geschnitten; bisher fehlten sie
+  stillschweigend.
+- Folgt in einem Pfad auf `Z` ein Zeichenbefehl ohne `M`, läuft die Kontur wie
+  in Java2D ohne Abheben weiter. Der Gerätename wird wie in Java je
+  UTF-16-Einheit gekürzt, der Overscan am Bettrand wie Java aufgerundet, die
+  Kreisgrenze von 101 mm in Javas Rechenreihenfolge geprüft.
+- **Bildimport:** Auflösungen aus der Datei werden auf ganze DPI gerundet
+  (2835 px/m sind 72 DPI, nicht 72,009).
+- Java-Vergleich: 172 von 249 Grenzfällen (SVG, Bilder, G-Code, DXF, EPS,
+  PDF) sind byte-gleich mit Java-VisiCut; die übrigen Abweichungen sind in
+  `scripts/java-parity/AUDIT-2026-10-21.md` begründet.
+
 ## 0.20.0 – 22.10.2026
 
 - **Inkscape-Anbindung** wie in Java-VisiCut: Die Erweiterung „Add to

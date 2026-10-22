@@ -86,6 +86,101 @@ pub fn fonts() -> Arc<fontdb::Database> {
         .clone()
 }
 
+/// Size of the document in mm, as VisiCut's SVG importer sees it
+/// (`determineResolution`, `determineTransformation`): width and height in
+/// absolute units together with a viewBox are exact; user units (px,
+/// unitless, missing or percent sizes, no viewBox) count at the resolution
+/// of the editor that wrote the file: 90 DPI (Inkscape before 0.92 and files
+/// without editor hints), 96 DPI from Inkscape 0.92 on, 72 DPI for Adobe
+/// Illustrator exports.
+pub fn document_size_mm(source: &str, size: usvg::Size) -> (f32, f32) {
+    let dpi = editor_dpi(source);
+    let fallback = || (size.width() * 25.4 / dpi, size.height() * 25.4 / dpi);
+    let Ok(document) = usvg::roxmltree::Document::parse_with_options(
+        source,
+        usvg::roxmltree::ParsingOptions {
+            allow_dtd: true,
+            ..Default::default()
+        },
+    ) else {
+        return fallback();
+    };
+    let root = document.root_element();
+    let view_box: Option<Vec<f32>> = root.attribute("viewBox").map(|v| {
+        v.split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|t| !t.is_empty())
+            .filter_map(|t| t.parse().ok())
+            .collect()
+    });
+    if !matches!(view_box.as_deref(), Some(&[_, _, w, h]) if w > 0.0 && h > 0.0) {
+        return fallback();
+    }
+    match (
+        root.attribute("width").and_then(|v| length_mm(v, dpi)),
+        root.attribute("height").and_then(|v| length_mm(v, dpi)),
+    ) {
+        (Some(w), Some(h)) if w > 0.0 && h > 0.0 => (w, h),
+        _ => fallback(),
+    }
+}
+
+/// An SVG length in mm; `None` for percentages or unknown units.
+fn length_mm(value: &str, dpi: f32) -> Option<f32> {
+    let value = value.trim();
+    let digits = value
+        .find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E')))
+        .unwrap_or(value.len());
+    let number: f32 = value[..digits].parse().ok()?;
+    let per_unit = match value[digits..].trim() {
+        "" | "px" => 25.4 / dpi,
+        "mm" => 1.0,
+        "cm" => 10.0,
+        "in" => 25.4,
+        "pt" => 25.4 / 72.0,
+        "pc" => 25.4 / 6.0,
+        _ => return None,
+    };
+    Some(number * per_unit)
+}
+
+/// VisiCut's `determineResolution`: the resolution the writing program used
+/// for user units, from comments and namespaces in the file.
+fn editor_dpi(source: &str) -> f32 {
+    let mut illustrator = false;
+    let mut inkscape = false;
+    let mut inkscape_092 = false;
+    for line in source.lines() {
+        if line.starts_with("<!-- Generator: Adobe Illustrator") {
+            illustrator = true;
+        }
+        if line.contains("www.inkscape.org/namespaces") {
+            inkscape = true;
+        }
+        if let Some(at) = line.find("inkscape:version") {
+            let rest = line[at + "inkscape:version".len()..]
+                .trim_start()
+                .trim_start_matches('=')
+                .trim_start()
+                .trim_start_matches(['"', '\'']);
+            let mut parts = rest.split(|c: char| !c.is_ascii_digit());
+            let major: i32 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(-1);
+            let minor: i32 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(-1);
+            if major > 0 || (major == 0 && minor >= 92) {
+                inkscape_092 = true;
+            }
+        }
+    }
+    if inkscape_092 {
+        96.0
+    } else if inkscape {
+        90.0
+    } else if illustrator {
+        72.0
+    } else {
+        90.0
+    }
+}
+
 /// usvg options shared by preview, engraving, cutting and the mapping.
 pub fn options() -> usvg::Options<'static> {
     // Embedded projects must remain portable: external resources are not resolved.
@@ -125,9 +220,10 @@ pub fn render(source: &str) -> Result<Preview, String> {
             }
         }
     }
+    let (width_mm, height_mm) = document_size_mm(source, size);
     Ok(Preview {
-        width_mm: size.width() * 25.4 / 96.0,
-        height_mm: size.height() * 25.4 / 96.0,
+        width_mm,
+        height_mm,
         image: eframe::egui::ColorImage::from_rgba_unmultiplied(
             [width as usize, height as usize],
             &pixels,
@@ -148,5 +244,48 @@ mod tests {
     #[test]
     fn rejects_malformed_svg() {
         assert!(render("not an SVG").is_err());
+    }
+
+    #[test]
+    fn sizes_user_units_like_visicut() {
+        let size = |svg: &str| {
+            let preview = render(svg).unwrap();
+            (preview.width_mm, preview.height_mm)
+        };
+        // Unitless without hints: 90 DPI; the same file from Inkscape 0.92: 96 DPI.
+        let (w, _) = size(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="90" height="45"><rect width="9" height="9"/></svg>"#,
+        );
+        assert!((w - 25.4).abs() < 1e-4, "{w}");
+        let (w, _) = size(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" inkscape:version="0.92.4 (5da689c313, 2019-01-14)" width="96" height="48"><rect width="9" height="9"/></svg>"#,
+        );
+        assert!((w - 25.4).abs() < 1e-4, "{w}");
+        let (w, _) = size(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" inkscape:version="0.91 r13725" width="90" height="45"><rect width="9" height="9"/></svg>"#,
+        );
+        assert!((w - 25.4).abs() < 1e-4, "{w}");
+        let (w, _) = size(
+            "<!-- Generator: Adobe Illustrator 24.0.0, SVG Export Plug-In -->\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"72\" height=\"36\"><rect width=\"9\" height=\"9\"/></svg>",
+        );
+        assert!((w - 25.4).abs() < 1e-4, "{w}");
+        // Absolute units with a viewBox are exact; without a viewBox the user
+        // units count at 90 DPI even if the width is given in mm.
+        let (w, h) = size(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="7cm" height="50mm" viewBox="0 0 70 50"><rect width="9" height="9"/></svg>"#,
+        );
+        assert!(
+            (w - 70.0).abs() < 1e-4 && (h - 50.0).abs() < 1e-4,
+            "{w} {h}"
+        );
+        let (w, _) = size(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="90mm" height="45mm"><rect width="9" height="9"/></svg>"#,
+        );
+        assert!((w - 90.0 * 96.0 / 90.0).abs() < 1e-3, "{w}");
+        // Percent sizes fall back to the viewBox in user units.
+        let (w, _) = size(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 90 45"><rect width="9" height="9"/></svg>"#,
+        );
+        assert!((w - 25.4).abs() < 1e-4, "{w}");
     }
 }

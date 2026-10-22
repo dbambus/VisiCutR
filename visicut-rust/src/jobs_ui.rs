@@ -1211,12 +1211,7 @@ impl JobUi {
             }
             // A click above may have changed the mode.
             match assignment_mode(project) {
-                AssignmentMode::Whole => crate::form::caption(
-                    ui,
-                    tr("\
-                        Ein Verfahren für das gesamte Motiv. Für Zuordnungen nach Strichfarbe \
-                     oder anderen Merkmalen „Regeln“ wählen."),
-                ),
+                AssignmentMode::Whole => {}
                 AssignmentMode::Objects => self.objects(ui, project, dirty),
                 AssignmentMode::Rules => {
                     crate::form::caption(

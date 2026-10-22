@@ -201,7 +201,7 @@ impl DeviceStore {
         count
     }
 
-    /// Geräte eines Labors: ersetzt gleichnamige, die übrigen kommen ans
+    /// Geräte eines FabLabs: ersetzt gleichnamige, die übrigen kommen ans
     /// Ende. Liefert, wie viele ersetzt wurden.
     pub fn replace(&mut self, devices: Vec<LaserDevice>) -> usize {
         let mut replaced = 0;

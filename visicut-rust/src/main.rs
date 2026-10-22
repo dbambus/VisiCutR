@@ -241,12 +241,12 @@ fn indented_caption(ui: &mut egui::Ui, text: &str) {
         .show(ui, |ui| form::caption(ui, text));
 }
 
-/// Geladene Labor-Einstellungen und was davon übernommen wird.
+/// Geladene FabLab-Einstellungen und was davon übernommen wird.
 struct LabOffer {
     name: String,
     url: String,
     settings: visicut_core::lab::LabSettings,
-    /// Neue Fassung eines abonnierten Labors (Prüfung beim Start).
+    /// Neue Fassung eines abonnierten FabLabs (Prüfung beim Start).
     update: bool,
     devices: bool,
     materials: bool,
@@ -511,9 +511,9 @@ struct VisiCutR {
     /// Laufende Update-Prüfung (`true`: von Hand gestartet) und gefundenes Release.
     update_check: Option<(bool, UpdateCheck)>,
     update_found: Option<visicut_core::update::Release>,
-    /// Geladene Labor-Einstellungen, die der Dialog zum Übernehmen anbietet.
+    /// Geladene FabLab-Einstellungen, die der Dialog zum Übernehmen anbietet.
     lab_offer: Option<LabOffer>,
-    /// Laufende Prüfung der abonnierten Labor-Einstellungen beim Start.
+    /// Laufende Prüfung der abonnierten FabLab-Einstellungen beim Start.
     lab_check: Option<std::sync::mpsc::Receiver<Result<visicut_core::lab::LabSettings, String>>>,
     /// Nimmt Dateien späterer Starts und der Inkscape-Erweiterung entgegen.
     instance: Option<instance::Listener>,
@@ -621,7 +621,7 @@ impl VisiCutR {
         {
             app.start_update_check(false);
         }
-        // Einmal am Tag nach einer neuen Fassung der Labor-Einstellungen fragen.
+        // Einmal am Tag nach einer neuen Fassung der FabLab-Einstellungen fragen.
         if let Some(lab) = app
             .settings
             .lab
@@ -746,7 +746,7 @@ impl VisiCutR {
         }
     }
 
-    /// Heruntergeladene Labor-Einstellungen und das Ergebnis der Prüfung beim
+    /// Heruntergeladene FabLab-Einstellungen und das Ergebnis der Prüfung beim
     /// Start: Ist etwas neu, fragt ein Dialog, was übernommen wird.
     fn poll_lab(&mut self, ctx: &egui::Context) {
         if let Some((name, url, settings)) = self.devices.downloaded.take() {
@@ -783,7 +783,7 @@ impl VisiCutR {
             // Ohne Netz nur ein Hinweis in der Statuszeile; morgen wieder.
             Err(e) => {
                 self.status = tr!(
-                    "Labor-Einstellungen von „{name}“ nicht prüfbar: {error}",
+                    "FabLab-Einstellungen von „{name}“ nicht abrufbar: {error}",
                     name = lab.name,
                     error = e
                 )
@@ -791,7 +791,7 @@ impl VisiCutR {
         }
     }
 
-    /// Fragt, welche Teile der Labor-Einstellungen übernommen werden.
+    /// Fragt, welche Teile der FabLab-Einstellungen übernommen werden.
     fn lab_window(&mut self, ctx: &egui::Context) {
         let Some(mut offer) = self.lab_offer.take() else {
             return;
@@ -811,9 +811,9 @@ impl VisiCutR {
                         ui.vertical_centered(|ui| {
                             ui.label(
                                 egui::RichText::new(if offer.update {
-                                    tr("Neue Labor-Einstellungen")
+                                    tr("Neue FabLab-Einstellungen")
                                 } else {
-                                    tr("Labor-Einstellungen übernehmen")
+                                    tr("FabLab-Einstellungen übernehmen")
                                 })
                                 .font(form::bold(20.0)),
                             );
@@ -2214,7 +2214,7 @@ impl VisiCutR {
             form::section(ui, tr("Lasercutter"), |ui| {
                 self.devices
                     .transfer(ui, &mut self.project, &mut self.status);
-                form::caption(ui, tr("Importieren liest VisiCut-Gerätedateien, .vcsettings-Archive und eigene Exporte; Herunterladen holt die Einstellungen eines Labors. Neue Geräte werden sofort gesichert."));
+                form::caption(ui, tr("Importieren liest VisiCut-Gerätedateien, .vcsettings-Archive und eigene Exporte; Herunterladen ruft die FabLab-Einstellungen vom Einstellungs-Server eines FabLabs ab. Neue Geräte werden sofort gesichert."));
             });
             form::section(ui, tr("Info"), |ui| {
                 form::row(ui, tr("Programm"), |ui| {

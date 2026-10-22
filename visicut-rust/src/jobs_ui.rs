@@ -1209,7 +1209,7 @@ impl JobUi {
     }
 
     /// Material profile for a new step, if the library has one.
-    /// Materialbibliothek eines Labors: ersetzt die bisherige und wird gesichert.
+    /// Materialbibliothek eines FabLabs: ersetzt die bisherige und wird gesichert.
     pub fn adopt_library(&mut self, library: Library) -> Result<(), String> {
         library.save(&device::config_dir())?;
         self.library = library;
@@ -1219,7 +1219,7 @@ impl JobUi {
         Ok(())
     }
 
-    /// Zuordnungen eines Labors als Vorlagen; gleichnamige werden ersetzt,
+    /// Zuordnungen eines FabLabs als Vorlagen; gleichnamige werden ersetzt,
     /// damit eine neue Fassung die alte ablöst.
     pub fn adopt_templates(&mut self, templates: Vec<Predefined>) -> Result<usize, String> {
         let mut count = 0;

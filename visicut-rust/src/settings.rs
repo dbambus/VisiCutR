@@ -22,12 +22,12 @@ pub struct AppSettings {
     pub update_check_disabled: bool,
     /// Zeit der letzten Update-Prüfung in Sekunden seit 1970.
     pub last_update_check: u64,
-    /// Labor, dessen Einstellungen beim Start auf eine neue Fassung geprüft
+    /// FabLab, dessen Einstellungen beim Start auf eine neue Fassung geprüft
     /// werden (wie VisiCuts LabSettings).
     pub lab: Option<LabSubscription>,
 }
 
-/// Übernommene Labor-Einstellungen und ihr Stand.
+/// Übernommene FabLab-Einstellungen und ihr Stand.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LabSubscription {
     pub name: String,

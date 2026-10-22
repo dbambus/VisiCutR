@@ -9,6 +9,8 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
   Bett, wird jedes neu erstellte Element ein eigenes Teil. Ein zweites Schild
   landete bisher im gewählten Teil und ließ sich nur mit dem ersten zusammen
   verschieben. Neue Teile bekommen die Werte aus dem Materialprofil.
+- **FabLab-Einstellungen** heißen jetzt so statt „Labor-Einstellungen“; der
+  Hinweis nennt den Einstellungs-Server, von dem sie abgerufen werden.
 
 ## 1.0.0-rc.1 – 22.10.2026
 
@@ -26,7 +28,7 @@ je Stärke; mehrere Parametersätze je Schritt; Gravur, 3D-Gravur, Markieren,
 Schneiden mit „Kontur“; Rotationseinheit; Kamera mit Kalibrierung und
 VisiCam; Bitmap-Vektorisierung; Inkscape-Erweiterung; Befehlszeile
 (`--laserdevice`, `--material`, `--thickness`, `--execute`); eine Instanz;
-Labor-Einstellungen herunterladen und beim Start auf neue Fassungen prüfen;
+FabLab-Einstellungen herunterladen und beim Start auf neue Fassungen prüfen;
 PLF-Export für Java-VisiCut. Die LTT-Aufträge sind in der Reihenfolge
 „Klassisch“ byte-gleich mit Java: 172 von 249 Grenzfällen identisch, die
 übrigen Abweichungen sind in `scripts/java-parity/AUDIT-2026-10-21.md`
@@ -56,10 +58,10 @@ GRBL, Ruida …); das Kamerabild als Grafik ins Projekt übernehmen.
 - **Parametrische Teile in PLF-Dateien einstellbar:** Sie werden beim
   Öffnen eigene Teile an ihrer Stelle, mit Parametern in der Seitenleiste;
   Lage, Drehung und Maßstab aus der PLF-Datei bleiben dabei erhalten.
-- **Labor-Einstellungen vollständig:** „Herunterladen“ übernimmt neben den
+- **FabLab-Einstellungen vollständig:** „Herunterladen“ übernimmt neben den
   Lasercuttern auch Materialien mit Laserwerten und die Zuordnungen; ein
   Dialog fragt, was übernommen wird. Auf Wunsch prüft VisiCutR wie
-  Java-VisiCut einmal am Tag beim Start, ob das Labor eine neue Fassung hat.
+  Java-VisiCut einmal am Tag beim Start, ob das FabLab eine neue Fassung hat.
   Laserprofile mit mehreren Parametersätzen kommen mit: gleiche Sätze
   hintereinander als Durchgänge, die übrigen als weitere Parametersätze.
 - **Sicherer ohne Materialprofil:** Gravieren und 3D-Gravur starten wie

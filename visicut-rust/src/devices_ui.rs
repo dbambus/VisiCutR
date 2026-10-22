@@ -123,9 +123,9 @@ pub struct DeviceUi {
     camera_found: Vec<String>,
     calibration: Option<Calibration>,
     shift_test: Option<ShiftTest>,
-    /// Laufender Download von Labor-Einstellungen (Laborname, Ergebnis).
+    /// Laufender Download von FabLab-Einstellungen (FabLab-Name, Ergebnis).
     download: Option<(String, &'static str, Download)>,
-    /// Fertig geladene Labor-Einstellungen (Name, Adresse); die Oberfläche
+    /// Fertig geladene FabLab-Einstellungen (Name, Adresse); die Oberfläche
     /// fragt, was davon übernommen wird.
     pub downloaded: Option<(String, String, visicut_core::lab::LabSettings)>,
 }
@@ -846,7 +846,7 @@ impl DeviceUi {
         Some(added)
     }
 
-    /// Lasercutter eines Labors: gleichnamige werden ersetzt. Liefert die
+    /// Lasercutter eines FabLabs: gleichnamige werden ersetzt. Liefert die
     /// Zahl der ersetzten, `None` wenn nicht gesichert werden konnte.
     pub fn adopt_lab(
         &mut self,

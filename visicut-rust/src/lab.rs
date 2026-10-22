@@ -1,7 +1,7 @@
-//! Labor-Einstellungen wie VisiCuts `LabSettings`: ein `.vcsettings`- oder
+//! FabLab-Einstellungen wie VisiCuts `LabSettings`: ein `.vcsettings`- oder
 //! GitHub-Archiv mit Lasercuttern (`devices/`), Materialien samt Laserwerten
 //! (`materials/`, `laserprofiles/`) und Zuordnungen (`mappings/`). Ein
-//! Fingerabdruck des Inhalts zeigt, ob das Labor eine neue Fassung
+//! Fingerabdruck des Inhalts zeigt, ob das FabLab eine neue Fassung
 //! veröffentlicht hat.
 
 use crate::device::{self, LaserDevice};
@@ -43,7 +43,7 @@ impl LabSettings {
     }
 }
 
-/// Lädt die Einstellungen des Labors `name` von `url`.
+/// Lädt die Einstellungen des FabLabs `name` von `url`.
 pub fn download(name: &str, url: &str) -> Result<LabSettings, String> {
     read(&crate::camera::fetch(url, 50 * 1024 * 1024)?, name)
 }

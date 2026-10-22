@@ -690,7 +690,6 @@
   "Aktualisiert: {files}": "Mis à jour : {files}",
   "Das Teil hat keine Parameter": "La pièce n'a pas de paramètres",
   "Dieser Parametertyp lässt sich nicht bearbeiten": "Ce type de paramètre ne peut pas être modifié",
-  "{name}: Parameter aus PLF-Dateien sind fest ({values}); zum Ändern die Vorlage selbst öffnen": "{name} : les paramètres des fichiers PLF sont figés ({values}) ; ouvrez le modèle lui-même pour les modifier",
   "Gesamtzeit ca. {time}": "Durée totale env. {time}",
   "Beim Start nach neuen Fassungen suchen": "Rechercher de nouvelles versions au démarrage",
   "Bibliothek von „{lab}“": "Bibliothèque de « {lab} »",

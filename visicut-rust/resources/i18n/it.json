@@ -690,7 +690,6 @@
   "Aktualisiert: {files}": "Aggiornato: {files}",
   "Das Teil hat keine Parameter": "La parte non ha parametri",
   "Dieser Parametertyp lässt sich nicht bearbeiten": "Questo tipo di parametro non è modificabile",
-  "{name}: Parameter aus PLF-Dateien sind fest ({values}); zum Ändern die Vorlage selbst öffnen": "{name}: i parametri dei file PLF sono fissi ({values}); per modificarli aprire il modello stesso",
   "Gesamtzeit ca. {time}": "Tempo totale ca. {time}",
   "Beim Start nach neuen Fassungen suchen": "Cerca nuove versioni all'avvio",
   "Bibliothek von „{lab}“": "Libreria di «{lab}»",

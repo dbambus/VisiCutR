@@ -5,6 +5,9 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
 
 ## Unveröffentlicht
 
+- **Parametrische Teile in PLF-Dateien einstellbar:** Sie werden beim
+  Öffnen eigene Teile an ihrer Stelle, mit Parametern in der Seitenleiste;
+  Lage, Drehung und Maßstab aus der PLF-Datei bleiben dabei erhalten.
 - **Labor-Einstellungen vollständig:** „Herunterladen“ übernimmt neben den
   Lasercuttern auch Materialien mit Laserwerten und die Zuordnungen; ein
   Dialog fragt, was übernommen wird. Auf Wunsch prüft VisiCutR wie

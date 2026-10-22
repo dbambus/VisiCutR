@@ -28,6 +28,22 @@ pub struct Imported {
     pub steps: Vec<crate::project::JobStep>,
     /// Template and values of a parametric SVG, whose parameters stay editable.
     pub parametric: Option<crate::project::Parametric>,
+    /// Further parts beside the main drawing: parametric parts of a VisiCut
+    /// project, which stay editable as parts of their own.
+    pub extra_parts: Vec<ExtraPart>,
+    /// Where the main drawing's top left corner belongs relative to the
+    /// usual import position (mm); zero except for cropped project parts.
+    pub offset_mm: [f64; 2],
+}
+
+/// A part of an import that keeps its own drawing (see [`Imported::extra_parts`]).
+pub struct ExtraPart {
+    pub name: String,
+    pub svg: String,
+    pub steps: Vec<crate::project::JobStep>,
+    pub parametric: Option<crate::project::Parametric>,
+    /// Top left corner relative to the origin of the main drawing (mm).
+    pub offset_mm: [f64; 2],
 }
 
 /// Reads an SVG file (≤ 25 MB) and embeds its external images.

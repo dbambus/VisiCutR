@@ -111,6 +111,18 @@ pub struct Parametric {
     #[serde(default)]
     pub base_dir: String,
     pub values: Vec<(String, crate::import::ParameterValue)>,
+    /// Part of a VisiCut project (PLF): the drawing is placed with the
+    /// part's transform (`None`: its physical size) and cropped to its content.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<Placement>,
+}
+
+/// Transform of a parametric part from a VisiCut project.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Placement {
+    /// Affine matrix `[a, b, c, d, e, f]` from SVG user units to mm.
+    pub transform: Option<[f64; 6]>,
 }
 
 /// Engrave shift table of the FAU device (`engraveShiftList`) for 10 %, 20 %,

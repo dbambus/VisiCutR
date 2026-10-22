@@ -690,7 +690,6 @@
   "Aktualisiert: {files}": "Updated: {files}",
   "Das Teil hat keine Parameter": "The part has no parameters",
   "Dieser Parametertyp lässt sich nicht bearbeiten": "This parameter type cannot be edited",
-  "{name}: Parameter aus PLF-Dateien sind fest ({values}); zum Ändern die Vorlage selbst öffnen": "{name}: parameters from PLF files are fixed ({values}); open the template itself to change them",
   "Gesamtzeit ca. {time}": "Total time approx. {time}",
   "Beim Start nach neuen Fassungen suchen": "Check for new versions at startup",
   "Bibliothek von „{lab}“": "Library from “{lab}”",

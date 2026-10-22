@@ -113,6 +113,7 @@ pub fn read_plf(path: &Path) -> Result<Imported, String> {
     let mut warnings = Vec::new();
     let any_mapping = parts.values().any(|part| part.mapping.is_some());
     let mut placed = Vec::new();
+    let mut separate: Vec<crate::svg_import::ExtraPart> = Vec::new();
     for (index, part) in parts {
         let mapping = part.mapping.map(|bytes| mappings::parse(&bytes));
         let Some((name, file)) = part.source else {
@@ -144,19 +145,6 @@ pub fn read_plf(path: &Path) -> Result<Imported, String> {
             }
         };
         warnings.extend(imported.warnings.iter().map(|w| format!("{name}: {w}")));
-        if let Some(parametric) = &imported.parametric {
-            let values = parametric
-                .values
-                .iter()
-                .map(|(name, value)| format!("{name} = {}", value.display()))
-                .collect::<Vec<_>>()
-                .join(", ");
-            warnings.push(tr!(
-                "{name}: Parameter aus PLF-Dateien sind fest ({values}); zum Ändern die Vorlage selbst öffnen",
-                name = name,
-                values = values
-            ));
-        }
         let transform = match part.transform {
             Some(Ok(transform)) => Some(transform),
             Some(Err(error)) => {
@@ -175,6 +163,26 @@ pub fn read_plf(path: &Path) -> Result<Imported, String> {
                 None
             }
         };
+        // Parametrische Teile bleiben eigene Teile, damit sich ihre
+        // Parameter ändern lassen.
+        if let Some(parametric) = imported.parametric {
+            let parametric = crate::project::Parametric {
+                placement: Some(crate::project::Placement { transform }),
+                ..parametric
+            };
+            match separate_part(&name, &imported.svg, parametric, mapping, any_mapping) {
+                Ok((part, more)) => {
+                    warnings.extend(more);
+                    separate.push(part);
+                }
+                Err(error) => warnings.push(tr!(
+                    "Teil „{name}“ übersprungen: {error}",
+                    name = name,
+                    error = error
+                )),
+            }
+            continue;
+        }
         match composer.add(&name, &file, &imported.svg, transform) {
             Ok(()) => placed.push(mappings::Placed {
                 // Same source as the composer parses (without DOCTYPE), with the original ids.
@@ -190,6 +198,22 @@ pub fn read_plf(path: &Path) -> Result<Imported, String> {
             )),
         }
     }
+    if composer.parts.is_empty() && !separate.is_empty() {
+        // Nur parametrische Teile: das erste wird die Hauptgrafik.
+        let first = separate.remove(0);
+        for part in &mut separate {
+            part.offset_mm[0] -= first.offset_mm[0];
+            part.offset_mm[1] -= first.offset_mm[1];
+        }
+        return Ok(Imported {
+            svg: first.svg,
+            warnings,
+            steps: first.steps,
+            parametric: first.parametric,
+            extra_parts: separate,
+            offset_mm: first.offset_mm,
+        });
+    }
     if composer.parts.is_empty() {
         return Err(if warnings.is_empty() {
             tr("PLF-Datei enthält keine Grafik").into()
@@ -200,8 +224,14 @@ pub fn read_plf(path: &Path) -> Result<Imported, String> {
             )
         });
     }
-    let (svg, more) = composer.finish()?;
+    let (svg, more, shift) = composer.finish()?;
     warnings.extend(more);
+    // Die Hauptgrafik beginnt am (verschobenen) Ursprung des Betts.
+    let (sx, sy) = shift.unwrap_or_default();
+    for part in &mut separate {
+        part.offset_mm[0] += sx;
+        part.offset_mm[1] += sy;
+    }
     let translation = if any_mapping {
         mappings::translate(&placed, attributes(&svg))
     } else {
@@ -213,6 +243,8 @@ pub fn read_plf(path: &Path) -> Result<Imported, String> {
         warnings,
         steps: translation.steps,
         parametric: None,
+        extra_parts: separate,
+        offset_mm: [0.0, 0.0],
     })
 }
 
@@ -237,6 +269,9 @@ pub fn render_parametric(
     .map_err(|e| tr!("Parametrische SVG: {details}", details = e))?;
     let mut imported =
         crate::svg_import::embed_external_images(&rendered.svg, Path::new(&parametric.base_dir));
+    if let Some(placement) = &parametric.placement {
+        imported.svg = place_part("parametric", &imported.svg, placement.transform)?.0;
+    }
     let mut warnings = rendered.warnings;
     warnings.append(&mut imported.warnings);
     imported.warnings = warnings;
@@ -286,6 +321,7 @@ pub fn read_parametric_svg(path: &Path) -> Result<Imported, String> {
             .display()
             .to_string(),
         values: saved,
+        placement: None,
     };
     let (mut imported, _) = render_parametric(&parametric)?;
     warnings.append(&mut imported.warnings);
@@ -481,6 +517,9 @@ fn length_px(text: &str) -> Option<f64> {
     (value > 0.0).then_some(value * factor)
 }
 
+/// Composed document, notes and the shift applied to keep parts on the bed.
+type Composed = (String, Vec<String>, Option<(f64, f64)>);
+
 #[derive(Default)]
 struct Composer {
     parts: Vec<String>,
@@ -608,7 +647,7 @@ impl Composer {
 
     /// The composed document, sized to reach from the bed origin to the
     /// furthest part. Parts left of or above the origin move it.
-    fn finish(&self) -> Result<(String, Vec<String>), String> {
+    fn finish(&self) -> Result<Composed, String> {
         let body = self.parts.join("\n");
         let probe = document(1.0, 1.0, None, &body);
         let tree = usvg::Tree::from_str(&probe, &crate::svg::options()).map_err(|e| {
@@ -640,8 +679,83 @@ impl Composer {
         Ok((
             document(round_up(width), round_up(height), shift, &body),
             warnings,
+            shift,
         ))
     }
+
+    /// The composed document cropped to its content; returns it and its top
+    /// left corner in bed millimetres.
+    fn finish_cropped(&self) -> Result<(String, [f64; 2]), String> {
+        let body = self.parts.join("\n");
+        let probe = document(1.0, 1.0, None, &body);
+        let tree = usvg::Tree::from_str(&probe, &crate::svg::options()).map_err(|e| {
+            tr!(
+                "PLF-Grafik konnte nicht zusammengesetzt werden: {error}",
+                error = e
+            )
+        })?;
+        let px = tree.size().width() as f64;
+        let stroke = tree.root().abs_stroke_bounding_box();
+        let (left, top) = (stroke.left() as f64 / px, stroke.top() as f64 / px);
+        let width = (stroke.width() as f64 / px).max(1.0);
+        let height = (stroke.height() as f64 / px).max(1.0);
+        let round_up = |v: f64| (v * 1000.0).ceil() / 1000.0;
+        Ok((
+            document(
+                round_up(width),
+                round_up(height),
+                Some((-left, -top)),
+                &body,
+            ),
+            [left, top],
+        ))
+    }
+}
+
+/// One part placed with its PLF transform like in the composed document, but
+/// cropped to its own content; returns the document and its top left corner.
+pub(crate) fn place_part(
+    name: &str,
+    svg: &str,
+    transform: Option<Matrix>,
+) -> Result<(String, [f64; 2]), String> {
+    let mut composer = Composer::default();
+    composer.add(name, Path::new("teil.svg"), svg, transform)?;
+    composer.finish_cropped()
+}
+
+/// A parametric PLF part as a part of its own, with the steps of its mapping.
+fn separate_part(
+    name: &str,
+    rendered: &str,
+    parametric: crate::project::Parametric,
+    mapping: Option<Result<Vec<mappings::Entry>, String>>,
+    any_mapping: bool,
+) -> Result<(crate::svg_import::ExtraPart, Vec<String>), String> {
+    let transform = parametric.placement.as_ref().and_then(|p| p.transform);
+    let (svg, offset_mm) = place_part(name, rendered, transform)?;
+    let translation = if any_mapping {
+        let placed = mappings::Placed {
+            objects: attributes(&xml::strip_doctype(rendered)).ok(),
+            svg: true,
+            mapping,
+            name: name.to_string(),
+        };
+        mappings::translate(&[placed], attributes(&svg))
+    } else {
+        mappings::Translation::default()
+    };
+    let stem = name.split('.').next().unwrap_or(name).to_string();
+    Ok((
+        crate::svg_import::ExtraPart {
+            name: stem,
+            svg,
+            steps: translation.steps,
+            parametric: Some(parametric),
+            offset_mm,
+        },
+        translation.warnings,
+    ))
 }
 
 fn document(width: f64, height: f64, shift: Option<(f64, f64)>, body: &str) -> String {
@@ -1113,12 +1227,58 @@ mod tests {
             ("transform.xml", t.as_bytes()),
         ]);
         let imported = read_plf(&path).unwrap();
+        // Ein einzelnes parametrisches Teil wird die Hauptgrafik, auf ihren
+        // Inhalt zugeschnitten (die Linie ragt 0,5 mm über den Ursprung).
         assert!(
-            close(bounds(&imported.svg), [0.0, 0.0, 30.0, 5.0]),
+            close(bounds(&imported.svg), [0.5, 0.5, 30.5, 5.5]),
             "{}",
             imported.svg
         );
-        assert!(imported.warnings.iter().any(|w| w.contains("size = 30")));
+        assert_eq!(imported.offset_mm, [-0.5, -0.5]);
+        let parametric = imported.parametric.unwrap();
+        assert_eq!(
+            parametric.values,
+            [("size".to_string(), ParameterValue::Number(30.0))]
+        );
+        // Mit neuem Wert bleibt die Lage aus der PLF-Datei.
+        let wider = crate::project::Parametric {
+            values: vec![("size".into(), ParameterValue::Number(50.0))],
+            ..parametric
+        };
+        let (rendered, _) = render_parametric(&wider).unwrap();
+        assert!(
+            close(bounds(&rendered.svg), [0.5, 0.5, 50.5, 5.5]),
+            "{}",
+            rendered.svg
+        );
+    }
+
+    #[test]
+    fn keeps_parametric_parts_beside_the_other_parts() {
+        let rect = br#"<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm" viewBox="0 0 20 10"><rect width="20" height="10" fill="none" stroke="red" stroke-width="0.1"/></svg>"#;
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:th="http://www.thymeleaf.org" width="100mm" height="100mm" viewBox="0 0 100 100"><defs><ref param="size" type="Double" default="10"/></defs><rect x="0" y="0" height="5" fill="none" stroke="black" stroke-width="0.1" th:attr="width=${size}"/></svg>"#;
+        let at = |x: f64, y: f64| transform_xml([1.0, 0.0, 0.0, 1.0, x, y]);
+        let (t1, t2) = (at(10.0, 10.0), at(60.0, 40.0));
+        let (_dir, path) = write_plf(&[
+            ("rechteck.svg", rect),
+            ("transform.xml", t1.as_bytes()),
+            ("1/box.parametric.svg", svg),
+            ("1/transform.xml", t2.as_bytes()),
+        ]);
+        let imported = read_plf(&path).unwrap();
+        assert!(imported.parametric.is_none());
+        let [extra] = &imported.extra_parts[..] else {
+            panic!("{}", imported.extra_parts.len());
+        };
+        assert_eq!(extra.name, "box");
+        assert!(extra.parametric.as_ref().unwrap().placement.is_some());
+        // Lage relativ zum Ursprung der Hauptgrafik (Bettursprung).
+        assert!(
+            (extra.offset_mm[0] - 59.95).abs() < 0.01 && (extra.offset_mm[1] - 39.95).abs() < 0.01,
+            "{:?}",
+            extra.offset_mm
+        );
+        assert!(!imported.svg.contains("box.parametric"));
     }
 
     #[test]

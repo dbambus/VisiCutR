@@ -1199,6 +1199,13 @@ impl VisiCutR {
         self.import(ctx, imported.svg, name.into(), imported.steps)?;
         self.project.part_source_file = Some(path.display().to_string());
         self.project.part_parametric = imported.parametric;
+        // Ein zugeschnittenes Projektteil liegt dort, wo es im Projekt lag.
+        self.project.x_mm += imported.offset_mm[0] as f32;
+        self.project.y_mm += imported.offset_mm[1] as f32;
+        if !imported.extra_parts.is_empty() {
+            visicut_core::compose::add_extra_parts(&mut self.project, imported.extra_parts)?;
+            (self.texture, self.part_textures) = self.textures_for(ctx, &self.project)?;
+        }
         self.status = tr!(
             "{file} importiert · Originalmaße übernommen",
             file = path.file_name().unwrap_or_default().to_string_lossy()

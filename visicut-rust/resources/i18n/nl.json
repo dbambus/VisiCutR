@@ -690,7 +690,6 @@
   "Aktualisiert: {files}": "Bijgewerkt: {files}",
   "Das Teil hat keine Parameter": "Het onderdeel heeft geen parameters",
   "Dieser Parametertyp lässt sich nicht bearbeiten": "Dit type parameter kan niet worden bewerkt",
-  "{name}: Parameter aus PLF-Dateien sind fest ({values}); zum Ändern die Vorlage selbst öffnen": "{name}: parameters uit PLF-bestanden liggen vast ({values}); open de sjabloon zelf om ze te wijzigen",
   "Gesamtzeit ca. {time}": "Totale tijd ca. {time}",
   "Beim Start nach neuen Fassungen suchen": "Bij het starten naar nieuwe versies zoeken",
   "Bibliothek von „{lab}“": "Bibliotheek van ‘{lab}’",

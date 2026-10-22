@@ -318,8 +318,9 @@ gewählte Teil einen Abschnitt **Parameter** mit einem Feld je Parameter
 (Zahlen mit `min`/`max`, Auswahllisten, Ja/Nein, Text; Beschriftung aus
 `label` bzw. `label_<sprache>`); nach jeder Eingabe wird die Grafik neu
 erzeugt, Lage, Maßstab und Zuordnung bleiben. Vorlage und Werte werden mit
-dem Projekt gespeichert. Teile aus PLF-Dateien behalten ihre gespeicherten
-Werte fest; der Hinweis nennt sie. LaserScript-Dateien (`.ls`) laufen in einer
+dem Projekt gespeichert. Parametrische Teile in VisiCut-Projekten (PLF)
+werden beim Öffnen eigene Teile an ihrer Stelle; Lage, Drehung und Maßstab
+aus der PLF-Datei bleiben beim Ändern der Parameter erhalten. LaserScript-Dateien (`.ls`) laufen in einer
 abgeschotteten JavaScript-Umgebung ohne Datei- und Netzzugriff mit
 Zeitlimit (5 s); `prompt`-Abfragen erhalten ihren Vorgabewert.
 

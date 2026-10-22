@@ -787,6 +787,7 @@ pub fn add_files_as_parts(
             let (mut next, more) = add_part(&result, &stem, &svg, imported.steps)?;
             next.part_source_file = Some(path.display().to_string());
             next.part_parametric = imported.parametric;
+            add_extra_parts(&mut next, imported.extra_parts)?;
             Ok((next, imported.warnings, more))
         });
         match appended {
@@ -940,6 +941,40 @@ fn replace_drawing(part: &mut crate::project::Part, svg: String) -> Result<(), S
         step.objects.retain(|o| *o < objects);
     }
     part.svg = svg;
+    Ok(())
+}
+
+/// Adds the further parts of an import (parametric parts of a VisiCut
+/// project) at their place relative to the active part, the import's main
+/// drawing, which stays active.
+pub fn add_extra_parts(
+    project: &mut Project,
+    extras: Vec<crate::svg_import::ExtraPart>,
+) -> Result<(), String> {
+    if extras.is_empty() {
+        return Ok(());
+    }
+    let main = project.active_part;
+    let (x, y) = (project.x_mm, project.y_mm);
+    for extra in extras {
+        let tree = usvg::Tree::from_str(&extra.svg, &svg::options())
+            .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
+        let part = crate::project::Part {
+            name: extra.name,
+            svg: extra.svg,
+            x_mm: x + extra.offset_mm[0] as f32,
+            y_mm: y + extra.offset_mm[1] as f32,
+            width_mm: tree.size().width() * 25.4 / 96.0,
+            height_mm: tree.size().height() * 25.4 / 96.0,
+            steps: extra.steps,
+            ignore_filters: Vec::new(),
+            source_file: None,
+            parametric: extra.parametric,
+            ..project.active()
+        };
+        project.add_part(part);
+    }
+    project.select_part(main);
     Ok(())
 }
 

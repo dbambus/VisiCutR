@@ -311,9 +311,15 @@ und Durchgänge enthält das Format nicht; Java-VisiCut nimmt sie aus seinen
 Profilen für Material und Stärke. Weitere Parametersätze, „Doppelte Linien
 entfernen“ und „Kürzeste Leerfahrten“ (gespeichert als „innen zuerst“) gehen
 dabei verloren; der Hinweis nach dem Export nennt das.
-Parametrische SVG (`.parametric.svg`, `.psvg`) werden mit den Standardwerten
-ihrer Parameter bzw. den in der PLF gespeicherten Werten erzeugt; der Hinweis
-nennt die verwendeten Werte. LaserScript-Dateien (`.ls`) laufen in einer
+Parametrische SVG (`.parametric.svg`, `.psvg`) starten mit den
+Standardwerten ihrer Parameter bzw. den daneben gespeicherten Werten
+(`<datei>.parameters`). Wie in Java-VisiCut zeigt die Seitenleiste für das
+gewählte Teil einen Abschnitt **Parameter** mit einem Feld je Parameter
+(Zahlen mit `min`/`max`, Auswahllisten, Ja/Nein, Text; Beschriftung aus
+`label` bzw. `label_<sprache>`); nach jeder Eingabe wird die Grafik neu
+erzeugt, Lage, Maßstab und Zuordnung bleiben. Vorlage und Werte werden mit
+dem Projekt gespeichert. Teile aus PLF-Dateien behalten ihre gespeicherten
+Werte fest; der Hinweis nennt sie. LaserScript-Dateien (`.ls`) laufen in einer
 abgeschotteten JavaScript-Umgebung ohne Datei- und Netzzugriff mit
 Zeitlimit (5 s); `prompt`-Abfragen erhalten ihren Vorgabewert.
 

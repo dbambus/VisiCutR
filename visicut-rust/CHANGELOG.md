@@ -5,6 +5,10 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
 
 ## Unveröffentlicht
 
+- **Parameter parametrischer Teile einstellen** wie in Java-VisiCut: Für
+  `.psvg`- und `.parametric.svg`-Teile zeigt die Seitenleiste ein Feld je
+  Parameter (mit Grenzen, Auswahllisten und Beschriftungen aus der Vorlage);
+  die Grafik wird bei jeder Eingabe neu erzeugt und bleibt an ihrem Platz.
 - **Mehrstufiges Widerrufen:** Widerrufen und Wiederholen über bis zu 50
   Schritte statt nur einem.
 - **Befehlszeile wie Java-VisiCut:** `--laserdevice`, `--material`,

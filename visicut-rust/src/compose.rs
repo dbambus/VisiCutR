@@ -759,6 +759,7 @@ pub fn add_part(
         raster: project.raster,
         ignore_filters: Vec::new(),
         source_file: None,
+        parametric: None,
     });
     Ok((result, notes))
 }
@@ -785,6 +786,7 @@ pub fn add_files_as_parts(
                 .unwrap_or(imported.svg);
             let (mut next, more) = add_part(&result, &stem, &svg, imported.steps)?;
             next.part_source_file = Some(path.display().to_string());
+            next.part_parametric = imported.parametric;
             Ok((next, imported.warnings, more))
         });
         match appended {
@@ -853,14 +855,70 @@ pub fn update_part(
     Some(Ok((result, notes)))
 }
 
-/// Reads `path` into `part`, keeping its position and scale. Returns whether
-/// the drawing changed and the import warnings.
+/// Reads `path` into `part`, keeping its position and scale. A parametric
+/// part keeps its parameter values. Returns whether the drawing changed and
+/// the import warnings.
 fn refresh_part(
     part: &mut crate::project::Part,
     path: &std::path::Path,
     whole_drawing: bool,
 ) -> Result<(bool, Vec<String>), String> {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let mut imported = crate::import::read_file(path).map_err(|e| format!("{name}: {e}"))?;
+    if let (Some(new), Some(old)) = (&imported.parametric, &part.parametric) {
+        let parametric = crate::project::Parametric {
+            values: old.values.clone(),
+            ..new.clone()
+        };
+        imported = crate::import::render_parametric(&parametric)
+            .map_err(|e| format!("{name}: {e}"))?
+            .0;
+    }
+    let svg = whole_drawing
+        .then(|| crate::svg_import::fit_to_content(&imported.svg))
+        .flatten()
+        .unwrap_or(imported.svg);
+    part.parametric = imported.parametric;
+    if svg == part.svg {
+        return Ok((false, Vec::new()));
+    }
+    replace_drawing(part, svg).map_err(|e| format!("{name}: {e}"))?;
+    let warnings = imported
+        .warnings
+        .into_iter()
+        .map(|w| format!("{name}: {w}"))
+        .collect();
+    Ok((true, warnings))
+}
+
+/// Sets new values for the parameters of the active (parametric) part and
+/// renders it again; position, scale and assignment stay.
+pub fn set_parameters(
+    project: &Project,
+    values: Vec<(String, crate::import::ParameterValue)>,
+) -> Result<(Project, Vec<String>), String> {
+    let parametric = project
+        .part_parametric
+        .as_ref()
+        .ok_or_else(|| tr("Das Teil hat keine Parameter").to_string())?;
+    let (imported, _) = crate::import::render_parametric(&crate::project::Parametric {
+        values,
+        ..parametric.clone()
+    })?;
+    let mut part = project.active();
+    replace_drawing(&mut part, imported.svg)?;
+    part.parametric = imported.parametric;
+    let mut result = project.clone();
+    let mut all = project.all_parts();
+    let index = project.active_part.min(all.len() - 1);
+    all[index] = part;
+    result.set_all_parts(all, index);
+    Ok((result, imported.warnings))
+}
+
+/// Puts a new drawing into `part`: a scaled part keeps its scale, objects
+/// assigned one by one that no longer exist lose their assignment.
+fn replace_drawing(part: &mut crate::project::Part, svg: String) -> Result<(), String> {
     let size_mm = |source: &str| {
         usvg::Tree::from_str(source, &svg::options())
             .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))
@@ -869,15 +927,7 @@ fn refresh_part(
                 (size.width() * 25.4 / 96.0, size.height() * 25.4 / 96.0)
             })
     };
-    let imported = crate::import::read_file(path).map_err(|e| format!("{name}: {e}"))?;
-    let svg = whole_drawing
-        .then(|| crate::svg_import::fit_to_content(&imported.svg))
-        .flatten()
-        .unwrap_or(imported.svg);
-    if svg == part.svg {
-        return Ok((false, Vec::new()));
-    }
-    let (new_w, new_h) = size_mm(&svg).map_err(|e| format!("{name}: {e}"))?;
+    let (new_w, new_h) = size_mm(&svg)?;
     // Eine skalierte Grafik behält ihren Maßstab.
     let (scale_x, scale_y) = size_mm(&part.svg)
         .ok()
@@ -885,18 +935,12 @@ fn refresh_part(
         .map_or((1.0, 1.0), |(w, h)| (part.width_mm / w, part.height_mm / h));
     part.width_mm = new_w * scale_x;
     part.height_mm = new_h * scale_y;
-    // Einzeln zugeordnete Objekte, die es nicht mehr gibt, fallen weg.
     let objects = selection::objects(&svg).map_or(0, |o| o.len());
     for step in &mut part.steps {
         step.objects.retain(|o| *o < objects);
     }
     part.svg = svg;
-    let warnings = imported
-        .warnings
-        .into_iter()
-        .map(|w| format!("{name}: {w}"))
-        .collect();
-    Ok((true, warnings))
+    Ok(())
 }
 
 /// Imports files one after another with [`append`] into the active part.
@@ -2319,6 +2363,46 @@ mod tests {
         let (kept, changed, notes) = reload_parts(&reloaded, false);
         assert_eq!((changed, notes.len()), (0, 1));
         assert_eq!(kept.svg, reloaded.svg);
+    }
+
+    #[test]
+    fn parameters_render_the_part_again_and_survive_a_reload() {
+        use crate::import::ParameterValue;
+        let dir = std::env::temp_dir().join(format!("visicutr-param-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("kiste.psvg");
+        std::fs::write(
+            &file,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="0 0 100 100"><defs><ref param="$breite" default="20"/></defs><rect x="0" y="0" width="{$breite}" height="10" fill="none" stroke="red"/></svg>"#,
+        )
+        .unwrap();
+        let (project, _) =
+            add_files_as_parts(&Project::default(), std::slice::from_ref(&file), false).unwrap();
+        assert!(project.part_parametric.is_some());
+        let mut project = project;
+        project.x_mm = 50.0;
+        let (changed, _) = set_parameters(
+            &project,
+            vec![("breite".into(), ParameterValue::Number(35.0))],
+        )
+        .unwrap();
+        assert!(changed.svg.contains(r#"width="35""#), "{}", changed.svg);
+        assert_eq!(changed.x_mm, 50.0);
+        assert_eq!(
+            changed.part_parametric.as_ref().unwrap().values,
+            [("breite".to_string(), ParameterValue::Number(35.0))]
+        );
+        // Neu laden nimmt die geänderte Vorlage, behält aber die Werte.
+        std::fs::write(
+            &file,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="0 0 100 100"><defs><ref param="$breite" default="20"/></defs><rect x="0" y="0" width="{$breite}" height="20" fill="none" stroke="red"/></svg>"#,
+        )
+        .unwrap();
+        let (reloaded, count, notes) = reload_parts(&changed, false);
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!((count, notes), (1, Vec::<String>::new()));
+        assert!(reloaded.svg.contains(r#"width="35""#) && reloaded.svg.contains(r#"height="20""#));
+        assert!(set_parameters(&Project::default(), Vec::new()).is_err());
     }
 
     #[test]

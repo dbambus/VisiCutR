@@ -25,6 +25,7 @@ mod write;
 mod xml;
 
 pub use mappings::import_templates;
+pub use parametric::{Kind as ParameterKind, Parameter, Value as ParameterValue};
 pub use write::{plf_bytes, write_plf};
 
 use super::{Imported, MAX_FILE_BYTES};
@@ -143,6 +144,19 @@ pub fn read_plf(path: &Path) -> Result<Imported, String> {
             }
         };
         warnings.extend(imported.warnings.iter().map(|w| format!("{name}: {w}")));
+        if let Some(parametric) = &imported.parametric {
+            let values = parametric
+                .values
+                .iter()
+                .map(|(name, value)| format!("{name} = {}", value.display()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            warnings.push(tr!(
+                "{name}: Parameter aus PLF-Dateien sind fest ({values}); zum Ändern die Vorlage selbst öffnen",
+                name = name,
+                values = values
+            ));
+        }
         let transform = match part.transform {
             Some(Ok(transform)) => Some(transform),
             Some(Err(error)) => {
@@ -198,6 +212,7 @@ pub fn read_plf(path: &Path) -> Result<Imported, String> {
         svg,
         warnings,
         steps: translation.steps,
+        parametric: None,
     })
 }
 
@@ -206,6 +221,34 @@ fn is_svg(file: &Path) -> bool {
     file.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("svg") || e.eq_ignore_ascii_case("psvg"))
+}
+
+/// Renders a parametric part with its current values; returns the drawing
+/// (images embedded) and the parameters with their types and limits.
+pub fn render_parametric(
+    parametric: &crate::project::Parametric,
+) -> Result<(Imported, Vec<Parameter>), String> {
+    let rendered = parametric::render(
+        parametric.template.clone(),
+        parametric.psvg,
+        parametric.values.clone(),
+        script::TIME_LIMIT,
+    )
+    .map_err(|e| tr!("Parametrische SVG: {details}", details = e))?;
+    let mut imported =
+        crate::svg_import::embed_external_images(&rendered.svg, Path::new(&parametric.base_dir));
+    let mut warnings = rendered.warnings;
+    warnings.append(&mut imported.warnings);
+    imported.warnings = warnings;
+    imported.parametric = Some(crate::project::Parametric {
+        values: rendered
+            .parameters
+            .iter()
+            .map(|p| (p.name.clone(), p.value.clone()))
+            .collect(),
+        ..parametric.clone()
+    });
+    Ok((imported, rendered.parameters))
 }
 
 pub fn read_parametric_svg(path: &Path) -> Result<Imported, String> {
@@ -234,49 +277,20 @@ pub fn read_parametric_svg(path: &Path) -> Result<Imported, String> {
             )),
         }
     }
-    let rendered = parametric::render(source, psvg, saved, script::TIME_LIMIT)
-        .map_err(|e| tr!("Parametrische SVG: {details}", details = e))?;
-    let embedded = crate::svg_import::embed_external_images(
-        &rendered.svg,
-        path.parent().unwrap_or(Path::new(".")),
-    );
-    warnings.extend(rendered.warnings);
-    if !rendered.parameters.is_empty() {
-        let list = |saved: bool| {
-            rendered
-                .parameters
-                .iter()
-                .filter(|p| p.saved == saved)
-                .map(|p| format!("{} = {}", p.name, p.value.display()))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let (defaults, stored) = (list(false), list(true));
-        let mut details = Vec::new();
-        if !defaults.is_empty() {
-            details.push(tr!(
-                "Standardwerte verwendet ({values}).",
-                values = defaults
-            ));
-        }
-        if !stored.is_empty() {
-            details.push(tr!(
-                "Gespeicherte Werte verwendet ({values}).",
-                values = stored
-            ));
-        }
-        details.push(tr("Andere Werte lassen sich in VisiCutR noch nicht eingeben.").into());
-        warnings.push(tr!(
-            "Parametrische SVG: {details}",
-            details = details.join(" ")
-        ));
-    }
-    warnings.extend(embedded.warnings);
-    Ok(Imported {
-        svg: embedded.svg,
-        warnings,
-        ..Default::default()
-    })
+    let parametric = crate::project::Parametric {
+        template: source,
+        psvg,
+        base_dir: path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .display()
+            .to_string(),
+        values: saved,
+    };
+    let (mut imported, _) = render_parametric(&parametric)?;
+    warnings.append(&mut imported.warnings);
+    imported.warnings = warnings;
+    Ok(imported)
 }
 
 pub fn read_laser_script(path: &Path) -> Result<Imported, String> {
@@ -1162,12 +1176,15 @@ mod tests {
             "{}",
             imported.svg
         );
-        let warning = imported
-            .warnings
-            .iter()
-            .find(|w| w.contains("Standardwerte"))
-            .unwrap();
-        assert!(warning.contains("breite = 20"), "{warning}");
+        // Die Werte lassen sich später ändern.
+        let parametric = imported.parametric.unwrap();
+        assert_eq!(
+            parametric.values,
+            [("breite".to_string(), ParameterValue::Number(20.0))]
+        );
+        let (_, parameters) = render_parametric(&parametric).unwrap();
+        assert_eq!(parameters[0].label, "Breite");
+        assert_eq!(parameters[0].kind, Some(ParameterKind::Number));
     }
 
     #[test]

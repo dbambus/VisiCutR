@@ -5,6 +5,7 @@ mod form;
 mod jobs_ui;
 mod object_bar;
 mod open_files;
+mod parameters_ui;
 mod preview_ui;
 mod remnant_ui;
 mod settings;
@@ -473,6 +474,8 @@ struct VisiCutR {
     /// Lasercutter, Material und Senden aus der Befehlszeile; warten, bis
     /// die Dateien geöffnet sind.
     launch_options: Option<instance::Options>,
+    /// Felder für die Parameter eines parametrischen Teils.
+    parameters: parameters_ui::ParametersUi,
     /// Stand der Inkscape-Erweiterung (Einstellungen), erst bei Bedarf geprüft.
     inkscape: Option<inkscape::Status>,
     #[cfg(feature = "screenshot")]
@@ -552,6 +555,7 @@ impl VisiCutR {
             instance: None,
             handed_over: None,
             launch_options: None,
+            parameters: Default::default(),
             inkscape: None,
             #[cfg(feature = "screenshot")]
             capture: None,
@@ -900,6 +904,7 @@ impl VisiCutR {
         self.project.svg = source;
         self.project.part_name = name.clone();
         self.project.part_source_file = None;
+        self.project.part_parametric = None;
         self.project.name = name;
         self.project.width_mm = preview.width_mm;
         self.project.height_mm = preview.height_mm;
@@ -926,6 +931,7 @@ impl VisiCutR {
         let name = path.file_stem().unwrap_or_default().to_string_lossy();
         self.import(ctx, imported.svg, name.into(), imported.steps)?;
         self.project.part_source_file = Some(path.display().to_string());
+        self.project.part_parametric = imported.parametric;
         self.status = tr!(
             "{file} importiert · Originalmaße übernommen",
             file = path.file_name().unwrap_or_default().to_string_lossy()
@@ -1340,6 +1346,22 @@ impl VisiCutR {
         } else {
             tr!("{count} Teile neu geladen", count = changed)
         };
+    }
+
+    /// Neue Werte für das parametrische Teil: Grafik neu erzeugen, Lage,
+    /// Maßstab und Zuordnung bleiben.
+    fn set_parameters(
+        &mut self,
+        ctx: &egui::Context,
+        values: Vec<(String, visicut_core::import::ParameterValue)>,
+    ) {
+        match visicut_core::compose::set_parameters(&self.project, values) {
+            Ok((project, notes)) => self.apply_composed(ctx, project, notes),
+            Err(e) => {
+                self.parameters.reset();
+                self.report(e);
+            }
+        }
     }
 
     fn apply_composed(&mut self, ctx: &egui::Context, project: Project, notes: Vec<String>) {
@@ -2454,6 +2476,14 @@ impl VisiCutR {
         let mut clicked = None;
         if self.project.has_artwork() {
             form::section(ui, tr("Teile"), |ui| self.parts_panel(ui, &mut clicked));
+        }
+        if let Some(parametric) = self.project.part_parametric.clone() {
+            let values = form::section(ui, tr("Parameter"), |ui| {
+                self.parameters.show(ui, &parametric)
+            });
+            if let Some(values) = values {
+                self.set_parameters(ui.ctx(), values);
+            }
         }
         form::section(ui, tr("Material"), |ui| {
             self.jobs.material(ui, &mut self.project, &mut self.dirty);

@@ -26,6 +26,8 @@ pub struct Imported {
     pub warnings: Vec<String>,
     /// Processing steps from the mappings of a VisiCut project (PLF); empty otherwise.
     pub steps: Vec<crate::project::JobStep>,
+    /// Template and values of a parametric SVG, whose parameters stay editable.
+    pub parametric: Option<crate::project::Parametric>,
 }
 
 /// Reads an SVG file (≤ 25 MB) and embeds its external images.

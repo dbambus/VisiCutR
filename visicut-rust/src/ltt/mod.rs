@@ -1615,6 +1615,7 @@ mod tests {
             raster: RasterSettings::default(),
             ignore_filters: Vec::new(),
             source_file: None,
+            parametric: None,
         });
         assert_eq!(p.part_count(), 2);
         assert_eq!(p.active_part, 1);

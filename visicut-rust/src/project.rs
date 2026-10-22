@@ -58,6 +58,9 @@ pub struct Project {
     /// File the active part was imported from, for „Neu laden“.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part_source_file: Option<String>,
+    /// Template and values when the active part is a parametric SVG.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_parametric: Option<Parametric>,
     /// Position of the active part in the list of all parts.
     #[serde(default)]
     pub active_part: usize,
@@ -91,6 +94,23 @@ pub struct Part {
     /// File the part was imported from, for „Neu laden“.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_file: Option<String>,
+    /// Template and values of a parametric SVG (VisiCut's ParametricPlfPart).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parametric: Option<Parametric>,
+}
+
+/// A parametric SVG template with the current parameter values; the part's
+/// drawing is rendered from it whenever a value changes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Parametric {
+    pub template: String,
+    /// `.psvg` syntax (`{expression}` in attributes) instead of `.parametric.svg`.
+    pub psvg: bool,
+    /// Folder for relative image links of the template.
+    #[serde(default)]
+    pub base_dir: String,
+    pub values: Vec<(String, crate::import::ParameterValue)>,
 }
 
 /// Engrave shift table of the FAU device (`engraveShiftList`) for 10 %, 20 %,
@@ -345,6 +365,8 @@ struct ProjectFile {
     #[serde(default)]
     part_source_file: Option<String>,
     #[serde(default)]
+    part_parametric: Option<Parametric>,
+    #[serde(default)]
     active_part: usize,
     #[serde(default)]
     parts: Vec<Part>,
@@ -398,6 +420,7 @@ impl TryFrom<ProjectFile> for Project {
             machine: file.machine,
             part_name: file.part_name,
             part_source_file: file.part_source_file,
+            part_parametric: file.part_parametric,
             active_part: file.active_part.min(file.parts.len()),
             parts: file.parts,
         })
@@ -481,6 +504,7 @@ impl Default for Project {
             machine: MachineSettings::default(),
             part_name: String::new(),
             part_source_file: None,
+            part_parametric: None,
             active_part: 0,
             parts: Vec::new(),
         }
@@ -561,6 +585,7 @@ impl Project {
             raster: self.raster,
             ignore_filters: self.ignore_filters.clone(),
             source_file: self.part_source_file.clone(),
+            parametric: self.part_parametric.clone(),
         }
     }
 
@@ -579,6 +604,7 @@ impl Project {
         self.raster = part.raster;
         self.ignore_filters = part.ignore_filters;
         self.part_source_file = part.source_file;
+        self.part_parametric = part.parametric;
     }
 
     /// All parts in list order (empty without artwork).
@@ -600,6 +626,7 @@ impl Project {
                 steps: Vec::new(),
                 ignore_filters: Vec::new(),
                 source_file: None,
+                parametric: None,
                 ..self.active()
             };
             self.set_active(empty);
@@ -679,6 +706,7 @@ impl Project {
             machine: self.machine.clone(),
             part_name: String::new(),
             part_source_file: None,
+            part_parametric: None,
             active_part: 0,
             parts: Vec::new(),
         };

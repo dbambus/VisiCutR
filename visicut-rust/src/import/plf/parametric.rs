@@ -49,7 +49,7 @@ function __status(index, size, current) {
 }
 "#;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Value {
     Number(f64),
     Integer(i64),
@@ -80,10 +80,28 @@ impl Value {
     }
 }
 
+/// Type of a parameter (`type` attribute of `<ref>`); decides the input field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Number,
+    Integer,
+    Boolean,
+    Text,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Parameter {
     pub name: String,
+    /// `label_<language>` or `label`, otherwise the name (like VisiCut).
+    pub label: String,
     pub value: Value,
     pub saved: bool,
+    /// `None` for unknown types, which cannot be edited.
+    pub kind: Option<Kind>,
+    /// Allowed values from `type="Integer(1,2,3)"`; empty allows any value.
+    pub options: Vec<Value>,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
 }
 
 pub struct Rendered {
@@ -209,30 +227,74 @@ impl Renderer<'_> {
                     }),
                 }
             };
-            let value = match base {
-                "Double" => Value::Number(number(&default)?),
-                "Integer" => Value::Integer(number(&default)?.trunc() as i64),
-                "Boolean" => Value::Boolean(
-                    default
-                        .as_deref()
-                        .is_some_and(|d| d.trim().eq_ignore_ascii_case("true")),
+            let (value, parameter_kind) = match base {
+                "Double" => (Value::Number(number(&default)?), Some(Kind::Number)),
+                "Integer" => (
+                    Value::Integer(number(&default)?.trunc() as i64),
+                    Some(Kind::Integer),
                 ),
-                "String" => Value::Text(default.unwrap_or_default()),
+                "Boolean" => (
+                    Value::Boolean(
+                        default
+                            .as_deref()
+                            .is_some_and(|d| d.trim().eq_ignore_ascii_case("true")),
+                    ),
+                    Some(Kind::Boolean),
+                ),
+                "String" => (Value::Text(default.unwrap_or_default()), Some(Kind::Text)),
                 _ => {
                     self.warnings.push(tr!(
                         "Parameter „{name}“ hat den unbekannten Typ „{kind}“",
                         name = name,
                         kind = kind
                     ));
-                    Value::Null
+                    (Value::Null, None)
                 }
             };
+            // `type="Integer(1,2,4)"`: only these values.
+            let options = kind
+                .find('(')
+                .filter(|_| kind.trim_end().ends_with(')'))
+                .map(|open| &kind.trim_end()[open + 1..kind.trim_end().len() - 1])
+                .map(|list| {
+                    list.split(',')
+                        .filter_map(|item| match parameter_kind {
+                            Some(Kind::Number) => item.trim().parse().ok().map(Value::Number),
+                            Some(Kind::Integer) => item.trim().parse().ok().map(Value::Integer),
+                            Some(Kind::Text) => Some(Value::Text(item.to_string())),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let limit = |attribute: &str| {
+                node.attribute(attribute)
+                    .and_then(|v| v.trim().parse::<f64>().ok())
+                    .filter(|v| v.is_finite())
+            };
+            let language = crate::i18n::language().code();
+            let label = node
+                .attributes()
+                .find(|a| {
+                    a.name()
+                        .strip_prefix("label_")
+                        .is_some_and(|code| code.split(['-', '_']).next() == Some(language))
+                })
+                .map(|a| a.value())
+                .or_else(|| node.attribute("label"))
+                .unwrap_or(param)
+                .to_string();
             match result.iter_mut().find(|p| p.name == name) {
                 Some(existing) => existing.value = value,
                 None => result.push(Parameter {
                     name,
+                    label,
                     value,
                     saved: false,
+                    kind: parameter_kind,
+                    options,
+                    min: limit("min"),
+                    max: limit("max"),
                 }),
             }
         }
@@ -873,6 +935,30 @@ mod tests {
 
     fn render_ok(source: &str, psvg: bool) -> Rendered {
         render(source.into(), psvg, Vec::new(), script::TIME_LIMIT).unwrap()
+    }
+
+    #[test]
+    fn reads_labels_options_and_limits() {
+        let source = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:th="http://www.thymeleaf.org" width="10mm" height="10mm"><defs><ref param="n" type="Integer(1,2,4)" default="2" label="Anzahl" label_en-US="Count"/><ref param="d" min="1" max="9.5" default="3" label="Tiefe"/><ref param="t" type="String(a,b)" default="a"/></defs></svg>"#;
+        let rendered = render_ok(source, false);
+        let [n, d, t] = &rendered.parameters[..] else {
+            panic!("{}", rendered.parameters.len());
+        };
+        assert_eq!((n.label.as_str(), n.kind), ("Anzahl", Some(Kind::Integer)));
+        assert_eq!(
+            n.options,
+            [Value::Integer(1), Value::Integer(2), Value::Integer(4)]
+        );
+        assert_eq!(
+            (d.kind, d.min, d.max),
+            (Some(Kind::Number), Some(1.0), Some(9.5))
+        );
+        assert!(d.options.is_empty());
+        assert_eq!(t.label, "t");
+        assert_eq!(
+            t.options,
+            [Value::Text("a".into()), Value::Text("b".into())]
+        );
     }
 
     #[test]

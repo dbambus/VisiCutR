@@ -3879,13 +3879,7 @@ impl VisiCutR {
                 self.project.port
             ));
             ui.weak(tr!(
-                "Aufträge: {jobs} · ca. {time}",
-                jobs = prepared
-                    .jobs
-                    .iter()
-                    .map(|job| job.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" › "),
+                "Gesamtzeit ca. {time}",
                 time = workspace::duration(prepared.estimated_seconds)
             ));
         });
@@ -3911,12 +3905,27 @@ impl VisiCutR {
                                     preview_ui::operation_color(step.operation),
                                 );
                                 ui.vertical(|ui| {
-                                    ui.strong(format!(
-                                        "{}. {}",
-                                        index + 1,
-                                        jobs_ui::operation_title(step.operation)
-                                    ))
-                                    .on_hover_text(&step.description);
+                                    // Die Datei, die am Gerät erscheint.
+                                    let job = prepared
+                                        .jobs
+                                        .iter()
+                                        .find(|job| job.operation == step.operation)
+                                        .or(prepared
+                                            .jobs
+                                            .first()
+                                            .filter(|_| prepared.jobs.len() == 1));
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 5.0;
+                                        ui.strong(format!(
+                                            "{}. {}",
+                                            index + 1,
+                                            jobs_ui::operation_title(step.operation)
+                                        ))
+                                        .on_hover_text(&step.description);
+                                        if let Some(job) = job {
+                                            ui.weak(format!("· {}", job.name));
+                                        }
+                                    });
                                     form::caption(ui, workspace::step_parameters(step));
                                 });
                                 ui.with_layout(

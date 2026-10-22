@@ -3,7 +3,10 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
-## Unveröffentlicht
+## 1.0.0-rc.2 – 22.10.2026
+
+Zweiter Release-Kandidat für VisiCutR 1.0 mit Korrekturen aus den ersten
+Tests. Der Vergleich mit Java-VisiCut steht bei 1.0.0-rc.1.
 
 - **Werkzeugfenster wie die Sende-Bestätigung:** Text, Form, Schild, Kopien
   und Nesting mit Rahmen in der Akzentfarbe, Titel mit Symbol, Feldern wie in

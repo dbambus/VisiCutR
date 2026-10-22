@@ -3749,19 +3749,40 @@ impl VisiCutR {
         }
         if let Some(prepared) = self.confirm_send.take() {
             let mut send = false;
-            let modal = egui::Modal::new(egui::Id::new("send")).show(ctx, |ui| {
-                self.send_summary(ui, &prepared);
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    send = ui.button(tr("Senden")).clicked();
-                    if ui.button(tr("Abbrechen")).clicked() {
-                        ui.close();
-                    }
+            let mut cancel = false;
+            // Wie der Hinweis: Rahmen ein paar Punkte innerhalb des
+            // Fensterrands, in der Akzentfarbe.
+            let outer = egui::Frame::popup(&ctx.style()).inner_margin(5.0);
+            let modal = egui::Modal::new(egui::Id::new("send"))
+                .frame(outer)
+                .show(ctx, |ui| {
+                    egui::Frame::new()
+                        .stroke(egui::Stroke::new(2.0, form::ACCENT))
+                        .corner_radius(7.0)
+                        .inner_margin(egui::Margin::symmetric(18, 14))
+                        .show(ui, |ui| {
+                            ui.set_width(460.0);
+                            self.send_summary(ui, &prepared);
+                            ui.add_space(12.0);
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    send = ui
+                                        .add(form::primary_button(&format!("✈ {}", tr("Senden"))))
+                                        .clicked();
+                                    cancel = ui
+                                        .add(
+                                            egui::Button::new(tr("Abbrechen"))
+                                                .min_size(egui::vec2(0.0, 28.0)),
+                                        )
+                                        .clicked();
+                                },
+                            );
+                        });
                 });
-            });
             if send {
                 self.transmit(prepared);
-            } else if !modal.should_close() {
+            } else if !cancel && !modal.should_close() {
                 self.confirm_send = Some(prepared);
             }
         }
@@ -3831,53 +3852,81 @@ impl VisiCutR {
     }
 
     fn send_summary(&self, ui: &mut egui::Ui, prepared: &PreparedJob) {
-        ui.set_max_width(560.0);
         let count = prepared.jobs.len();
-        ui.heading(if count == 1 {
-            tr!("{count} Auftrag an den Lasercutter senden?", count = count)
-        } else {
-            tr!("{count} Aufträge an den Lasercutter senden?", count = count)
+        ui.vertical_centered(|ui| {
+            let size = 20.0;
+            let mut title = egui::text::LayoutJob::default();
+            title.append(
+                "✈  ",
+                0.0,
+                egui::TextFormat::simple(egui::FontId::proportional(size), form::ACCENT),
+            );
+            title.append(
+                &if count == 1 {
+                    tr!("{count} Auftrag an den Lasercutter senden?", count = count)
+                } else {
+                    tr!("{count} Aufträge an den Lasercutter senden?", count = count)
+                },
+                0.0,
+                egui::TextFormat::simple(form::bold(size), ui.visuals().strong_text_color()),
+            );
+            ui.label(title);
+            ui.add_space(4.0);
+            ui.weak(format!(
+                "{} · {}:{}",
+                self.devices.device().name,
+                self.project.hostname,
+                self.project.port
+            ));
+            ui.weak(tr!(
+                "Aufträge: {jobs} · ca. {time}",
+                jobs = prepared
+                    .jobs
+                    .iter()
+                    .map(|job| job.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" › "),
+                time = workspace::duration(prepared.estimated_seconds)
+            ));
         });
-        ui.label(format!(
-            "{} · {}:{}",
-            self.devices.device().name,
-            self.project.hostname,
-            self.project.port
-        ));
-        ui.label(tr!(
-            "Aufträge: {jobs} · ca. {time}",
-            jobs = prepared
-                .jobs
-                .iter()
-                .map(|job| job.name.as_str())
-                .collect::<Vec<_>>()
-                .join(" › "),
-            time = workspace::duration(prepared.estimated_seconds)
-        ));
-        ui.add_space(6.0);
+        ui.add_space(12.0);
         egui::ScrollArea::vertical()
             .max_height(260.0)
             .show(ui, |ui| {
-                egui::Grid::new("send-steps")
-                    .num_columns(3)
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.strong(tr("Schritt"));
-                        ui.strong(tr("Parameter"));
-                        ui.strong(tr("Zeit"));
-                        ui.end_row();
-                        for (index, step) in prepared.steps.iter().enumerate() {
-                            ui.label(format!(
-                                "{}. {}",
-                                index + 1,
-                                jobs_ui::operation_title(step.operation)
-                            ))
-                            .on_hover_text(&step.description);
-                            ui.label(workspace::step_parameters(step));
-                            ui.label(workspace::duration(step.estimated_seconds));
-                            ui.end_row();
-                        }
-                    });
+                for (index, step) in prepared.steps.iter().enumerate() {
+                    egui::Frame::new()
+                        .fill(egui::Color32::from_gray(244))
+                        .corner_radius(6.0)
+                        .inner_margin(egui::Margin::symmetric(12, 8))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                let (dot, _) = ui.allocate_exact_size(
+                                    egui::vec2(10.0, 10.0),
+                                    egui::Sense::hover(),
+                                );
+                                ui.painter().circle_filled(
+                                    dot.center(),
+                                    4.0,
+                                    preview_ui::operation_color(step.operation),
+                                );
+                                ui.vertical(|ui| {
+                                    ui.strong(format!(
+                                        "{}. {}",
+                                        index + 1,
+                                        jobs_ui::operation_title(step.operation)
+                                    ))
+                                    .on_hover_text(&step.description);
+                                    form::caption(ui, workspace::step_parameters(step));
+                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| ui.label(workspace::duration(step.estimated_seconds)),
+                                );
+                            });
+                        });
+                    ui.add_space(4.0);
+                }
             });
         for warning in &prepared.warnings {
             ui.colored_label(WARNING, format!("⚠ {warning}"));

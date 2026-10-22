@@ -27,17 +27,34 @@ pub fn current_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// `v1.2.3` or `1.2.3` (a suffix such as `-beta` is ignored) as numbers.
-fn parse(version: &str) -> Option<[u64; 3]> {
-    let core = version.trim().trim_start_matches(['v', 'V']);
-    let core = core.split(['-', '+']).next()?;
+/// Comparable form of `v1.2.3` or `1.2.3-rc.1`: the numbers, then whether
+/// it is a final release (it follows its pre-releases), then the number at the
+/// end of the pre-release suffix (`rc.2` after `rc.1`).
+fn parse(version: &str) -> Option<([u64; 3], bool, u64)> {
+    let version = version.trim().trim_start_matches(['v', 'V']);
+    let version = version.split('+').next()?;
+    let (core, pre) = match version.split_once('-') {
+        Some((core, pre)) => (core, Some(pre)),
+        None => (version, None),
+    };
     let mut parts = core.split('.').map(|p| p.parse::<u64>().ok());
     let numbers = [
         parts.next()??,
         parts.next().flatten().unwrap_or(0),
         parts.next().flatten().unwrap_or(0),
     ];
-    Some(numbers)
+    let pre_number = pre.map_or(0, |pre| {
+        let digits: String = pre
+            .chars()
+            .rev()
+            .take_while(char::is_ascii_digit)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        digits.parse().unwrap_or(0)
+    });
+    Some((numbers, pre.is_none(), pre_number))
 }
 
 /// Whether `latest` is a higher version than `current`.
@@ -119,6 +136,12 @@ mod tests {
         assert!(!is_newer("v0.19.0", "0.19.0"));
         assert!(!is_newer("v0.9.0", "0.19.0"));
         assert!(!is_newer("nightly", "0.19.0"));
+        // Vorabversionen liegen vor der fertigen Version.
+        assert!(is_newer("v1.0.0", "1.0.0-rc.1"));
+        assert!(is_newer("v1.0.0-rc.2", "1.0.0-rc.1"));
+        assert!(is_newer("v1.0.0-rc.1", "0.20.1"));
+        assert!(!is_newer("v1.0.0-rc.1", "1.0.0"));
+        assert!(!is_newer("v1.0.0-rc.1", "1.0.0-rc.1"));
     }
 
     #[test]

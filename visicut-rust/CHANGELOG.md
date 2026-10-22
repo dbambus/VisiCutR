@@ -3,7 +3,48 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
-## Unveröffentlicht
+## 1.0.0-rc.1 – 22.10.2026
+
+Erster Release-Kandidat für VisiCutR 1.0, die Rust-Neuentwicklung von
+VisiCut für den LTT iLaser 4000 (Windows, Linux, macOS, ohne Java). Bitte am
+Gerät erproben und Fehler über **Hilfe → Fehler melden …** melden.
+
+### Gegenüber Java-VisiCut
+
+**Wie in Java:** Import von SVG, parametrischen SVG (`.psvg`,
+`.parametric.svg`) mit Parameterfeldern, PLF-Projekten, LaserScript, DXF, EPS,
+PDF, G-Code und Bildern; Zuordnung Gesamt, Einzeln (Objekte) und Regeln
+(Farben, Ebenen, Attribute) mit Ignorieren; Materialbibliothek mit Laserwerten
+je Stärke; mehrere Parametersätze je Schritt; Gravur, 3D-Gravur, Markieren,
+Schneiden mit „Kontur“; Rotationseinheit; Kamera mit Kalibrierung und
+VisiCam; Bitmap-Vektorisierung; Inkscape-Erweiterung; Befehlszeile
+(`--laserdevice`, `--material`, `--thickness`, `--execute`); eine Instanz;
+Labor-Einstellungen herunterladen und beim Start auf neue Fassungen prüfen;
+PLF-Export für Java-VisiCut. Die LTT-Aufträge sind in der Reihenfolge
+„Klassisch“ byte-gleich mit Java: 172 von 249 Grenzfällen identisch, die
+übrigen Abweichungen sind in `scripts/java-parity/AUDIT-2026-10-21.md`
+begründet.
+
+**Nur in VisiCutR:** Schnittreihenfolge „Kürzeste Leerfahrten“ (Standard) und
+„Doppelte Linien entfernen“; Gravurauflösung je Schritt; Text, Formen und
+Schilder ohne Inkscape; Kopien im Raster und Nesting (keine, 90° oder freie
+Drehung); Reststück-Erkennung im Kamerabild; mehrere Teile mit Anfassern,
+Bezugspunkt, Drehen und Spiegeln; „Neu laden“ aller Teile und Aktualisieren
+aus Inkscape mit gleicher Lage und Zuordnung; mehrstufiges Widerrufen;
+eigene Zuordnungs-Vorlagen; ungesicherte Stände ohne Rückfrage; Zeitschätzung
+mit Zeitslider; Zeilenversatz-Kalibrierung; Absicherung gegen übernommene
+Schneidwerte ohne Materialprofil; fünf Sprachen; native Programme für
+Windows, Linux und macOS mit Update-Hinweis.
+
+**Anders als in Java:** Laserwerte und Rastereinstellungen gehören zum
+Material und zum Schritt, statt getrennter Laserprofile; gesendet wird immer
+erst nach Bestätigung im Fenster, auch mit `--execute`; `--mapping` wird wie
+in Java nicht unterstützt.
+
+**Nicht enthalten:** andere Lasercutter als der LTT iLaser 4000 (Epilog,
+GRBL, Ruida …); das Kamerabild als Grafik ins Projekt übernehmen.
+
+### Neu seit 0.20.1
 
 - **Parametrische Teile in PLF-Dateien einstellbar:** Sie werden beim
   Öffnen eigene Teile an ihrer Stelle, mit Parametern in der Seitenleiste;
@@ -38,6 +79,12 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
   installieren.
 - **Zoom 1:1** (⌘1/Strg+1, Knopf „1:1“): Originalgröße bei 96 dpi; Zoom
   jetzt bis 800 %.
+- **Sende-Bestätigung** im Stil der Hinweise: Gerät und Gesamtzeit oben, je
+  Schritt Verfahren, Werte, Zeit und die Datei, die am Gerät erscheint.
+- **Lesbarer:** Erläuterungen in Fließtextgröße; „1 Auftrag“ statt
+  „1 Einzelaufträge“.
+- **Update-Prüfung** kennt Vorabversionen: Wer einen Release-Kandidaten nutzt,
+  bekommt die fertige Version angeboten.
 
 ## 0.20.1 – 22.10.2026
 

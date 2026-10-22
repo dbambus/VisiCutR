@@ -1002,12 +1002,47 @@ impl VisiCutR {
         if !options.is_empty() {
             self.launch_options = Some(options);
         }
+        if request.update && !self.busy() {
+            request.files = self.update_parts(ctx, request.files);
+            if request.files.is_empty() {
+                return;
+            }
+        }
         match <[PathBuf; 1]>::try_from(request.files) {
             Ok([path]) if !request.add => self.request(ctx, Replace::Open(path)),
             Ok(files) => self.drop_files(ctx, files.into()),
             Err(files) if !files.is_empty() => self.drop_files(ctx, files),
             Err(_) => {}
         }
+    }
+
+    /// Erneut aus Inkscape gesendete Zeichnungen: Gibt es ein Teil gleichen
+    /// Namens, wird nur dessen Grafik ersetzt (Lage, Maßstab und Zuordnung
+    /// bleiben). Liefert die übrigen Dateien.
+    fn update_parts(&mut self, ctx: &egui::Context, files: Vec<PathBuf>) -> Vec<PathBuf> {
+        let mut rest = Vec::new();
+        let mut project = self.project.clone();
+        let mut updated = Vec::new();
+        let mut notes = Vec::new();
+        for path in files {
+            match visicut_core::compose::update_part(&project, &path, self.fit_policy == Some(true))
+            {
+                Some(Ok((next, more))) => {
+                    project = next;
+                    notes.extend(more);
+                    updated.push(file_name(&path));
+                }
+                Some(Err(e)) => notes.push(e),
+                None => rest.push(path),
+            }
+        }
+        if !updated.is_empty() {
+            self.apply_composed(ctx, project, notes);
+            self.status = tr!("Aktualisiert: {files}", files = updated.join(", "));
+        } else if !notes.is_empty() {
+            self.report(notes.join("\n"));
+        }
+        rest
     }
 
     /// Wendet Lasercutter, Material und Dicke aus der Befehlszeile an; mit

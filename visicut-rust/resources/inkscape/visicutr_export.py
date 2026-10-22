@@ -197,7 +197,9 @@ def prepare(source, ids, target):
 def launch(visicutr, add, path):
     """Startet VisiCutR losgelöst von Inkscape. Läuft es schon, gibt der neue
     Aufruf die Datei weiter und endet sofort; Fehler meldet Inkscape."""
-    command = [visicutr] + (["--add"] if add else []) + ["--", path]
+    # --update: Ist die Zeichnung schon ein Teil, ersetzt VisiCutR nur dessen
+    # Grafik; Lage und Zuordnung bleiben.
+    command = [visicutr, "--update"] + (["--add"] if add else []) + ["--", path]
     # Fehlerausgabe in eine Datei: eine Pipe bräche nach dem Ende dieses
     # Skripts und die Oberfläche könnte nicht mehr schreiben.
     log_path = os.path.join(os.path.dirname(path), "visicutr.log")

@@ -28,6 +28,10 @@ pub struct Request {
     pub add: bool,
     /// Absolute Pfade; leer holt nur das Fenster nach vorn.
     pub files: Vec<PathBuf>,
+    /// Gibt es schon ein Teil mit dem Namen der Datei, nur dessen Grafik
+    /// ersetzen (`--update`, von der Inkscape-Erweiterung).
+    #[serde(default)]
+    pub update: bool,
     /// Lasercutter, Material und Senden wie in Java-VisiCut.
     #[serde(default)]
     pub options: Options,
@@ -78,6 +82,7 @@ impl Launch {
 pub const USAGE: &str = "Aufruf: visicutr [OPTIONEN] [DATEI …] | visicutr --demo | visicutr --version\n  \
 DATEI                 Projekt oder Grafik öffnen (mehrere werden als Teile hinzugefügt)\n  \
 --add                 Grafiken als Teile zum offenen Projekt hinzufügen\n  \
+--update              Teile gleichen Namens aktualisieren statt neu anzulegen\n  \
 --laserdevice NAME    Lasercutter wählen\n  \
 --material NAME       Material aus der Bibliothek wählen, z. B. \"Acrylglas\"\n  \
 --thickness MM        Materialdicke in mm, z. B. 3 oder 2.5\n  \
@@ -102,6 +107,7 @@ pub fn parse(arguments: impl IntoIterator<Item = String>, cwd: &Path) -> Result<
         match argument.as_str() {
             "--" => only_files = true,
             "--add" => launch.request.add = true,
+            "--update" => launch.request.update = true,
             "--laserdevice" => options.device = Some(value("--laserdevice")?),
             "--material" => options.material = Some(value("--material")?),
             "--thickness" => {
@@ -358,7 +364,10 @@ mod tests {
         assert!(version.print.unwrap().starts_with("VisiCutR "));
         // Ältere Instanzen schicken keine Optionen mit.
         let old: Request = serde_json::from_str(r#"{"add":false,"files":[]}"#).unwrap();
-        assert!(old.options.is_empty());
+        assert!(old.options.is_empty() && !old.update);
+        let inkscape = parse(args(&["--update", "--add", "--", "a.svg"]), Path::new("/t")).unwrap();
+        assert!(inkscape.request.update && inkscape.request.add);
+        assert_eq!(inkscape.request.files, [PathBuf::from("/t/a.svg")]);
     }
 
     #[test]
@@ -385,6 +394,7 @@ mod tests {
         let request = Request {
             add: true,
             files: vec![PathBuf::from("/tmp/ä b.svg")],
+            update: true,
             options: Options {
                 material: Some("Pappel".into()),
                 ..Options::default()

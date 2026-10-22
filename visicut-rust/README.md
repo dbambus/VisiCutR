@@ -123,6 +123,8 @@ legt das Skript Menüeintrag, MIME-Typen (`application/x-visicutr-project`,
    **Datei → Neu laden** (⌘R/Strg+R) liest die Dateien aller Teile erneut
    ein, etwa nach einer Änderung in Inkscape; Lage, Maßstab und Zuordnung
    bleiben, in VisiCutR geänderte Objekte werden ersetzt (⌘Z holt sie zurück).
+   Schickt die Inkscape-Erweiterung eine Zeichnung erneut, aktualisiert sie
+   das Teil gleichen Namens ebenso, statt ein neues anzulegen.
    **Teil duplizieren** legt eine versetzte Kopie an, **Löschen** entfernt das
    gewählte Teil. Beim Senden werden alle Teile zusammengeführt, je Verfahren
    ein LTT-Auftrag; die Vorschau zeigt alle Teile. Widerrufen nimmt das ganze
@@ -364,6 +366,7 @@ haben eigene Instanzen.
 ```sh
 visicutr zeichnung.svg          # öffnen (ersetzt das Projekt)
 visicutr --add teil1.svg teil2.dxf  # als Teile hinzufügen
+visicutr --update --add teil1.svg   # Teil „teil1“ aktualisieren, sonst hinzufügen
 visicutr --demo                 # Beispiel, immer in einem neuen Fenster
 visicutr --version              # Version ausgeben
 visicutr --laserdevice "LTT iLaser 4000" --material Pappel --thickness 3 teil.svg

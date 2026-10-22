@@ -692,6 +692,7 @@
   "Datei hinzufügen …": "Ajouter un fichier …",
   "Gilt für das gewählte Teil „{name}“.": "S'applique à la pièce sélectionnée « {name} ».",
   "Grafiken als Teile hinzufügen": "Ajouter des graphiques comme pièces",
+  "Aktualisiert: {files}": "Mis à jour : {files}",
   "Neu laden": "Recharger",
   "Neu laden: Dateien unverändert": "Recharger : fichiers inchangés",
   "Ein Teil neu geladen": "Une pièce rechargée",

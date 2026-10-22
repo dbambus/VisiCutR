@@ -15,6 +15,11 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
 - **Neu laden** (Datei-Menü, ⌘R/Strg+R): Teile merken sich ihre Datei und
   lassen sich nach Änderungen etwa in Inkscape neu einlesen; Lage, Maßstab und
   Zuordnung bleiben.
+- **Aus Inkscape aktualisieren:** Schickt die Inkscape-Erweiterung eine
+  Zeichnung, die schon als Teil gleichen Namens im Projekt liegt, ersetzt
+  VisiCutR nur dessen Grafik; Lage, Maßstab und Zuordnung bleiben (neue
+  Option `--update`). Die Erweiterung unter Einstellungen → Allgemein neu
+  installieren.
 - **Zoom 1:1** (⌘1/Strg+1, Knopf „1:1“): Originalgröße bei 96 dpi; Zoom
   jetzt bis 800 %.
 

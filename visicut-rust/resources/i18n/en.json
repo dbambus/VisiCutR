@@ -692,6 +692,7 @@
   "Datei hinzufügen …": "Add file …",
   "Gilt für das gewählte Teil „{name}“.": "Applies to the selected part “{name}”.",
   "Grafiken als Teile hinzufügen": "Add graphics as parts",
+  "Aktualisiert: {files}": "Updated: {files}",
   "Neu laden": "Reload",
   "Neu laden: Dateien unverändert": "Reload: files unchanged",
   "Ein Teil neu geladen": "One part reloaded",

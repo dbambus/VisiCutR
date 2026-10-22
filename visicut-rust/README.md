@@ -441,6 +441,29 @@ Das bisherige Motiv bleibt dabei unverändert als eingebettetes SVG erhalten,
 Objektnummern und Regeln bleiben gültig. Ein SVG mit DTD-Entitäten
 (manche Illustrator-Dateien) lässt sich nicht erweitern.
 
+## Drucken und Lasern mit Schnittmarken
+
+Ein gedrucktes Motiv lässt sich passgenau ausschneiden:
+
+1. **Datei → Druckvorlage mit Schnittmarken …** legt alle Teile mittig auf
+   ein A4-Blatt (Druckfläche 190 × 217 mm) und setzt drei Marken in die Ecken
+   oben links, oben rechts und unten links; die vierte Ecke bleibt frei, so
+   ist die Lage des Blatts eindeutig. Das PDF in Originalgröße (100 %)
+   drucken. Das Projekt merkt sich, wo die Marken zu den Teilen liegen.
+2. Das Blatt mit der bedruckten Seite nach oben irgendwo aufs Bett legen.
+3. **An Schnittmarken ausrichten** (Knopf neben „Kamera“) holt ein neues
+   Kamerabild, findet die Marken (Ringe mit Punkt wie VisiCams Passmarken;
+   Passmarken am Bett zählen nicht) und dreht und verschiebt alle Teile so,
+   dass sie auf dem Druck liegen; ein Maßstabsfehler des Druckers bis 5 %
+   wird mit ausgeglichen. Die Statuszeile nennt Drehung, Maßstab und die
+   Abweichung der Marken untereinander; über 1 mm erscheint ein Hinweis.
+
+Die Genauigkeit hängt an Kamera und Kalibrierung: Die Markenmitten werden
+genauer als ein Pixel bestimmt, im Test mit 1,5 Pixeln je Millimeter auf
+etwa 0,1 mm. Gewelltes Papier und Spiegelungen verschlechtern sie. Teile
+nach dem Erstellen der Druckvorlage nicht mehr verschieben, sonst passen
+sie nicht mehr zu den Marken.
+
 ## Lasercutter, Rotationseinheit und Kamera
 
 **Datei → Lasercutter** wählt den aktiven Lasercutter, **Datei →

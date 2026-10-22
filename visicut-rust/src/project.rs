@@ -64,6 +64,9 @@ pub struct Project {
     /// Position of the active part in the list of all parts.
     #[serde(default)]
     pub active_part: usize,
+    /// Cut marks of the printed template, for aligning the parts on the sheet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registration: Option<Registration>,
     /// The other parts, in list order without the active one. Like VisiCut's
     /// PlfParts each has its own position, size and assignment; all parts
     /// are lasered together, one LTT job per operation.
@@ -97,6 +100,14 @@ pub struct Part {
     /// Template and values of a parametric SVG (VisiCut's ParametricPlfPart).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parametric: Option<Parametric>,
+}
+
+/// Where the cut marks of the printed template lie on the bed (mm): top left,
+/// top right, bottom left of the sheet.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Registration {
+    pub marks: [[f64; 2]; 3],
 }
 
 /// A parametric SVG template with the current parameter values; the part's
@@ -382,6 +393,8 @@ struct ProjectFile {
     active_part: usize,
     #[serde(default)]
     parts: Vec<Part>,
+    #[serde(default)]
+    registration: Option<Registration>,
 }
 
 impl TryFrom<ProjectFile> for Project {
@@ -435,6 +448,7 @@ impl TryFrom<ProjectFile> for Project {
             part_parametric: file.part_parametric,
             active_part: file.active_part.min(file.parts.len()),
             parts: file.parts,
+            registration: file.registration,
         })
     }
 }
@@ -519,6 +533,7 @@ impl Default for Project {
             part_parametric: None,
             active_part: 0,
             parts: Vec::new(),
+            registration: None,
         }
     }
 }
@@ -721,6 +736,7 @@ impl Project {
             part_parametric: None,
             active_part: 0,
             parts: Vec::new(),
+            registration: None,
         };
         view.set_active(part.clone());
         view

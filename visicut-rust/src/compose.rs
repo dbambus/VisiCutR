@@ -1865,6 +1865,17 @@ fn embed(
     ))
 }
 
+/// All parts as SVG elements in bed millimetres, moved by `(dx, dy)`; for
+/// documents that show the whole layout (print template with cut marks).
+pub fn all_parts_svg(project: &Project, dx: f64, dy: f64) -> Result<String, String> {
+    let mut body = format!(r#"<g transform="translate({} {})">"#, num(dx), num(dy));
+    for part in project.all_parts() {
+        body += &embed(&project.part_view(&part), None, None)?;
+    }
+    body += "</g>";
+    Ok(body)
+}
+
 /// Byte index after the `>` of the start tag beginning at `start`.
 fn start_tag_end(source: &str, start: usize) -> Option<usize> {
     let mut quote = None;

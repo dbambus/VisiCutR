@@ -50,6 +50,10 @@ enum Command {
     Export,
     /// Projekt für Java-VisiCut als PLF schreiben.
     ExportPlf,
+    /// Motiv mit Schnittmarken als PDF zum Drucken.
+    PrintTemplate,
+    /// Teile an den Schnittmarken eines aufgelegten Drucks ausrichten.
+    AlignMarks,
     Quit,
     Center,
     Devices,
@@ -135,6 +139,8 @@ impl Command {
             Self::SaveAs => tr("Sichern unter …"),
             Self::Export => tr("LTT-Job exportieren …"),
             Self::ExportPlf => tr("Als VisiCut-Projekt (PLF) exportieren …"),
+            Self::PrintTemplate => tr("Druckvorlage mit Schnittmarken …"),
+            Self::AlignMarks => tr("An Schnittmarken ausrichten"),
             Self::Quit => tr("Beenden"),
             Self::Center => tr("Motiv auf dem Arbeitsbett zentrieren"),
             Self::Devices => tr("Einstellungen …"),
@@ -224,7 +230,9 @@ impl Command {
             | Self::ClearRecent
             | Self::ClearCache
             | Self::Device(_)
-            | Self::ExportPlf => return None,
+            | Self::ExportPlf
+            | Self::PrintTemplate
+            | Self::AlignMarks => return None,
         };
         Some(KeyboardShortcut::new(modifiers, key))
     }
@@ -314,6 +322,7 @@ struct Snapshot {
 /// Knopfgruppen rechts über der Arbeitsfläche, von links nach rechts.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ViewGroup {
+    Marks,
     Remnants,
     Camera,
     Grid,
@@ -327,6 +336,7 @@ impl ViewGroup {
     fn commands(self) -> &'static [Command] {
         match self {
             Self::Remnants => &[Command::Remnants],
+            Self::Marks => &[Command::AlignMarks],
             Self::Camera => &[Command::ToggleCamera, Command::RefreshCamera],
             Self::Grid => &[Command::ToggleGrid],
             Self::Zoom => &[Command::ZoomIn, Command::ZoomOut],
@@ -511,6 +521,8 @@ struct VisiCutR {
     /// Laufende Update-Prüfung (`true`: von Hand gestartet) und gefundenes Release.
     update_check: Option<(bool, UpdateCheck)>,
     update_found: Option<visicut_core::update::Release>,
+    /// Laufende Suche nach den Schnittmarken im Kamerabild.
+    marks_check: Option<std::sync::mpsc::Receiver<Result<Vec<[f64; 2]>, String>>>,
     /// Geladene FabLab-Einstellungen, die der Dialog zum Übernehmen anbietet.
     lab_offer: Option<LabOffer>,
     /// Laufende Prüfung der abonnierten FabLab-Einstellungen beim Start.
@@ -600,6 +612,7 @@ impl VisiCutR {
             settings,
             update_check: None,
             update_found: None,
+            marks_check: None,
             lab_offer: None,
             lab_check: None,
             instance: None,
@@ -743,6 +756,93 @@ impl VisiCutR {
             }
             Err(e) if manual => self.report(e),
             Err(e) => self.status = e,
+        }
+    }
+
+    /// Druckvorlage: Motiv mit drei Schnittmarken auf A4 als PDF. Das Projekt
+    /// merkt sich die Lage der Marken für „An Schnittmarken ausrichten“.
+    fn print_template(&mut self) {
+        let template = match visicut_core::registration::template(&self.project) {
+            Ok(template) => template,
+            Err(e) => return self.report(e),
+        };
+        let name = format!("{} – {}.pdf", self.project.name, tr("Schnittmarken"));
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("PDF", &["pdf"])
+            .set_file_name(name)
+            .save_file()
+        else {
+            return;
+        };
+        match visicut_core::registration::pdf(&template.svg)
+            .and_then(|bytes| std::fs::write(&path, bytes).map_err(|e| e.to_string()))
+        {
+            Ok(()) => {
+                self.checkpoint();
+                self.project.registration = Some(template.registration);
+                self.dirty = true;
+                self.status = tr!(
+                    "„{file}“ gesichert: in Originalgröße (100 %) drucken, aufs Bett legen, dann „An Schnittmarken ausrichten“",
+                    file = file_name(&path)
+                );
+            }
+            Err(e) => self.report(e),
+        }
+    }
+
+    /// Sucht die Schnittmarken des aufgelegten Drucks in einem neuen Kamerabild.
+    fn start_align_marks(&mut self) {
+        if self.marks_check.is_some() {
+            return;
+        }
+        let device = self.devices.device().clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(visicut_core::camera::sheet_marks_on_bed(&device));
+        });
+        self.marks_check = Some(rx);
+        self.status = tr("Suche Schnittmarken im Kamerabild …").into();
+    }
+
+    /// Richtet die Teile an den gefundenen Marken aus und zeigt das Kamerabild
+    /// zum Vergleich.
+    fn poll_marks(&mut self, ctx: &egui::Context) {
+        let Some(receiver) = &self.marks_check else {
+            return;
+        };
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(200));
+                return;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err(tr("Kamerabild nicht erhalten").into())
+            }
+        };
+        self.marks_check = None;
+        let aligned =
+            result.and_then(|found| visicut_core::registration::align(&self.project, &found));
+        match aligned {
+            Ok(aligned) => {
+                self.apply_composed(ctx, aligned.project, Vec::new());
+                self.status = tr!(
+                    "An den Schnittmarken ausgerichtet · Drehung {angle}° · Maßstab {scale} % · Abweichung {residual} mm",
+                    angle = format!("{:.2}", aligned.angle_deg),
+                    scale = format!("{:.1}", aligned.scale * 100.0),
+                    residual = format!("{:.2}", aligned.residual_mm)
+                );
+                if aligned.residual_mm > 1.0 {
+                    self.alert = Some(tr!(
+                        "Die Schnittmarken passen nur auf {residual} mm genau zusammen. Liegt das Blatt flach? Ist die Kamera kalibriert?",
+                        residual = format!("{:.1}", aligned.residual_mm)
+                    ));
+                }
+                // Das neue Kamerabild zeigt, ob das Motiv auf dem Druck liegt.
+                self.devices.show_camera(&self.project);
+                self.devices.refresh_camera(&self.project);
+            }
+            Err(e) => self.report(e),
         }
     }
 
@@ -2446,7 +2546,15 @@ impl VisiCutR {
             Command::Device(_) => !self.busy(),
             Command::Undo => !self.undo.is_empty() && !self.busy(),
             Command::Redo => !self.redo.is_empty() && !self.busy(),
-            Command::Center | Command::ExportPlf => self.texture.is_some() && !self.busy(),
+            Command::Center | Command::ExportPlf | Command::PrintTemplate => {
+                self.texture.is_some() && !self.busy()
+            }
+            Command::AlignMarks => {
+                self.project.registration.is_some()
+                    && self.devices.has_camera()
+                    && self.marks_check.is_none()
+                    && !self.busy()
+            }
             Command::ToggleCamera => self.devices.has_camera(),
             Command::RefreshCamera => self.devices.camera_shown() && !self.devices.camera_loading(),
             Command::Remnants => self.devices.has_camera() && !self.busy(),
@@ -2484,6 +2592,8 @@ impl VisiCutR {
             }
             Command::Export => self.export(),
             Command::ExportPlf => self.export_plf(),
+            Command::PrintTemplate => self.print_template(),
+            Command::AlignMarks => self.start_align_marks(),
             Command::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Command::Center => {
                 workspace::center(&mut self.project);
@@ -2689,6 +2799,7 @@ impl VisiCutR {
             Command::SaveAs,
             Command::Export,
             Command::ExportPlf,
+            Command::PrintTemplate,
         ] {
             self.menu_item(ui, command, clicked);
         }
@@ -3171,6 +3282,9 @@ impl VisiCutR {
             let zoom = format!("{:.0} %", self.zoom * 100.0);
             let has_camera = self.devices.has_camera();
             let mut groups: Vec<(ViewGroup, Vec<&str>)> = Vec::new();
+            if has_camera && self.project.registration.is_some() {
+                groups.push((ViewGroup::Marks, vec![Command::AlignMarks.title()]));
+            }
             if has_camera {
                 groups.push((ViewGroup::Remnants, vec![Command::Remnants.title()]));
                 let mut texts = vec![camera.as_str()];
@@ -3279,6 +3393,16 @@ impl VisiCutR {
                             }
                             let shown = self.devices.camera_shown();
                             chosen.extend(toggle(ui, Command::ToggleCamera, &camera, shown));
+                        }
+                        ViewGroup::Marks => {
+                            if self.marks_check.is_some() {
+                                ui.spinner();
+                            }
+                            chosen.extend(tool(
+                                ui,
+                                Command::AlignMarks,
+                                Command::AlignMarks.title(),
+                            ))
                         }
                         // Reststücke im Kamerabild erkennen.
                         ViewGroup::Remnants => {
@@ -4481,6 +4605,7 @@ impl eframe::App for VisiCutR {
         self.poll_update(ctx);
         self.update_window(ctx);
         self.poll_lab(ctx);
+        self.poll_marks(ctx);
         self.lab_window(ctx);
         self.shortcuts_window(ctx);
         let device_action = self

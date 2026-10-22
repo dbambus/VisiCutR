@@ -941,6 +941,28 @@ pub fn tracked_mapping(
     })
 }
 
+/// Ring marks in a fresh camera picture, in bed millimetres: the cut marks of
+/// a printed sheet. Marks fixed on the bed (tracking markers of the
+/// calibration) are left out.
+pub fn sheet_marks_on_bed(device: &LaserDevice) -> Result<Vec<[f64; 2]>, String> {
+    let calibration = device
+        .camera_calibration
+        .as_ref()
+        .ok_or(tr("Kamera ist noch nicht kalibriert"))?;
+    let picture = capture(device)?;
+    let (mapping, _) = tracked_mapping(calibration, &picture)?;
+    Ok(find_markers(&picture)
+        .into_iter()
+        .filter_map(|p| mapping.to_bed(p))
+        .filter(|p| {
+            !calibration
+                .marker_points
+                .iter()
+                .any(|m| (m[0] - p[0]).hypot(m[1] - p[1]) < 20.0)
+        })
+        .collect())
+}
+
 /// Camera picture projected onto the bed.
 pub fn background_image(
     device: &LaserDevice,

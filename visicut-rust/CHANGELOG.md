@@ -3,6 +3,14 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## Unveröffentlicht (für 1.1)
+
+- **Drucken und Lasern mit Schnittmarken:** **Datei → Druckvorlage mit
+  Schnittmarken …** legt das Motiv mit drei Marken auf ein A4-Blatt (PDF).
+  Liegt der Druck auf dem Bett, findet **An Schnittmarken ausrichten** die
+  Marken im Kamerabild und gleicht Lage, Drehung und Druckmaßstab aus, damit
+  passgenau geschnitten wird.
+
 ## 1.0.0-rc.2 – 22.10.2026
 
 Zweiter Release-Kandidat für VisiCutR 1.0 mit Korrekturen aus den ersten

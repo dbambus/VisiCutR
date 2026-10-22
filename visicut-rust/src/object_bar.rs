@@ -40,15 +40,38 @@ pub fn bar<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let id = ui.id().with("object_bar_width");
     let width = ui.data(|d| d.get_temp::<f32>(id));
     ui.horizontal(|ui| {
-        ui.add_space(((ui.available_width() - width.unwrap_or(0.0)) / 2.0).max(0.0));
+        let row = ui.available_width();
+        ui.add_space(((row - width.unwrap_or(0.0)) / 2.0).max(0.0));
         let response = frame(ui, add);
-        if width != Some(response.response.rect.width()) {
-            ui.data_mut(|d| d.insert_temp(id, response.response.rect.width()));
+        let bar = response.response.rect.width();
+        if width != Some(bar) {
+            ui.data_mut(|d| d.insert_temp(id, bar));
             ui.ctx().request_repaint();
         }
+        min_window_width(ui.ctx(), row, bar);
         response.inner
     })
     .inner
+}
+
+/// Rand links und rechts neben der Leiste bei kleinster Fensterbreite.
+const BAR_MARGIN: f32 = 12.0;
+/// Kleinste Fensterhöhe (wie beim Start festgelegt).
+const MIN_WINDOW_HEIGHT: f32 = 620.0;
+
+/// Das Fenster darf nicht schmaler werden, als die Leiste mit kleinem Rand
+/// braucht: Breite des Fensters ohne die Zeile (`row`) plus Leiste.
+fn min_window_width(ctx: &egui::Context, row: f32, bar: f32) {
+    let window = ctx.content_rect().width();
+    let min = (window - row + bar + 2.0 * BAR_MARGIN).ceil();
+    let id = egui::Id::new("object_bar_min_window_width");
+    if ctx.data(|d| d.get_temp::<f32>(id)) != Some(min) {
+        ctx.data_mut(|d| d.insert_temp(id, min));
+        ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(
+            min,
+            MIN_WINDOW_HEIGHT,
+        )));
+    }
 }
 
 fn frame<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {

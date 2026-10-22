@@ -67,19 +67,53 @@ public class SVGImporter extends AbstractImporter
   private SVGUniverse u = new SVGUniverse();
   private SVGRoot root;
 
+  /**
+   * The value of a style property or presentation attribute, inherited from
+   * ancestors; null if neither is set.
+   */
+  private static String styleOrAttribute(SVGElement e, String name)
+  {
+    StyleAttribute style = e.getStyleAbsolute(name);
+    if (style == null)
+    {
+      style = e.getPresAbsolute(name);
+    }
+    return style == null ? null : style.getStringValue();
+  }
+
+  /**
+   * Whether the element is invisible: display="none", visibility="hidden"
+   * or opacity="0", given as style or as presentation attribute (Inkscape
+   * writes styles, other programs attributes).
+   */
+  private static boolean isHidden(SVGElement e)
+  {
+    if ("none".equals(styleOrAttribute(e, "display")) || "hidden".equals(styleOrAttribute(e, "visibility")))
+    {
+      return true;
+    }
+    String opacity = styleOrAttribute(e, "opacity");
+    if (opacity != null)
+    {
+      try
+      {
+        return Float.parseFloat(opacity.trim()) == 0f;
+      }
+      catch (NumberFormatException ex)
+      {
+        return false;
+      }
+    }
+    return false;
+  }
+
   private void importNode(SVGElement e, List<GraphicObject> result, double svgResolution, List<String> warnings)
   {
     if (e instanceof PatternSVG || e instanceof Gradient || e instanceof Defs)
     {//Ignore Patterns,Gradients and Children
       return;
     }
-    StyleAttribute display = e.getStyleAbsolute("display");
-    if (display != null && "none".equals(display.getStringValue()))
-    {
-      return;
-    }
-    StyleAttribute visibility = e.getStyleAbsolute("visibility");
-    if (visibility != null && "hidden".equals(visibility.getStringValue()))
+    if (isHidden(e))
     {
       return;
     }

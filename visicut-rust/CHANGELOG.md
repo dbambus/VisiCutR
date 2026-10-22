@@ -5,6 +5,9 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
 
 ## Unveröffentlicht
 
+- **Sicherer ohne Materialprofil:** Gravieren und 3D-Gravur starten wie
+  Markieren mit 0 % Leistung, wenn das Material kein Profil dafür hat, statt
+  die Schneidwerte zu übernehmen.
 - **Parameter parametrischer Teile einstellen** wie in Java-VisiCut: Für
   `.psvg`- und `.parametric.svg`-Teile zeigt die Seitenleiste ein Feld je
   Parameter (mit Grenzen, Auswahllisten und Beschriftungen aus der Vorlage);

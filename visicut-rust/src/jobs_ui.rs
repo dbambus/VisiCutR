@@ -127,14 +127,15 @@ pub fn preset<'a>(
 }
 
 /// A new step with the material profile, else the motif's parameters.
-/// Marking without a profile starts at 0 % power so a cutting power is never
-/// taken over by accident (macOS `defaultStep`).
+/// Marking and engraving without a profile start at 0 % power unless the
+/// motif uses the same operation, so a cutting power is never taken over by
+/// accident (macOS `defaultStep`, there only for marking).
 pub fn default_step(library: &Library, project: &Project, operation: Operation) -> JobStep {
     let mut step = JobStep::new(operation);
-    let mark = operation == Operation::Mark && project.operation != Operation::Mark;
+    let safe = operation != Operation::Cut && project.operation != operation;
     (step.power_percent, step.speed_percent) = match preset(library, project, operation) {
         Some(p) => (p.power_percent, p.speed_percent),
-        None if mark => (0.0, 100.0),
+        None if safe => (0.0, 100.0),
         None => (project.power_percent, project.speed_percent),
     };
     step.passes = project.passes;
@@ -144,13 +145,15 @@ pub fn default_step(library: &Library, project: &Project, operation: Operation) 
     step
 }
 
-/// Whole-motif operation; marking resets to 0 % power (macOS `selectOperation`).
+/// Whole-motif operation; marking and engraving reset to 0 % power until a
+/// material profile sets them (macOS `selectOperation`, there only for
+/// marking).
 pub fn select_operation(project: &mut Project, operation: Operation) {
     if operation == project.operation {
         return;
     }
     project.operation = operation;
-    if operation == Operation::Mark {
+    if operation != Operation::Cut {
         (project.power_percent, project.speed_percent, project.passes) = (0.0, 100.0, 1);
     }
 }
@@ -2042,7 +2045,7 @@ mod tests {
     }
 
     #[test]
-    fn default_steps_use_profiles_and_mark_without_profile_starts_at_zero() {
+    fn default_steps_use_profiles_and_start_at_zero_without_profile() {
         let library = library();
         let p = project();
         let cut = default_step(&library, &p, Operation::Cut);
@@ -2051,12 +2054,25 @@ mod tests {
         // The 0 % mark profile is not applicable.
         let mark = default_step(&library, &p, Operation::Mark);
         assert_eq!((mark.power_percent, mark.speed_percent), (0.0, 100.0));
+        // Ohne Profil keine Werte eines anderen Verfahrens übernehmen …
         let engrave3d = default_step(&library, &p, Operation::Engrave3d);
+        assert_eq!(
+            (engrave3d.power_percent, engrave3d.speed_percent),
+            (0.0, 100.0)
+        );
+        assert_eq!(engrave3d.raster, p.raster);
+        // … wohl aber die des gleichen Verfahrens.
+        let mut deep = p.clone();
+        deep.operation = Operation::Engrave3d;
+        let engrave3d = default_step(&library, &deep, Operation::Engrave3d);
         assert_eq!(
             (engrave3d.power_percent, engrave3d.speed_percent),
             (55.0, 66.0)
         );
-        assert_eq!(engrave3d.raster, p.raster);
+        let mut engraving = p.clone();
+        engraving.operation = Operation::Cut;
+        select_operation(&mut engraving, Operation::Engrave3d);
+        assert_eq!(engraving.power_percent, 0.0);
         let mut marking = p.clone();
         select_operation(&mut marking, Operation::Mark);
         assert_eq!(

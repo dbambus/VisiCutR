@@ -297,8 +297,28 @@ pub fn add_objects_as_part(
         ..project.clone()
     };
     let (created, _) = add_objects(&empty, objects)?;
+    let mut part = created.active();
+    // Auf etwas Vorhandenem wäre das Neue nicht mehr anklickbar: daneben
+    // legen, sonst darunter (wie `add_part`).
+    let overlaps = |x: f32, y: f32| {
+        project.all_parts().iter().any(|p| {
+            x < p.x_mm + p.width_mm
+                && p.x_mm < x + part.width_mm
+                && y < p.y_mm + p.height_mm
+                && p.y_mm < y + part.height_mm
+        })
+    };
+    if overlaps(part.x_mm, part.y_mm) {
+        let [bx, by, bw, bh] = project.bounds();
+        let gap = APPEND_GAP_MM as f32;
+        if bx + bw + gap + part.width_mm <= project.bed_width_mm {
+            (part.x_mm, part.y_mm) = (bx + bw + gap, by);
+        } else if by + bh + gap + part.height_mm <= project.bed_height_mm {
+            (part.x_mm, part.y_mm) = (bx, by + bh + gap);
+        }
+    }
     let mut result = project.clone();
-    result.add_part(created.active());
+    result.add_part(part);
     Ok(result)
 }
 
@@ -2490,6 +2510,10 @@ mod tests {
         assert_eq!(second.parts[0].svg, first.svg);
         assert_eq!(second.active_part, 1);
         assert!(second.x_mm > first.x_mm + 150.0);
+        // An derselben Stelle erstellt, kommt es rechts daneben statt darauf.
+        let third = add_objects_as_part(&first, &sign, "Schild").unwrap();
+        assert_eq!(third.y_mm, first.y_mm);
+        assert!((third.x_mm - (first.x_mm + first.width_mm + APPEND_GAP_MM as f32)).abs() < 0.01);
     }
 
     #[test]

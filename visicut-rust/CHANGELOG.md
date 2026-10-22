@@ -8,7 +8,12 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
 - **Text, Formen und Schilder als eigene Teile:** Liegt schon etwas auf dem
   Bett, wird jedes neu erstellte Element ein eigenes Teil. Ein zweites Schild
   landete bisher im gewählten Teil und ließ sich nur mit dem ersten zusammen
-  verschieben. Neue Teile bekommen die Werte aus dem Materialprofil.
+  verschieben. Neue Teile bekommen die Werte aus dem Materialprofil. Würde
+  ein neues Element auf etwas Vorhandenem liegen, kommt es rechts daneben
+  (sonst darunter), damit beide anklickbar bleiben.
+- **Überlappende Teile anklicken:** Ein Klick auf eine Stelle, an der ein
+  anderes Teil unter dem gewählten liegt, wählt dieses; Ziehen verschiebt
+  weiter das gewählte.
 - **FabLab-Einstellungen** heißen jetzt so statt „Labor-Einstellungen“; der
   Hinweis nennt den Einstellungs-Server, von dem sie abgerufen werden.
 

@@ -3531,7 +3531,7 @@ impl VisiCutR {
                 self.preview
                     .overlay(&painter, to_screen(self.project.bounds()));
                 let mut select = None;
-                for (index, rect) in others {
+                for &(index, rect) in &others {
                     painter.rect_stroke(
                         rect,
                         0.0,
@@ -3671,6 +3671,15 @@ impl VisiCutR {
                         ui.separator();
                     }
                 });
+                // Liegt unter dem gewählten Teil ein anderes, wählt ein Klick
+                // dieses; sonst wäre es nicht mehr erreichbar.
+                if response.clicked()
+                    && let Some(pos) = response.interact_pointer_pos()
+                    && let Some((index, _)) = others.iter().rev().find(|(_, r)| r.contains(pos))
+                {
+                    self.select_part(*index);
+                    return;
+                }
                 if response.dragged() && !self.busy() {
                     let delta = response.drag_delta() / scale;
                     let (x, y) = (self.project.x_mm + delta.x, self.project.y_mm + delta.y);

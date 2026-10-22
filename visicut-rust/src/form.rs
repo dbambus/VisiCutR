@@ -582,6 +582,8 @@ pub fn tool_window(
                     .collapsible(false)
                     .resizable(false)
                     .default_width(width)
+                    .pivot(egui::Align2::CENTER_CENTER)
+                    .default_pos(ctx.content_rect().center())
                     .show(ctx, &mut run);
                 return;
             }

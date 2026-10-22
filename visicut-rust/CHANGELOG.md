@@ -5,6 +5,10 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
 
 ## Unveröffentlicht
 
+- **Werkzeugfenster wie die Sende-Bestätigung:** Text, Form, Schild, Kopien
+  und Nesting mit Rahmen in der Akzentfarbe, Titel mit Symbol, Feldern wie in
+  der Seitenleiste (Einheit im Feld) und „Abbrechen“ / „Einfügen“ rechts
+  unten. Formen werden über gezeichnete Symbole gewählt statt über Wörter.
 - **Text, Formen und Schilder als eigene Teile:** Liegt schon etwas auf dem
   Bett, wird jedes neu erstellte Element ein eigenes Teil. Ein zweites Schild
   landete bisher im gewählten Teil und ließ sich nur mit dem ersten zusammen

@@ -17,6 +17,17 @@ pub enum Tool {
 }
 
 impl Tool {
+    fn icon(self) -> crate::object_bar::Icon {
+        use crate::object_bar::Icon;
+        match self {
+            Self::Text => Icon::Text,
+            Self::Shape => Icon::Shape,
+            Self::Sign => Icon::Sign,
+            Self::Array => Icon::Array,
+            Self::Nest => Icon::Nest,
+        }
+    }
+
     fn title(self) -> &'static str {
         match self {
             Self::Text => tr("Text einfügen"),
@@ -113,40 +124,128 @@ impl Default for ComposeUi {
     }
 }
 
+/// Breite der Felder rechts, wie in der Seitenleiste.
+const FIELD: f32 = 150.0;
+/// Breite des Inhalts im Rahmen (Fenster 420 pt).
+const CONTENT_WIDTH: f32 = 360.0;
+
 fn operation_choice(ui: &mut egui::Ui, id: &str, operation: &mut Operation) {
-    crate::form::Dropdown::from_id_salt(id)
-        .selected_text(match operation {
-            Operation::Cut => tr("Schneiden (rot)"),
-            Operation::Mark => tr("Markieren (blau)"),
-            _ => tr("Gravieren (schwarz)"),
-        })
-        .show_ui(ui, |ui| {
-            ui.selectable_value(operation, Operation::Engrave, tr("Gravieren (schwarz)"));
-            ui.selectable_value(operation, Operation::Cut, tr("Schneiden (rot)"));
-            ui.selectable_value(operation, Operation::Mark, tr("Markieren (blau)"));
-        });
+    crate::form::row(ui, tr("Bearbeitung"), |ui| {
+        crate::form::Dropdown::from_id_salt(id)
+            .width(FIELD)
+            .selected_text(match operation {
+                Operation::Cut => tr("Schneiden (rot)"),
+                Operation::Mark => tr("Markieren (blau)"),
+                _ => tr("Gravieren (schwarz)"),
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(operation, Operation::Engrave, tr("Gravieren (schwarz)"));
+                ui.selectable_value(operation, Operation::Cut, tr("Schneiden (rot)"));
+                ui.selectable_value(operation, Operation::Mark, tr("Markieren (blau)"));
+            });
+    });
+}
+
+/// Zeile mit Zahlenfeld und Einheit im Feld.
+fn number<N: egui::emath::Numeric>(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut N,
+    range: std::ops::RangeInclusive<N>,
+    unit: &str,
+) {
+    crate::form::row(ui, label, |ui| {
+        crate::form::unit_value(ui, value, range, unit, FIELD);
+    });
 }
 
 fn mm(ui: &mut egui::Ui, label: &str, value: &mut f64, range: std::ops::RangeInclusive<f64>) {
-    ui.label(label);
-    ui.add(
-        egui::DragValue::new(value)
-            .range(range)
-            .speed(0.5)
-            .suffix(" mm"),
-    );
-    ui.end_row();
+    number(ui, label, value, range, "mm");
 }
 
 fn font_choice(ui: &mut egui::Ui, fonts: &[String], font: &mut String) {
-    crate::form::Dropdown::from_id_salt("font")
-        .selected_text(font.as_str())
-        .height(320.0)
-        .show_ui(ui, |ui| {
-            for name in fonts {
-                ui.selectable_value(font, name.clone(), name);
+    crate::form::row(ui, tr("Schrift"), |ui| {
+        crate::form::Dropdown::from_id_salt("font")
+            .width(FIELD)
+            .selected_text(font.as_str())
+            .height(320.0)
+            .show_ui(ui, |ui| {
+                for name in fonts {
+                    ui.selectable_value(font, name.clone(), name);
+                }
+            });
+    });
+}
+
+fn text_field(ui: &mut egui::Ui, text: &mut String, rows: usize) {
+    ui.add(
+        egui::TextEdit::multiline(text)
+            .desired_rows(rows)
+            .desired_width(CONTENT_WIDTH),
+    );
+    ui.add_space(4.0);
+}
+
+/// Formen als gezeichnete Symbole statt Wörter; liefert die gewählte.
+fn shape_choice(ui: &mut egui::Ui, kind: &mut ShapeKind) {
+    ui.horizontal(|ui| {
+        for (option, name) in [
+            (ShapeKind::Rectangle, tr("Rechteck")),
+            (ShapeKind::Ellipse, tr("Ellipse")),
+            (ShapeKind::Polygon, tr("Vieleck")),
+            (ShapeKind::Star, tr("Stern")),
+        ] {
+            let selected = *kind == option;
+            let (rect, response) =
+                ui.allocate_exact_size(egui::vec2(56.0, 44.0), egui::Sense::click());
+            let painter = ui.painter();
+            let fill = if selected {
+                crate::form::ACCENT
+            } else if response.hovered() {
+                egui::Color32::from_gray(225)
+            } else {
+                egui::Color32::from_gray(238)
+            };
+            painter.rect_filled(rect, 6.0, fill);
+            let color = if selected {
+                egui::Color32::WHITE
+            } else {
+                egui::Color32::from_gray(50)
+            };
+            let stroke = egui::Stroke::new(1.8, color);
+            let c = rect.center();
+            match option {
+                ShapeKind::Rectangle => {
+                    let r = egui::Rect::from_center_size(c, egui::vec2(28.0, 20.0));
+                    painter.rect_stroke(r, 0.0, stroke, egui::StrokeKind::Middle);
+                }
+                ShapeKind::Ellipse => {
+                    painter.add(egui::Shape::ellipse_stroke(
+                        c,
+                        egui::vec2(15.0, 10.0),
+                        stroke,
+                    ));
+                }
+                ShapeKind::Polygon | ShapeKind::Star => {
+                    let star = option == ShapeKind::Star;
+                    let count = if star { 10 } else { 6 };
+                    let points = (0..count)
+                        .map(|i| {
+                            let a = std::f32::consts::TAU * i as f32 / count as f32
+                                - std::f32::consts::FRAC_PI_2;
+                            let radius = if star && i % 2 == 1 { 5.5 } else { 13.0 };
+                            c + egui::vec2(a.cos(), a.sin()) * radius
+                        })
+                        .collect();
+                    painter.add(egui::Shape::closed_line(points, stroke));
+                }
             }
-        });
+            if response.on_hover_text(name).clicked() {
+                *kind = option;
+            }
+        }
+    });
+    ui.add_space(6.0);
 }
 
 impl ComposeUi {
@@ -173,21 +272,74 @@ impl ComposeUi {
         let tool = self.open?;
         let mut open = true;
         let mut apply = false;
-        crate::form::tool_window(ctx, "compose_tool", tool.title(), 380.0, &mut open, |ui| {
-            match tool {
-                Tool::Text => self.text_form(ui),
-                Tool::Shape => self.shape_form(ui),
-                Tool::Sign => self.sign_form(ui),
-                Tool::Array => self.array_form(ui, project),
-                Tool::Nest => self.nest_form(ui, project),
-            }
-            ui.separator();
-            let label = match tool {
-                Tool::Array | Tool::Nest => tr("Anwenden"),
-                _ => tr("Einfügen"),
-            };
-            apply = ui.button(label).clicked();
+        let mut cancel = false;
+        crate::form::tool_window(ctx, "compose_tool", tool.title(), 420.0, &mut open, |ui| {
+            // Wie Hinweis und Sende-Bestätigung: Rahmen in der Akzentfarbe,
+            // Titel mit Symbol, Knöpfe rechts unten.
+            egui::Frame::new()
+                .stroke(egui::Stroke::new(2.0, crate::form::ACCENT))
+                .corner_radius(7.0)
+                .inner_margin(egui::Margin::symmetric(18, 14))
+                .show(ui, |ui| {
+                    // Feste Breite: Textfelder wachsen sonst mit dem Fenster.
+                    ui.set_width(CONTENT_WIDTH);
+                    ui.vertical_centered(|ui| {
+                        ui.horizontal(|ui| {
+                            let title =
+                                egui::RichText::new(tool.title()).font(crate::form::bold(20.0));
+                            let galley = ui.painter().layout_no_wrap(
+                                title.text().to_owned(),
+                                crate::form::bold(20.0),
+                                egui::Color32::BLACK,
+                            );
+                            let width = 30.0 + galley.size().x;
+                            ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
+                            let (icon, _) = ui
+                                .allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::hover());
+                            crate::object_bar::paint(
+                                ui.painter(),
+                                tool.icon(),
+                                icon,
+                                crate::form::ACCENT,
+                            );
+                            ui.label(title);
+                        });
+                    });
+                    ui.add_space(10.0);
+                    match tool {
+                        Tool::Text => self.text_form(ui),
+                        Tool::Shape => self.shape_form(ui),
+                        Tool::Sign => self.sign_form(ui),
+                        Tool::Array => self.array_form(ui, project),
+                        Tool::Nest => self.nest_form(ui, project),
+                    }
+                    ui.add_space(12.0);
+                    let label = match tool {
+                        Tool::Array | Tool::Nest => tr("Anwenden"),
+                        _ => tr("Einfügen"),
+                    };
+                    // Nur eine Zeile hoch, sonst wächst das Fenster mit.
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), 30.0),
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            apply = ui.add(crate::form::primary_button(label)).clicked();
+                            if ui
+                                .add(
+                                    egui::Button::new(tr("Abbrechen"))
+                                        .min_size(egui::vec2(0.0, 28.0)),
+                                )
+                                .clicked()
+                            {
+                                cancel = true;
+                            }
+                        },
+                    );
+                });
         });
+        if cancel {
+            open = false;
+        }
         if !open {
             self.open = None;
         }
@@ -281,191 +433,169 @@ impl ComposeUi {
         }
     }
 
-    fn position(&mut self, ui: &mut egui::Ui) {
+    fn text_form(&mut self, ui: &mut egui::Ui) {
+        let t = &mut self.text;
+        text_field(ui, &mut t.text, 3);
+        font_choice(ui, &self.fonts, &mut t.font);
+        mm(ui, tr("Schriftgröße"), &mut t.size_mm, 0.5..=1000.0);
+        crate::form::row(ui, tr("Stil"), |ui| {
+            ui.checkbox(&mut t.italic, tr("Kursiv"));
+            ui.checkbox(&mut t.bold, tr("Fett"));
+        });
+        crate::form::row(ui, tr("Ausrichtung"), |ui| {
+            let title = |a: Align| match a {
+                Align::Left => tr("Links"),
+                Align::Center => tr("Mitte"),
+                Align::Right => tr("Rechts"),
+            };
+            crate::form::Dropdown::from_id_salt("text_align")
+                .width(FIELD)
+                .selected_text(title(t.align))
+                .show_ui(ui, |ui| {
+                    for a in [Align::Left, Align::Center, Align::Right] {
+                        ui.selectable_value(&mut t.align, a, title(a));
+                    }
+                });
+        });
+        number(ui, tr("Zeilenabstand"), &mut t.line_spacing, 0.5..=5.0, "×");
+        operation_choice(ui, "text_operation", &mut t.operation);
         mm(ui, tr("X (links)"), &mut self.x_mm, 0.0..=1000.0);
         mm(ui, tr("Y (oben)"), &mut self.y_mm, 0.0..=600.0);
-    }
-
-    fn text_form(&mut self, ui: &mut egui::Ui) {
-        ui.add(
-            egui::TextEdit::multiline(&mut self.text.text)
-                .desired_rows(3)
-                .desired_width(320.0),
+        crate::form::caption(
+            ui,
+            tr("Der Text wird in Umrisse umgewandelt und ist danach nicht mehr editierbar."),
         );
-        egui::Grid::new("text").num_columns(2).show(ui, |ui| {
-            ui.label(tr("Schrift"));
-            font_choice(ui, &self.fonts, &mut self.text.font);
-            ui.end_row();
-            mm(ui, tr("Schriftgröße"), &mut self.text.size_mm, 0.5..=1000.0);
-            ui.label(tr("Stil"));
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.text.bold, tr("Fett"));
-                ui.checkbox(&mut self.text.italic, tr("Kursiv"));
-            });
-            ui.end_row();
-            ui.label(tr("Ausrichtung"));
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.text.align, Align::Left, tr("Links"));
-                ui.selectable_value(&mut self.text.align, Align::Center, tr("Mitte"));
-                ui.selectable_value(&mut self.text.align, Align::Right, tr("Rechts"));
-            });
-            ui.end_row();
-            ui.label(tr("Zeilenabstand"));
-            ui.add(
-                egui::DragValue::new(&mut self.text.line_spacing)
-                    .range(0.5..=5.0)
-                    .speed(0.05),
-            );
-            ui.end_row();
-            ui.label(tr("Bearbeitung"));
-            operation_choice(ui, "text_operation", &mut self.text.operation);
-            ui.end_row();
-            self.position(ui);
-        });
-        ui.small(tr(
-            "Der Text wird in Umrisse umgewandelt und ist danach nicht mehr editierbar.",
-        ));
     }
 
     fn shape_form(&mut self, ui: &mut egui::Ui) {
         let (s, x, y) = (&mut self.shape, &mut self.x_mm, &mut self.y_mm);
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut s.kind, ShapeKind::Rectangle, tr("Rechteck"));
-            ui.selectable_value(&mut s.kind, ShapeKind::Ellipse, tr("Ellipse"));
-            ui.selectable_value(&mut s.kind, ShapeKind::Polygon, tr("Vieleck"));
-            ui.selectable_value(&mut s.kind, ShapeKind::Star, tr("Stern"));
-        });
-        egui::Grid::new("shape").num_columns(2).show(ui, |ui| {
-            match s.kind {
-                ShapeKind::Rectangle | ShapeKind::Ellipse => {
-                    mm(ui, tr("Breite"), &mut s.width_mm, 0.1..=1000.0);
-                    mm(ui, tr("Höhe"), &mut s.height_mm, 0.1..=1000.0);
-                    if s.kind == ShapeKind::Rectangle {
-                        mm(ui, tr("Eckenradius"), &mut s.corner_mm, 0.0..=500.0);
-                    }
-                }
-                ShapeKind::Polygon | ShapeKind::Star => {
-                    ui.label(if s.kind == ShapeKind::Star {
-                        tr("Zacken")
-                    } else {
-                        tr("Ecken")
-                    });
-                    ui.add(egui::DragValue::new(&mut s.corners).range(3..=100));
-                    ui.end_row();
-                    mm(ui, tr("Durchmesser"), &mut s.diameter_mm, 0.1..=1000.0);
-                    if s.kind == ShapeKind::Star {
-                        ui.label(tr("Innenradius"));
-                        ui.add(
-                            egui::DragValue::new(&mut s.inner_percent)
-                                .range(5.0..=95.0)
-                                .suffix(" %"),
-                        );
-                        ui.end_row();
-                    }
+        shape_choice(ui, &mut s.kind);
+        match s.kind {
+            ShapeKind::Rectangle | ShapeKind::Ellipse => {
+                mm(ui, tr("Breite"), &mut s.width_mm, 0.1..=1000.0);
+                mm(ui, tr("Höhe"), &mut s.height_mm, 0.1..=1000.0);
+                if s.kind == ShapeKind::Rectangle {
+                    mm(ui, tr("Eckenradius"), &mut s.corner_mm, 0.0..=500.0);
                 }
             }
-            ui.label(tr("Bearbeitung"));
-            operation_choice(ui, "shape_operation", &mut s.operation);
-            ui.end_row();
-            mm(ui, tr("X (links)"), x, 0.0..=1000.0);
-            mm(ui, tr("Y (oben)"), y, 0.0..=600.0);
-        });
+            ShapeKind::Polygon | ShapeKind::Star => {
+                let label = if s.kind == ShapeKind::Star {
+                    tr("Zacken")
+                } else {
+                    tr("Ecken")
+                };
+                number(ui, label, &mut s.corners, 3..=100, "");
+                mm(ui, tr("Durchmesser"), &mut s.diameter_mm, 0.1..=1000.0);
+                if s.kind == ShapeKind::Star {
+                    number(ui, tr("Innenradius"), &mut s.inner_percent, 5.0..=95.0, "%");
+                }
+            }
+        }
+        operation_choice(ui, "shape_operation", &mut s.operation);
+        mm(ui, tr("X (links)"), x, 0.0..=1000.0);
+        mm(ui, tr("Y (oben)"), y, 0.0..=600.0);
     }
 
     fn sign_form(&mut self, ui: &mut egui::Ui) {
         let s = &mut self.sign;
-        ui.add(
-            egui::TextEdit::multiline(&mut s.text)
-                .desired_rows(2)
-                .desired_width(320.0),
-        );
-        egui::Grid::new("sign").num_columns(2).show(ui, |ui| {
-            mm(ui, tr("Breite"), &mut s.width_mm, 5.0..=1000.0);
-            mm(ui, tr("Höhe"), &mut s.height_mm, 5.0..=600.0);
-            mm(ui, tr("Eckenradius"), &mut s.corner_mm, 0.0..=300.0);
-            ui.label(tr("Löcher"));
-            ui.horizontal(|ui| {
-                for n in [0, 2, 4] {
-                    ui.selectable_value(&mut s.holes, n, n.to_string());
-                }
-            });
-            ui.end_row();
-            if s.holes > 0 {
-                mm(
-                    ui,
-                    tr("Lochdurchmesser"),
-                    &mut s.hole_diameter_mm,
-                    0.5..=50.0,
-                );
-                mm(
-                    ui,
-                    tr("Lochabstand zum Rand"),
-                    &mut s.hole_inset_mm,
-                    0.5..=200.0,
-                );
-            }
+        text_field(ui, &mut s.text, 2);
+        mm(ui, tr("Breite"), &mut s.width_mm, 5.0..=1000.0);
+        mm(ui, tr("Höhe"), &mut s.height_mm, 5.0..=600.0);
+        mm(ui, tr("Eckenradius"), &mut s.corner_mm, 0.0..=300.0);
+        crate::form::row(ui, tr("Löcher"), |ui| {
+            crate::form::Dropdown::from_id_salt("sign_holes")
+                .width(FIELD)
+                .selected_text(s.holes.to_string())
+                .show_ui(ui, |ui| {
+                    for n in [0, 2, 4] {
+                        ui.selectable_value(&mut s.holes, n, n.to_string());
+                    }
+                });
+        });
+        if s.holes > 0 {
             mm(
                 ui,
-                tr("Rahmen (markiert, 0 = ohne)"),
-                &mut s.frame_inset_mm,
-                0.0..=100.0,
+                tr("Lochdurchmesser"),
+                &mut s.hole_diameter_mm,
+                0.5..=50.0,
             );
-            ui.label(tr("Schrift"));
-            font_choice(ui, &self.fonts, &mut s.font);
-            ui.end_row();
-            mm(ui, tr("Schriftgröße"), &mut s.size_mm, 0.5..=500.0);
-            ui.label(tr("Text"));
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut s.bold, tr("Fett"));
-                operation_choice(ui, "sign_text", &mut s.text_operation);
-            });
-            ui.end_row();
-            mm(ui, tr("X (links)"), &mut s.x_mm, 0.0..=1000.0);
-            mm(ui, tr("Y (oben)"), &mut s.y_mm, 0.0..=600.0);
+            mm(
+                ui,
+                tr("Lochabstand zum Rand"),
+                &mut s.hole_inset_mm,
+                0.5..=200.0,
+            );
+        }
+        mm(
+            ui,
+            tr("Rahmen (markiert, 0 = ohne)"),
+            &mut s.frame_inset_mm,
+            0.0..=100.0,
+        );
+        font_choice(ui, &self.fonts, &mut s.font);
+        mm(ui, tr("Schriftgröße"), &mut s.size_mm, 0.5..=500.0);
+        crate::form::row(ui, tr("Stil"), |ui| {
+            ui.checkbox(&mut s.bold, tr("Fett"));
         });
-        ui.small(tr(
-            "Platte und Löcher werden geschnitten, der Text mittig gesetzt.",
-        ));
+        crate::form::row(ui, tr("Text"), |ui| {
+            crate::form::Dropdown::from_id_salt("sign_text")
+                .width(FIELD)
+                .selected_text(match s.text_operation {
+                    Operation::Cut => tr("Schneiden (rot)"),
+                    Operation::Mark => tr("Markieren (blau)"),
+                    _ => tr("Gravieren (schwarz)"),
+                })
+                .show_ui(ui, |ui| {
+                    for (o, t) in [
+                        (Operation::Engrave, tr("Gravieren (schwarz)")),
+                        (Operation::Cut, tr("Schneiden (rot)")),
+                        (Operation::Mark, tr("Markieren (blau)")),
+                    ] {
+                        ui.selectable_value(&mut s.text_operation, o, t);
+                    }
+                });
+        });
+        mm(ui, tr("X (links)"), &mut s.x_mm, 0.0..=1000.0);
+        mm(ui, tr("Y (oben)"), &mut s.y_mm, 0.0..=600.0);
+        crate::form::caption(
+            ui,
+            tr("Platte und Löcher werden geschnitten, der Text mittig gesetzt."),
+        );
     }
 
     fn array_form(&mut self, ui: &mut egui::Ui, project: &Project) {
-        egui::Grid::new("array").num_columns(2).show(ui, |ui| {
-            ui.label(tr("Spalten"));
-            ui.add(egui::DragValue::new(&mut self.columns).range(1..=50));
-            ui.end_row();
-            ui.label(tr("Zeilen"));
-            ui.add(egui::DragValue::new(&mut self.rows).range(1..=50));
-            ui.end_row();
-            mm(ui, tr("Abstand X"), &mut self.gap_x_mm, -500.0..=500.0);
-            mm(ui, tr("Abstand Y"), &mut self.gap_y_mm, -500.0..=500.0);
-        });
+        number(ui, tr("Spalten"), &mut self.columns, 1..=50, "");
+        number(ui, tr("Zeilen"), &mut self.rows, 1..=50, "");
+        mm(ui, tr("Abstand X"), &mut self.gap_x_mm, -500.0..=500.0);
+        mm(ui, tr("Abstand Y"), &mut self.gap_y_mm, -500.0..=500.0);
         let (w, h) = (
             self.columns as f64 * project.width_mm as f64
                 + (self.columns as f64 - 1.0) * self.gap_x_mm,
             self.rows as f64 * project.height_mm as f64 + (self.rows as f64 - 1.0) * self.gap_y_mm,
         );
-        ui.small(tr!(
-            "{count} Exemplare · {width} × {height} mm; Zuordnungen gelten für alle Kopien.",
-            count = self.columns * self.rows,
-            width = format!("{w:.0}"),
-            height = format!("{h:.0}")
-        ));
+        crate::form::caption(
+            ui,
+            tr!(
+                "{count} Exemplare · {width} × {height} mm; Zuordnungen gelten für alle Kopien.",
+                count = self.columns * self.rows,
+                width = format!("{w:.0}"),
+                height = format!("{h:.0}")
+            ),
+        );
     }
 
     fn nest_form(&mut self, ui: &mut egui::Ui, project: &Project) {
         let n = &mut self.nest;
-        egui::Grid::new("nest").num_columns(2).show(ui, |ui| {
-            ui.label(tr("Anzahl je Teil"));
-            ui.add(egui::DragValue::new(&mut n.quantity).range(1..=400));
-            ui.end_row();
-            mm(ui, tr("Abstand"), &mut n.gap_mm, 0.0..=50.0);
-            ui.label(tr("Drehen"));
-            let label = |r: NestRotation| match r {
-                NestRotation::None => tr("Keine Drehung"),
-                NestRotation::Quarter => tr("Nur um 90°"),
-                NestRotation::Free => tr("Beliebig (ganze Grad)"),
-            };
+        number(ui, tr("Anzahl je Teil"), &mut n.quantity, 1..=400, "");
+        mm(ui, tr("Abstand"), &mut n.gap_mm, 0.0..=50.0);
+        let label = |r: NestRotation| match r {
+            NestRotation::None => tr("Keine Drehung"),
+            NestRotation::Quarter => tr("Nur um 90°"),
+            NestRotation::Free => tr("Beliebig (ganze Grad)"),
+        };
+        crate::form::row(ui, tr("Drehen"), |ui| {
             crate::form::Dropdown::from_id_salt("nest_rotation")
+                .width(FIELD)
                 .selected_text(label(n.rotation))
                 .show_ui(ui, |ui| {
                     for r in [NestRotation::None, NestRotation::Quarter, NestRotation::Free] {
@@ -474,12 +604,11 @@ impl ComposeUi {
                 })
                 .response
                 .on_hover_text(tr("Beliebig: jedes Teil wird zusätzlich so gedreht, dass sein umschließendes Rechteck am kleinsten ist."));
-            ui.end_row();
-            mm(ui, tr("Fläche X"), &mut n.area_mm[0], 0.0..=1000.0);
-            mm(ui, tr("Fläche Y"), &mut n.area_mm[1], 0.0..=600.0);
-            mm(ui, tr("Fläche Breite"), &mut n.area_mm[2], 1.0..=1000.0);
-            mm(ui, tr("Fläche Höhe"), &mut n.area_mm[3], 1.0..=600.0);
         });
+        mm(ui, tr("Fläche X"), &mut n.area_mm[0], 0.0..=1000.0);
+        mm(ui, tr("Fläche Y"), &mut n.area_mm[1], 0.0..=600.0);
+        mm(ui, tr("Fläche Breite"), &mut n.area_mm[2], 1.0..=1000.0);
+        mm(ui, tr("Fläche Höhe"), &mut n.area_mm[3], 1.0..=600.0);
         ui.horizontal(|ui| {
             if ui.button(tr("Ganzes Arbeitsbett")).clicked() {
                 n.area_mm = NestSettings::default().area_mm;
@@ -493,9 +622,12 @@ impl ComposeUi {
                 ];
             }
         });
-        ui.small(tr(
-            "Teile sind die Objekte der obersten Ebene (bzw. einer Inkscape-Ebene); \
+        crate::form::caption(
+            ui,
+            tr(
+                "Teile sind die Objekte der obersten Ebene (bzw. einer Inkscape-Ebene); \
              sie werden nach ihren Umrissrechtecken angeordnet, größte zuerst.",
-        ));
+            ),
+        );
     }
 }

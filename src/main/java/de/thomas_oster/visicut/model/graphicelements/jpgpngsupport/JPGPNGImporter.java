@@ -26,8 +26,14 @@ import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.util.Iterator;
 import java.util.List;
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.metadata.IIOMetadata;
+import javax.imageio.metadata.IIOMetadataFormatImpl;
+import javax.imageio.stream.ImageInputStream;
+import org.w3c.dom.Node;
 import javax.swing.filechooser.FileFilter;
 
 /**
@@ -42,9 +48,13 @@ public class JPGPNGImporter extends AbstractImporter
     try
     {
       GraphicSet result = new GraphicSet();
-      //TODO: Get Real Resolution
-      double px2mm = Util.inch2mm(1d/72d);
-      result.setBasicTransform(AffineTransform.getScaleInstance(px2mm, px2mm));
+      // resolution stored in the file (PNG pHYs, JPEG JFIF or Exif, BMP), 72 DPI otherwise
+      double[] dpi = resolutionDpi(inputFile);
+      if (dpi == null)
+      {
+        dpi = new double[]{72, 72};
+      }
+      result.setBasicTransform(AffineTransform.getScaleInstance(Util.inch2mm(1d / dpi[0]), Util.inch2mm(1d / dpi[1])));
       BufferedImage image = ImageIO.read(inputFile);
       if (image != null)
       {
@@ -61,6 +71,95 @@ public class JPGPNGImporter extends AbstractImporter
     {
       throw new ImportException(ex);
     }
+  }
+
+  /**
+   * Horizontal and vertical resolution in DPI from the image metadata, or null.
+   */
+  private static double[] resolutionDpi(File file)
+  {
+    try (ImageInputStream input = ImageIO.createImageInputStream(file))
+    {
+      if (input == null)
+      {
+        return null;
+      }
+      Iterator<ImageReader> readers = ImageIO.getImageReaders(input);
+      if (!readers.hasNext())
+      {
+        return null;
+      }
+      ImageReader reader = readers.next();
+      try
+      {
+        reader.setInput(input);
+        IIOMetadata metadata = reader.getImageMetadata(0);
+        if (metadata == null || !metadata.isStandardMetadataFormatSupported())
+        {
+          return null;
+        }
+        Node tree = metadata.getAsTree(IIOMetadataFormatImpl.standardMetadataFormatName);
+        Double horizontal = pixelSizeMm(tree, "HorizontalPixelSize");
+        Double vertical = pixelSizeMm(tree, "VerticalPixelSize");
+        if (horizontal == null || vertical == null)
+        {
+          return null;
+        }
+        double[] dpi = {snapDpi(25.4 / horizontal), snapDpi(25.4 / vertical)};
+        for (double value : dpi)
+        {
+          if (!(value >= 1 && value <= 100000))
+          {
+            return null;
+          }
+        }
+        return dpi;
+      }
+      finally
+      {
+        reader.dispose();
+      }
+    }
+    catch (IOException | RuntimeException ex)
+    {
+      return null;
+    }
+  }
+
+  /** Files store whole pixels per metre: 2835 px/m mean 72 DPI, not 72.009. */
+  private static double snapDpi(double dpi)
+  {
+    return Math.abs(dpi - Math.round(dpi)) < 0.05 ? Math.round(dpi) : dpi;
+  }
+
+  /** The "value" attribute of the named node of the standard metadata tree, in mm. */
+  private static Double pixelSizeMm(Node node, String name)
+  {
+    if (name.equals(node.getNodeName()) && node.getAttributes() != null)
+    {
+      Node value = node.getAttributes().getNamedItem("value");
+      if (value != null)
+      {
+        try
+        {
+          double size = Double.parseDouble(value.getNodeValue());
+          return size > 0 ? size : null;
+        }
+        catch (NumberFormatException ex)
+        {
+          return null;
+        }
+      }
+    }
+    for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling())
+    {
+      Double found = pixelSizeMm(child, name);
+      if (found != null)
+      {
+        return found;
+      }
+    }
+    return null;
   }
 
   public FileFilter getFileFilter()

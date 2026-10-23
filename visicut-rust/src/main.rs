@@ -17,14 +17,14 @@ use eframe::egui::{
 };
 use std::path::{Path, PathBuf};
 use visicut_core::{
-    i18n::{self, tr},
-    tr,
-};
-use visicut_core::{
-    import, inkscape, instance,
+    addins, import, inkscape, instance,
     ltt::{self, OutputJob, PreparedJob},
     project::{CutOrder, Operation, Project},
     session, svg,
+};
+use visicut_core::{
+    i18n::{self, tr},
+    tr,
 };
 
 const WARNING: Color32 = Color32::from_rgb(180, 75, 40);
@@ -667,6 +667,13 @@ impl VisiCutR {
             }
         }
         if !launch.standalone {
+            // Für das Illustrator-Skript und das CorelDRAW-Makro.
+            if let Ok(program) = std::env::current_exe()
+                && let Err(e) =
+                    addins::remember_program(&visicut_core::device::config_dir(), &program)
+            {
+                eprintln!("Programmpfad nicht gespeichert: {e}");
+            }
             let ctx = cc.egui_ctx.clone();
             match instance::Listener::start(&visicut_core::device::config_dir(), move || {
                 ctx.request_repaint()
@@ -2250,7 +2257,51 @@ impl VisiCutR {
                 );
                 ui.add_space(6.0);
                 form::section(ui, tr("Inkscape"), |ui| self.inkscape_section(ui));
+                form::section(ui, tr("Adobe Illustrator"), |ui| {
+                    if ui.button(tr("Illustrator-Skript speichern …")).clicked() {
+                        self.save_add_in(addins::ILLUSTRATOR);
+                    }
+                    form::caption(
+                        ui,
+                        tr(
+                            "Für Illustrator CS5.1 oder neuer: schickt die Zeichnung oder die Auswahl als Teil an VisiCutR. In Illustrator mit Datei → Skripten → Anderes Skript … (Strg+F12) ausführen; im Skriptordner von Illustrator (z. B. Vorgaben/de_DE/Skripten im Programmordner) erscheint es direkt im Menü.",
+                        ),
+                    );
+                });
+                // CorelDRAW-Makros (VBA) gibt es nur unter Windows.
+                if cfg!(windows) {
+                    form::section(ui, tr("CorelDRAW"), |ui| {
+                        if ui.button(tr("CorelDRAW-Makro speichern …")).clicked() {
+                            self.save_add_in(addins::CORELDRAW);
+                        }
+                        form::caption(
+                            ui,
+                            tr(
+                                "Für CorelDRAW 2017 oder neuer mit VBA: im Makro-Editor (Alt+F11) im Projekt GlobalMacros mit Datei → Datei importieren … einfügen. Danach stehen AddToVisiCutR (als Teil hinzufügen) und OpenInVisiCutR (Projekt ersetzen) unter Extras → Makros und lassen sich unter Extras → Optionen → Anpassung als Symbol ablegen.",
+                            ),
+                        );
+                    });
+                }
+                form::caption(
+                    ui,
+                    tr(
+                        "Skript und Makro finden VisiCutR über den Pfad, den VisiCutR bei jedem Start im Einstellungsordner ablegt. Nach dem Verschieben VisiCutR einmal starten.",
+                    ),
+                );
             });
+    }
+
+    /// Speichert das Illustrator-Skript oder CorelDRAW-Makro, wohin der
+    /// Benutzer möchte; beide Programme haben keinen Ordner, den VisiCutR
+    /// ohne Administratorrechte beschreiben könnte.
+    fn save_add_in(&mut self, (name, content): (&str, &str)) {
+        let Some(path) = rfd::FileDialog::new().set_file_name(name).save_file() else {
+            return;
+        };
+        match std::fs::write(&path, content) {
+            Ok(()) => self.status = tr!("Gespeichert unter {path}", path = path.display()),
+            Err(e) => self.report(tr!("Nicht gespeichert: {error}", error = e)),
+        }
     }
 
     /// Installiert die Inkscape-Erweiterung „Add to VisiCutR“ wie das Menü

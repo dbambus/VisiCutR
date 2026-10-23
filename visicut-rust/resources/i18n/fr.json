@@ -985,5 +985,14 @@
   "Tastenkürzel": "Raccourcis clavier",
   "Zoomen": "Zoomer",
   "Über VisiCutR": "À propos de VisiCutR",
-  "Weitere Ansichtsoptionen": "Autres options d'affichage"
+  "Weitere Ansichtsoptionen": "Autres options d'affichage",
+  "Adobe Illustrator": "Adobe Illustrator",
+  "Illustrator-Skript speichern …": "Enregistrer le script Illustrator …",
+  "Für Illustrator CS5.1 oder neuer: schickt die Zeichnung oder die Auswahl als Teil an VisiCutR. In Illustrator mit Datei → Skripten → Anderes Skript … (Strg+F12) ausführen; im Skriptordner von Illustrator (z. B. Vorgaben/de_DE/Skripten im Programmordner) erscheint es direkt im Menü.": "Pour Illustrator CS5.1 ou plus récent : envoie le dessin ou la sélection à VisiCutR comme pièce. Dans Illustrator, l’exécuter via Fichier → Scripts → Autre script … (Ctrl+F12) ; enregistré dans le dossier des scripts d’Illustrator (p. ex. Paramètres prédéfinis/fr_FR/Scripts dans le dossier du programme), il apparaît directement dans le menu.",
+  "CorelDRAW": "CorelDRAW",
+  "CorelDRAW-Makro speichern …": "Enregistrer la macro CorelDRAW …",
+  "Für CorelDRAW 2017 oder neuer mit VBA: im Makro-Editor (Alt+F11) im Projekt GlobalMacros mit Datei → Datei importieren … einfügen. Danach stehen AddToVisiCutR (als Teil hinzufügen) und OpenInVisiCutR (Projekt ersetzen) unter Extras → Makros und lassen sich unter Extras → Optionen → Anpassung als Symbol ablegen.": "Pour CorelDRAW 2017 ou plus récent avec VBA : dans l’éditeur de macros (Alt+F11), l’ajouter au projet GlobalMacros via Fichier → Importer un fichier …. AddToVisiCutR (ajouter comme pièce) et OpenInVisiCutR (remplacer le projet) apparaissent alors sous Outils → Macros et peuvent être placées comme bouton sous Outils → Options → Personnalisation.",
+  "Skript und Makro finden VisiCutR über den Pfad, den VisiCutR bei jedem Start im Einstellungsordner ablegt. Nach dem Verschieben VisiCutR einmal starten.": "Le script et la macro trouvent VisiCutR grâce au chemin que VisiCutR enregistre dans son dossier de paramètres à chaque démarrage. Après avoir déplacé VisiCutR, le démarrer une fois.",
+  "Gespeichert unter {path}": "Enregistré sous {path}",
+  "Nicht gespeichert: {error}": "Non enregistré : {error}"
 }

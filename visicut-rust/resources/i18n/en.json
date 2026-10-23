@@ -985,5 +985,14 @@
   "Tastenkürzel": "Keyboard shortcuts",
   "Zoomen": "Zoom",
   "Über VisiCutR": "About VisiCutR",
-  "Weitere Ansichtsoptionen": "More view options"
+  "Weitere Ansichtsoptionen": "More view options",
+  "Adobe Illustrator": "Adobe Illustrator",
+  "Illustrator-Skript speichern …": "Save Illustrator script …",
+  "Für Illustrator CS5.1 oder neuer: schickt die Zeichnung oder die Auswahl als Teil an VisiCutR. In Illustrator mit Datei → Skripten → Anderes Skript … (Strg+F12) ausführen; im Skriptordner von Illustrator (z. B. Vorgaben/de_DE/Skripten im Programmordner) erscheint es direkt im Menü.": "For Illustrator CS5.1 or later: sends the drawing or the selection to VisiCutR as a part. In Illustrator run it with File → Scripts → Other Script … (Ctrl+F12); saved in Illustrator's scripts folder (e.g. Presets/en_US/Scripts in the program folder) it appears directly in the menu.",
+  "CorelDRAW": "CorelDRAW",
+  "CorelDRAW-Makro speichern …": "Save CorelDRAW macro …",
+  "Für CorelDRAW 2017 oder neuer mit VBA: im Makro-Editor (Alt+F11) im Projekt GlobalMacros mit Datei → Datei importieren … einfügen. Danach stehen AddToVisiCutR (als Teil hinzufügen) und OpenInVisiCutR (Projekt ersetzen) unter Extras → Makros und lassen sich unter Extras → Optionen → Anpassung als Symbol ablegen.": "For CorelDRAW 2017 or later with VBA: in the macro editor (Alt+F11) add it to the GlobalMacros project with File → Import File …. Then AddToVisiCutR (add as a part) and OpenInVisiCutR (replace the project) are listed under Tools → Macros and can be placed as a button under Tools → Options → Customization.",
+  "Skript und Makro finden VisiCutR über den Pfad, den VisiCutR bei jedem Start im Einstellungsordner ablegt. Nach dem Verschieben VisiCutR einmal starten.": "Script and macro find VisiCutR through the path VisiCutR stores in its settings folder on every start. After moving VisiCutR, start it once.",
+  "Gespeichert unter {path}": "Saved to {path}",
+  "Nicht gespeichert: {error}": "Not saved: {error}"
 }

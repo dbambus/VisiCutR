@@ -1,0 +1,2 @@
+# Der Makro-Editor von CorelDRAW importiert Module nur mit CRLF.
+*.bas -text

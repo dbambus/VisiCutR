@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Schwingungstest 4: drei Kreuze 10 × 10 mm wie auf dem Foto -->
+<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="0 0 100 100">
+<g fill="none" stroke="#ff0000" stroke-width="0.1">
+  <path d="M 10 50 L 20 50"/>
+  <path d="M 15 45 L 15 55"/>
+  <path d="M 45 50 L 55 50"/>
+  <path d="M 50 45 L 50 55"/>
+  <path d="M 80 50 L 90 50"/>
+  <path d="M 85 45 L 85 55"/>
+</g>
+</svg>

@@ -3,6 +3,16 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## Unveröffentlicht
+
+- **Illustrator und CorelDRAW:** Ein Skript für Adobe Illustrator (CS5.1 oder
+  neuer) und ein VBA-Makro für CorelDRAW (2017 oder neuer, Windows) schicken
+  die Zeichnung oder die Auswahl an ihrer Lage auf der Seite wie die
+  Inkscape-Erweiterung an VisiCutR; Texte werden dabei zu Pfaden. Gespeichert
+  werden sie unter Einstellungen → Software-Add-ins, im Windows-Download
+  liegen sie unter `illustrator-script/` und `coreldraw-macro/`. VisiCutR legt
+  dafür bei jedem Start seinen Programmpfad im Einstellungsordner ab.
+
 ## 1.0.0-rc.2 – 22.10.2026
 
 Zweiter Release-Kandidat für VisiCutR 1.0 mit Korrekturen aus den ersten

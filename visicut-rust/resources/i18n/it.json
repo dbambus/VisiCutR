@@ -985,5 +985,14 @@
   "Tastenkürzel": "Scorciatoie da tastiera",
   "Zoomen": "Zoom",
   "Über VisiCutR": "Informazioni su VisiCutR",
-  "Weitere Ansichtsoptionen": "Altre opzioni di visualizzazione"
+  "Weitere Ansichtsoptionen": "Altre opzioni di visualizzazione",
+  "Adobe Illustrator": "Adobe Illustrator",
+  "Illustrator-Skript speichern …": "Salva script Illustrator …",
+  "Für Illustrator CS5.1 oder neuer: schickt die Zeichnung oder die Auswahl als Teil an VisiCutR. In Illustrator mit Datei → Skripten → Anderes Skript … (Strg+F12) ausführen; im Skriptordner von Illustrator (z. B. Vorgaben/de_DE/Skripten im Programmordner) erscheint es direkt im Menü.": "Per Illustrator CS5.1 o successivo: invia il disegno o la selezione a VisiCutR come parte. In Illustrator eseguirlo con File → Script → Altro script … (Ctrl+F12); salvato nella cartella degli script di Illustrator (ad es. Predefiniti/it_IT/Script nella cartella del programma) compare direttamente nel menu.",
+  "CorelDRAW": "CorelDRAW",
+  "CorelDRAW-Makro speichern …": "Salva macro CorelDRAW …",
+  "Für CorelDRAW 2017 oder neuer mit VBA: im Makro-Editor (Alt+F11) im Projekt GlobalMacros mit Datei → Datei importieren … einfügen. Danach stehen AddToVisiCutR (als Teil hinzufügen) und OpenInVisiCutR (Projekt ersetzen) unter Extras → Makros und lassen sich unter Extras → Optionen → Anpassung als Symbol ablegen.": "Per CorelDRAW 2017 o successivo con VBA: nell’editor delle macro (Alt+F11) aggiungerlo al progetto GlobalMacros con File → Importa file …. Poi AddToVisiCutR (aggiungi come parte) e OpenInVisiCutR (sostituisci il progetto) si trovano in Strumenti → Macro e si possono inserire come pulsante in Strumenti → Opzioni → Personalizzazione.",
+  "Skript und Makro finden VisiCutR über den Pfad, den VisiCutR bei jedem Start im Einstellungsordner ablegt. Nach dem Verschieben VisiCutR einmal starten.": "Script e macro trovano VisiCutR tramite il percorso che VisiCutR salva nella cartella delle impostazioni a ogni avvio. Dopo aver spostato VisiCutR, avviarlo una volta.",
+  "Gespeichert unter {path}": "Salvato in {path}",
+  "Nicht gespeichert: {error}": "Non salvato: {error}"
 }

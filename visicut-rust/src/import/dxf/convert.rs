@@ -1,6 +1,6 @@
 //! DXF entities → paths and texts in world millimetres (Y up).
 use super::colors::aci;
-use super::geom::{Affine, P, PathBuilder, Seg, full_turn};
+use super::geom::{self, Affine, P, PathBuilder, Seg, full_turn};
 use super::reader::{Document, Entity, Pair, number};
 use super::text;
 use crate::{i18n::tr, tr};
@@ -45,7 +45,13 @@ pub struct Converted {
 }
 
 const MAX_PRIMITIVES: usize = 500_000;
+/// Segments of all paths together (about 56 bytes each).
+const MAX_SEGMENTS: usize = 4_000_000;
 const MAX_DEPTH: u32 = 16;
+/// Blocks drawn in total. Depth and array size are limited per INSERT, so
+/// a block that inserts itself 1000 × 100 times would otherwise run on for
+/// ever without drawing anything.
+const MAX_BLOCK_INSTANCES: usize = 1_000_000;
 /// Cap height of typical fonts relative to the font size; DXF text height is
 /// the cap height.
 const CAP_HEIGHT: f64 = 0.7;
@@ -78,6 +84,8 @@ struct Converter<'a> {
     missing_blocks: BTreeSet<String>,
     pattern_hatch: bool,
     too_deep: bool,
+    segments: usize,
+    block_instances: usize,
 }
 
 pub fn convert(doc: &Document, unit_mm: f64) -> Result<Converted, String> {
@@ -93,6 +101,8 @@ pub fn convert(doc: &Document, unit_mm: f64) -> Result<Converted, String> {
         missing_blocks: BTreeSet::new(),
         pattern_hatch: false,
         too_deep: false,
+        segments: 0,
+        block_instances: 0,
     };
     let ctx = Ctx {
         m: Affine::scale(unit_mm, unit_mm),
@@ -441,6 +451,12 @@ impl Converter<'_> {
     }
 
     fn push(&mut self, prim: Prim) -> Result<(), String> {
+        if let Prim::Path { segs, .. } = &prim {
+            self.segments += segs.len();
+            if segs.len() >= geom::MAX_PATH_SEGMENTS || self.segments > MAX_SEGMENTS {
+                return Err(tr("DXF-Datei enthält zu viele Objekte").into());
+            }
+        }
         if self.prims.len() >= MAX_PRIMITIVES {
             return Err(tr("DXF-Datei enthält zu viele Objekte").into());
         }
@@ -671,6 +687,10 @@ impl Converter<'_> {
         style: &Style,
         ctx: &Ctx,
     ) -> Result<(), String> {
+        self.block_instances += 1;
+        if self.block_instances > MAX_BLOCK_INSTANCES {
+            return Err(tr("DXF-Datei enthält zu viele Blockreferenzen").into());
+        }
         let Some(block) = self.doc.block(name) else {
             self.missing_blocks.insert(name.to_owned());
             return Ok(());

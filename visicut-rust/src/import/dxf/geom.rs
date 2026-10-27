@@ -108,6 +108,10 @@ pub struct PathBuilder {
     start: P,
 }
 
+/// Segments of one path; a curve that would need more (a spline enlarged a
+/// billion times, say) stops there, and the importer refuses the path.
+pub const MAX_PATH_SEGMENTS: usize = 1_000_000;
+
 /// Chord tolerance (mm) for curves that are flattened.
 const TOLERANCE: f64 = 0.005;
 
@@ -125,12 +129,23 @@ impl PathBuilder {
         }
     }
 
+    fn add(&mut self, seg: Seg) {
+        if self.segs.len() < MAX_PATH_SEGMENTS {
+            self.segs.push(seg);
+        }
+    }
+
+    /// Whether segments were dropped at [`MAX_PATH_SEGMENTS`].
+    pub fn overflowed(&self) -> bool {
+        self.segs.len() >= MAX_PATH_SEGMENTS
+    }
+
     pub fn move_to(&mut self, p: P) {
         let p = self.m.apply(p);
         if let Some(Seg::Move(_)) = self.segs.last() {
             self.segs.pop();
         }
-        self.segs.push(Seg::Move(p));
+        self.add(Seg::Move(p));
         self.current = Some(p);
         self.start = p;
     }
@@ -152,7 +167,7 @@ impl PathBuilder {
             Some(current) => {
                 let world = self.m.apply(p);
                 if !close_to(current, world) {
-                    self.segs.push(Seg::Line(world));
+                    self.add(Seg::Line(world));
                     self.current = Some(world);
                 }
             }
@@ -164,19 +179,18 @@ impl PathBuilder {
             return self.move_to(p);
         }
         let p = self.m.apply(p);
-        self.segs.push(Seg::Line(p));
+        self.add(Seg::Line(p));
         self.current = Some(p);
     }
 
     fn line_to_world(&mut self, p: P) {
-        self.segs.push(Seg::Line(p));
+        self.add(Seg::Line(p));
         self.current = Some(p);
     }
 
     pub fn cubic_to(&mut self, c1: P, c2: P, p: P) {
         let p = self.m.apply(p);
-        self.segs
-            .push(Seg::Cubic(self.m.apply(c1), self.m.apply(c2), p));
+        self.add(Seg::Cubic(self.m.apply(c1), self.m.apply(c2), p));
         self.current = Some(p);
     }
 
@@ -187,7 +201,7 @@ impl PathBuilder {
             {
                 self.segs.pop();
             }
-            self.segs.push(Seg::Close);
+            self.add(Seg::Close);
             self.current = Some(self.start);
         }
     }
@@ -256,6 +270,9 @@ impl PathBuilder {
         self.connect(f(*first));
         for pair in knots.windows(2) {
             let (t0, t1) = (pair[0], pair[1]);
+            if self.overflowed() {
+                return;
+            }
             if t1 <= t0 {
                 continue;
             }
@@ -268,6 +285,9 @@ impl PathBuilder {
     }
 
     fn subdivide(&mut self, f: &dyn Fn(f64) -> P, t0: f64, p0: P, t1: f64, p1: P, depth: u32) {
+        if self.overflowed() {
+            return;
+        }
         let tm = (t0 + t1) / 2.0;
         let pm = f(tm);
         let chord = [p1[0] - p0[0], p1[1] - p0[1]];

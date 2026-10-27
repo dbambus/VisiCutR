@@ -382,3 +382,33 @@ fn emits_text_mtext_hatch_and_linetypes() {
     assert_eq!(objects.len(), 4);
     assert!(objects[1].r#type.contains(&"Text".to_string()));
 }
+
+#[test]
+fn self_inserting_blocks_stop_at_the_instance_limit() {
+    // Depth and array size are limited per INSERT; without a total the
+    // nested 1000 × 100 arrays ran practically for ever.
+    let start = std::time::Instant::now();
+    let error = import_bytes(
+        drawing(
+            MM,
+            "",
+            "|0|BLOCK|8|0|2|A|10|0|20|0|0|INSERT|8|0|2|A|10|0|20|0|70|1000|71|100|0|ENDBLK",
+            "|0|LINE|8|0|10|0|20|0|11|1|21|0|0|INSERT|8|0|2|A|10|0|20|0",
+        )
+        .as_bytes(),
+    )
+    .err()
+    .expect("refused");
+    assert!(error.contains("Blockreferenzen"), "{error}");
+    assert!(start.elapsed() < std::time::Duration::from_secs(30));
+}
+
+#[test]
+fn flattened_curves_have_a_segment_limit() {
+    // Enlarged a billion times every knot interval splits to full depth.
+    let mut path = geom::PathBuilder::new(geom::Affine::scale(1e9, 1e9));
+    let knots: Vec<f64> = (0..200).map(f64::from).collect();
+    path.curve(&|t: f64| [t.sin(), (3.0 * t).cos()], &knots);
+    assert!(path.overflowed());
+    assert_eq!(path.segs.len(), geom::MAX_PATH_SEGMENTS);
+}

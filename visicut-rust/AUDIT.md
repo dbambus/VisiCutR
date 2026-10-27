@@ -20,28 +20,28 @@ auf das Lesen des Codes.
 
 ## Stand der Behebung
 
-Behoben auf dem Branch `claude/serene-planck-3r5kr0`, je Punkt ein Commit:
+Behoben nach 1.0.0-rc.2, je Punkt ein Commit:
 
 | Befund | Commit |
 | --- | --- |
-| H1 Gravur außerhalb des Betts (Y) | `905f7d1` |
-| H2 Widerrufen nach „Öffnen“ | `194ff51` |
-| H3 Verknüpfte Bilder, Netzwerkpfade | `f7a75d4` |
-| M1 Durchgänge neuer Schritte | `b01ed60` |
-| M2 Zip-Bomben | `95c23d8` |
-| M3/M4 JavaScript (Speicher, Zeit) | `1a29327` |
-| M5 PLF-Fristen, Ghostscript-Ausgabe (auch N10) | `1fa5cb6` |
-| M6/M7 DXF-Blöcke und -Kurven | `d4e54d0` |
-| M8 Tiefe Verschachtelung (betraf alle XML-Importe) | `927a0eb` |
-| M9 PDF-Bomben | `f2d3b89` |
-| Importe im UI-Thread | `202c76f` |
-| M10 Kameraserver | `182a0db` |
-| M12 Drehen bläht den Rahmen auf | `c84351f` |
-| M13 Ungesicherte Bibliothek/Geräte beim Beenden | `8859b8a` |
-| N1 ⌘R/Strg+R | `cc27542` |
-| N8 Kamerapasswort, Rechte von `devices.json` (auch N9 für die Geräteliste) | `69d264d` |
-| N5 0,01-%-Markierprofile | `7d6826e` |
-| README im Hauptverzeichnis | `efe6d8b` |
+| H1 Gravur außerhalb des Betts (Y) | `eb349ee` |
+| H2 Widerrufen nach „Öffnen“ | `8b63237` |
+| H3 Verknüpfte Bilder, Netzwerkpfade | `373af04` |
+| M1 Durchgänge neuer Schritte | `2162005` |
+| M2 Zip-Bomben | `796cfd3` |
+| M3/M4 JavaScript (Speicher, Zeit) | `582857b` |
+| M5 PLF-Fristen, Ghostscript-Ausgabe (auch N10) | `91f7b1e` |
+| M6/M7 DXF-Blöcke und -Kurven | `b386cd4` |
+| M8 Tiefe Verschachtelung (betraf alle XML-Importe) | `5a39907` |
+| M9 PDF-Bomben | `a5ebad3` |
+| Importe im UI-Thread | `8fa7c29` |
+| M10 Kameraserver | `06c798b` |
+| M12 Drehen bläht den Rahmen auf | `7b318ae` |
+| M13 Ungesicherte Bibliothek/Geräte beim Beenden | `8f39e98` |
+| N1 ⌘R/Strg+R | `77c6ca5` |
+| N8 Kamerapasswort, Rechte von `devices.json` (auch N9 für die Geräteliste) | `ac16e63` |
+| N5 0,01-%-Markierprofile | `f45c719` |
+| README im Hauptverzeichnis | `f82758f` |
 
 Noch offen sind:
 

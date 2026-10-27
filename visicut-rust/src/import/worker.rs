@@ -90,6 +90,7 @@ impl Job {
 
     /// In the worker process if there is one, else in this one.
     pub(super) fn run(self, limit: Duration) -> Result<Output, String> {
+        let limit = super::time_left(limit)?;
         match EXECUTABLE.get() {
             Some(executable) => run_in_worker(executable, &self, limit),
             None => self.run_here(limit),

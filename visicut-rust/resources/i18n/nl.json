@@ -558,7 +558,7 @@
   "G-Code-Zeile {number}: Radius ist kleiner als der halbe Abstand der Endpunkte": "G-Code-regel {number}: radius is kleiner dan de halve afstand tussen de eindpunten",
   "G-Code-Zeile {number}: Vollkreis mit R ist nicht eindeutig und wird übersprungen": "G-Code-regel {number}: volledige cirkel met R is niet eenduidig en wordt overgeslagen",
   "Gespeicherte Parameterwerte nicht lesbar ({error}); Standardwerte verwendet": "Opgeslagen parameterwaarden niet leesbaar ({error}); standaardwaarden gebruikt",
-  "Ghostscript hat die EPS/PS-Datei nicht innerhalb von 60 Sekunden umgewandelt": "Ghostscript heeft het EPS/PS-bestand niet binnen 60 seconden omgezet",
+  "Ghostscript hat die EPS/PS-Datei nicht innerhalb von {seconds} Sekunden umgewandelt": "Ghostscript heeft het EPS/PS-bestand niet binnen {seconds} seconden omgezet",
   "Ghostscript ist fehlgeschlagen: {error}": "Ghostscript is mislukt: {error}",
   "Ghostscript konnte die EPS/PS-Datei nicht umwandeln: {detail}": "Ghostscript kon het EPS/PS-bestand niet omzetten: {detail}",
   "Ghostscript konnte nicht gestartet werden: {error}": "Ghostscript kon niet worden gestart: {error}",
@@ -992,5 +992,6 @@
   "Hilfsprozess für den Import konnte nicht gestartet werden: {error}": "Het hulpproces voor het importeren kon niet worden gestart: {error}",
   "Import nach {seconds} s abgebrochen (Datei zu aufwendig)": "Importeren na {seconds} s afgebroken (bestand te complex)",
   "Import ist unerwartet abgebrochen": "Het importeren is onverwacht afgebroken",
-  "Import abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Importeren afgebroken: te veel geheugen gebruikt of onverwacht beëindigd"
+  "Import abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Importeren afgebroken: te veel geheugen gebruikt of onverwacht beëindigd",
+  "PDF ist größer als 100 MB": "De PDF is groter dan 100 MB"
 }

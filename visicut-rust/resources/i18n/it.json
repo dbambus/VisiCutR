@@ -558,7 +558,7 @@
   "G-Code-Zeile {number}: Radius ist kleiner als der halbe Abstand der Endpunkte": "Riga G-Code {number}: il raggio è minore della metà della distanza tra i punti finali",
   "G-Code-Zeile {number}: Vollkreis mit R ist nicht eindeutig und wird übersprungen": "Riga G-Code {number}: il cerchio completo con R è ambiguo e viene saltato",
   "Gespeicherte Parameterwerte nicht lesbar ({error}); Standardwerte verwendet": "Valori dei parametri salvati illeggibili ({error}); usati i valori predefiniti",
-  "Ghostscript hat die EPS/PS-Datei nicht innerhalb von 60 Sekunden umgewandelt": "Ghostscript non ha convertito il file EPS/PS entro 60 secondi",
+  "Ghostscript hat die EPS/PS-Datei nicht innerhalb von {seconds} Sekunden umgewandelt": "Ghostscript non ha convertito il file EPS/PS entro {seconds} secondi",
   "Ghostscript ist fehlgeschlagen: {error}": "Ghostscript non riuscito: {error}",
   "Ghostscript konnte die EPS/PS-Datei nicht umwandeln: {detail}": "Ghostscript non è riuscito a convertire il file EPS/PS: {detail}",
   "Ghostscript konnte nicht gestartet werden: {error}": "Impossibile avviare Ghostscript: {error}",
@@ -992,5 +992,6 @@
   "Hilfsprozess für den Import konnte nicht gestartet werden: {error}": "Impossibile avviare il processo ausiliario di importazione: {error}",
   "Import nach {seconds} s abgebrochen (Datei zu aufwendig)": "Importazione interrotta dopo {seconds} s (file troppo complesso)",
   "Import ist unerwartet abgebrochen": "L’importazione si è interrotta inaspettatamente",
-  "Import abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Importazione interrotta: troppa memoria utilizzata o terminata inaspettatamente"
+  "Import abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Importazione interrotta: troppa memoria utilizzata o terminata inaspettatamente",
+  "PDF ist größer als 100 MB": "Il PDF è più grande di 100 MB"
 }

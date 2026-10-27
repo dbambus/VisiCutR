@@ -8,6 +8,10 @@ use std::time::{Duration, Instant};
 
 /// Longest a single Ghostscript conversion may take.
 const TIMEOUT: Duration = Duration::from_secs(60);
+/// Messages kept from Ghostscript (`-dSAFER` still lets a file write there).
+const MAX_MESSAGES: u64 = 64 * 1024;
+/// Largest PDF read back.
+const MAX_PDF_BYTES: u64 = 100 * 1024 * 1024;
 
 pub fn missing() -> &'static str {
     tr(
@@ -20,6 +24,7 @@ pub fn missing() -> &'static str {
 /// Runs `gs -sDEVICE=pdfwrite` on `path` and returns the PDF bytes.
 pub fn to_pdf(path: &Path) -> Result<Vec<u8>, String> {
     let gs = find().ok_or(missing())?;
+    let timeout = crate::import::time_left(TIMEOUT)?;
     let input = std::path::absolute(path).map_err(|e| e.to_string())?;
     let output = TempFile::new();
     let mut command = Command::new(&gs);
@@ -52,23 +57,25 @@ pub fn to_pdf(path: &Path) -> Result<Vec<u8>, String> {
     })?;
     let mut stderr = child.stderr.take();
     let reader = std::thread::spawn(move || {
-        let mut text = String::new();
+        let mut text = Vec::new();
         if let Some(stderr) = stderr.as_mut() {
-            let _ = stderr.read_to_string(&mut text);
+            let _ = stderr.take(MAX_MESSAGES).read_to_end(&mut text);
+            // Keep draining so that Ghostscript never blocks on a full pipe.
+            let _ = std::io::copy(stderr, &mut std::io::sink());
         }
-        text
+        String::from_utf8_lossy(&text).into_owned()
     });
     let started = Instant::now();
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if started.elapsed() > TIMEOUT => {
+            Ok(None) if started.elapsed() > timeout => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(tr(
-                    "Ghostscript hat die EPS/PS-Datei nicht innerhalb von 60 Sekunden umgewandelt",
-                )
-                .into());
+                return Err(tr!(
+                    "Ghostscript hat die EPS/PS-Datei nicht innerhalb von {seconds} Sekunden umgewandelt",
+                    seconds = timeout.as_secs()
+                ));
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(20)),
             Err(e) => {
@@ -77,6 +84,10 @@ pub fn to_pdf(path: &Path) -> Result<Vec<u8>, String> {
         }
     };
     let messages = reader.join().unwrap_or_default();
+    let size = std::fs::metadata(&output.0).map_or(0, |m| m.len());
+    if size > MAX_PDF_BYTES {
+        return Err(tr("PDF ist größer als 100 MB").into());
+    }
     let pdf = std::fs::read(&output.0).unwrap_or_default();
     if !status.success() || pdf.is_empty() {
         let lines = || messages.lines().map(str::trim).filter(|l| !l.is_empty());

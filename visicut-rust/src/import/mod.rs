@@ -76,7 +76,44 @@ pub fn is_importable(path: &Path) -> bool {
     extension(path).is_some_and(|e| EXTENSIONS.contains(&e.as_str()))
 }
 
+/// Time for one file including everything it contains: a VisiCut project
+/// (PLF) holds up to 1000 parts, each of which could otherwise use the
+/// whole time of a script (5 s) or Ghostscript (60 s).
+pub const TIME_LIMIT: std::time::Duration = std::time::Duration::from_secs(90);
+
+thread_local! {
+    static DEADLINE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+}
+
+/// `limit`, shortened to what is left of the running import's time.
+pub(crate) fn time_left(limit: std::time::Duration) -> Result<std::time::Duration, String> {
+    let Some(deadline) = DEADLINE.get() else {
+        return Ok(limit);
+    };
+    match deadline.checked_duration_since(std::time::Instant::now()) {
+        Some(left) if !left.is_zero() => Ok(limit.min(left)),
+        _ => Err(crate::tr!(
+            "Import nach {seconds} s abgebrochen (Datei zu aufwendig)",
+            seconds = TIME_LIMIT.as_secs_f32()
+        )),
+    }
+}
+
 pub fn read_file(path: &Path) -> Result<Imported, String> {
+    struct Outermost;
+    impl Drop for Outermost {
+        fn drop(&mut self) {
+            DEADLINE.set(None);
+        }
+    }
+    let _outermost = DEADLINE.get().is_none().then(|| {
+        DEADLINE.set(Some(std::time::Instant::now() + TIME_LIMIT));
+        Outermost
+    });
+    read_file_within(path)
+}
+
+fn read_file_within(path: &Path) -> Result<Imported, String> {
     let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
     if meta.len() > MAX_FILE_BYTES {
         return Err(tr("Datei ist größer als 25 MB").into());
@@ -120,6 +157,22 @@ mod tests {
         assert!(is_importable(Path::new("x.parametric.svg")));
         assert!(!is_importable(Path::new("job.vcr")));
         assert!(!is_importable(Path::new("noextension")));
+    }
+
+    #[test]
+    fn nested_imports_share_the_time_of_the_outermost() {
+        let limit = std::time::Duration::from_secs(5);
+        assert_eq!(time_left(limit), Ok(limit), "outside an import");
+        DEADLINE.set(Some(
+            std::time::Instant::now() + std::time::Duration::from_secs(2),
+        ));
+        assert!(time_left(limit).unwrap() <= std::time::Duration::from_secs(2));
+        DEADLINE.set(Some(std::time::Instant::now()));
+        assert!(time_left(limit).unwrap_err().contains("abgebrochen"));
+        // read_file sets the deadline only when none is running and clears it.
+        DEADLINE.set(None);
+        let _ = read_file(Path::new("does-not-exist.svg"));
+        assert_eq!(DEADLINE.get(), None);
     }
 
     #[test]

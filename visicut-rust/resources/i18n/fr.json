@@ -558,7 +558,7 @@
   "G-Code-Zeile {number}: Radius ist kleiner als der halbe Abstand der Endpunkte": "Ligne G-Code {number} : le rayon est inférieur à la moitié de la distance entre les extrémités",
   "G-Code-Zeile {number}: Vollkreis mit R ist nicht eindeutig und wird übersprungen": "Ligne G-Code {number} : un cercle complet avec R est ambigu et est ignoré",
   "Gespeicherte Parameterwerte nicht lesbar ({error}); Standardwerte verwendet": "Valeurs de paramètres enregistrées illisibles ({error}) ; valeurs par défaut utilisées",
-  "Ghostscript hat die EPS/PS-Datei nicht innerhalb von 60 Sekunden umgewandelt": "Ghostscript n'a pas converti le fichier EPS/PS en moins de 60 secondes",
+  "Ghostscript hat die EPS/PS-Datei nicht innerhalb von {seconds} Sekunden umgewandelt": "Ghostscript n'a pas converti le fichier EPS/PS en moins de {seconds} secondes",
   "Ghostscript ist fehlgeschlagen: {error}": "Échec de Ghostscript : {error}",
   "Ghostscript konnte die EPS/PS-Datei nicht umwandeln: {detail}": "Ghostscript n'a pas pu convertir le fichier EPS/PS : {detail}",
   "Ghostscript konnte nicht gestartet werden: {error}": "Impossible de lancer Ghostscript : {error}",
@@ -992,5 +992,6 @@
   "Hilfsprozess für den Import konnte nicht gestartet werden: {error}": "Le processus auxiliaire d’importation n’a pas pu être démarré : {error}",
   "Import nach {seconds} s abgebrochen (Datei zu aufwendig)": "Importation interrompue après {seconds} s (fichier trop complexe)",
   "Import ist unerwartet abgebrochen": "L’importation s’est arrêtée de manière inattendue",
-  "Import abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Importation interrompue : trop de mémoire utilisée ou arrêt inattendu"
+  "Import abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Importation interrompue : trop de mémoire utilisée ou arrêt inattendu",
+  "PDF ist größer als 100 MB": "Le PDF dépasse 100 MB"
 }

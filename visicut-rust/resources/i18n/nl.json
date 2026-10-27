@@ -985,5 +985,6 @@
   "Tastenkürzel": "Sneltoetsen",
   "Zoomen": "Zoomen",
   "Über VisiCutR": "Over VisiCutR",
-  "Weitere Ansichtsoptionen": "Meer weergaveopties"
+  "Weitere Ansichtsoptionen": "Meer weergaveopties",
+  "Bild „{name}“ liegt nicht im Ordner der Zeichnung und wurde eingebettet: {path}. Vor dem Weitergeben des Projekts prüfen.": "Afbeelding ‘{name}’ staat niet in de map van de tekening en is ingesloten: {path}. Controleer dit voordat je het project deelt."
 }

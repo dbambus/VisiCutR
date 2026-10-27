@@ -985,5 +985,6 @@
   "Tastenkürzel": "Raccourcis clavier",
   "Zoomen": "Zoomer",
   "Über VisiCutR": "À propos de VisiCutR",
-  "Weitere Ansichtsoptionen": "Autres options d'affichage"
+  "Weitere Ansichtsoptionen": "Autres options d'affichage",
+  "Bild „{name}“ liegt nicht im Ordner der Zeichnung und wurde eingebettet: {path}. Vor dem Weitergeben des Projekts prüfen.": "L’image « {name} » ne se trouve pas dans le dossier du dessin et a été intégrée : {path}. Vérifiez avant de partager le projet."
 }

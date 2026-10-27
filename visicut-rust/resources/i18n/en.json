@@ -985,5 +985,6 @@
   "Tastenkürzel": "Keyboard shortcuts",
   "Zoomen": "Zoom",
   "Über VisiCutR": "About VisiCutR",
-  "Weitere Ansichtsoptionen": "More view options"
+  "Weitere Ansichtsoptionen": "More view options",
+  "Bild „{name}“ liegt nicht im Ordner der Zeichnung und wurde eingebettet: {path}. Vor dem Weitergeben des Projekts prüfen.": "Image “{name}” is not in the drawing's folder and was embedded: {path}. Check before sharing the project."
 }

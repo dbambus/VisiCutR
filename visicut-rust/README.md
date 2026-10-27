@@ -131,8 +131,11 @@ legt das Skript Menüeintrag, MIME-Typen (`application/x-visicutr-project`,
    Ablegen zurück. Text, Formen, Kopien und Nesting wirken auf das gewählte
    Teil.
    Verknüpfte Bilddateien (PNG, JPEG, GIF, WebP, SVG) werden dabei relativ zur
-   SVG geladen und in das Projekt eingebettet; Webadressen werden nicht
-   abgerufen, fehlende Bilder werden als Hinweis gemeldet.
+   SVG geladen und in das Projekt eingebettet; Webadressen und
+   Netzwerkpfade (`\\server\…`, `file://server/…`) werden nicht abgerufen,
+   fehlende Bilder werden als Hinweis gemeldet. Ein Bild außerhalb des
+   Ordners der SVG wird mit Hinweis samt Pfad eingebettet, damit eine fremde
+   SVG nicht unbemerkt andere Dateien ins Projekt holt.
    Rasterbilder (PNG, JPEG, BMP, GIF) erhalten ihre Größe aus der
    Auflösung in der Datei (auf ganze DPI gerundet, 2835 px/m sind 72 DPI),
    sonst 72 DPI wie in VisiCut; G-Code (`.nc`,

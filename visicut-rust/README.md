@@ -326,10 +326,11 @@ werden beim Öffnen eigene Teile an ihrer Stelle; Lage, Drehung und Maßstab
 aus der PLF-Datei bleiben beim Ändern der Parameter erhalten. LaserScript-Dateien (`.ls`) laufen in einer
 abgeschotteten JavaScript-Umgebung ohne Datei- und Netzzugriff mit
 Zeitlimit (5 s); `prompt`-Abfragen erhalten ihren Vorgabewert. Diese
-Skripte und die Ausdrücke parametrischer SVG laufen in einem eigenen
-Hilfsprozess (`visicutr --script-worker`), der nach dem Zeitlimit beendet
-wird und unter Linux höchstens 2 GB Speicher belegen darf: Ein
-präpariertes Skript kann so VisiCutR nicht zum Absturz bringen.
+Skripte, die Ausdrücke parametrischer SVG und das Umwandeln von PDF-Seiten
+laufen in einem eigenen Hilfsprozess (`visicutr --import-worker`), der nach
+dem Zeitlimit (Skripte 5 s, PDF 60 s) beendet wird und unter Linux
+höchstens 2 GB Speicher belegen darf: Eine präparierte Datei kann so
+VisiCutR nicht zum Absturz bringen.
 
 ## Inkscape und Befehlszeile
 

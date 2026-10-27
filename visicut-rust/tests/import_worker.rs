@@ -1,6 +1,6 @@
-//! Scripts from files run in a child process of the application
-//! (`visicutr --script-worker`), so a hostile script can only end that
-//! process: it is killed after the time limit and, on Linux, limited in
+//! Scripts and PDF pages from files run in a child process of the
+//! application (`visicutr --import-worker`), so a hostile file can only end
+//! that process: it is killed after the time limit and, on Linux, limited in
 //! memory.
 
 use std::path::PathBuf;
@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use visicut_core::import;
 
 fn laserscript(name: &str, source: &str) -> PathBuf {
-    import::use_script_worker(env!("CARGO_BIN_EXE_visicutr").into());
+    import::use_worker_executable(env!("CARGO_BIN_EXE_visicutr").into());
     let dir = std::env::temp_dir().join(format!("visicutr-worker-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join(name);
@@ -57,4 +57,15 @@ fn memory_bombs_end_only_the_worker() {
         let error = import::read_file(&path).err().expect(name);
         assert!(error.contains("abgebrochen"), "{name}: {error}");
     }
+}
+
+#[test]
+fn pdf_pages_are_converted_in_the_worker_process() {
+    // hayro inflates streams without a size limit; in the worker a
+    // decompression bomb can only end that process.
+    import::use_worker_executable(env!("CARGO_BIN_EXE_visicutr").into());
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/java_parity/import_pdf_flate/page.pdf");
+    let imported = import::read_file(&path).unwrap();
+    assert!(imported.svg.contains("<path"), "{}", imported.svg);
 }

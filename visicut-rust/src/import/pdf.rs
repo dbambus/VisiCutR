@@ -56,11 +56,25 @@ pub fn read_postscript(path: &Path) -> Result<Imported, String> {
     }
 }
 
-/// Converts the first page of a PDF document into an SVG sized in millimetres.
+/// Converts the first page of a PDF document into an SVG sized in millimetres,
+/// in the import worker: hayro inflates streams without a size limit.
 fn convert(data: Vec<u8>) -> Result<Imported, String> {
+    use super::worker::{Job, Output};
     if !data.starts_with(b"%PDF") && !data.windows(5).take(1024).any(|w| w == b"%PDF-") {
         return Err(tr("Datei ist keine gültige PDF-Datei").into());
     }
+    match Job::pdf(&data).run(super::worker::PDF_TIME_LIMIT)? {
+        Output::Drawn { svg, warnings } => Ok(Imported {
+            svg,
+            warnings,
+            ..Default::default()
+        }),
+        _ => Err(tr("Import ist unerwartet abgebrochen").into()),
+    }
+}
+
+/// [`convert`] in this process.
+pub(super) fn convert_here(data: Vec<u8>) -> Result<Imported, String> {
     // hayro does not use unsafe code but may still panic on malformed input;
     // a broken file must not take the whole application down.
     std::panic::catch_unwind(move || convert_unchecked(data))

@@ -12,11 +12,16 @@ mod raster;
 
 use crate::i18n::tr;
 pub use crate::svg_import::Imported;
+mod worker;
+
 pub use plf::{
-    Parameter, ParameterKind, ParameterValue, SCRIPT_WORKER_FLAG, import_templates, plf_bytes,
-    render_parametric, serve_script_worker, use_script_worker, write_plf,
+    Parameter, ParameterKind, ParameterValue, import_templates, plf_bytes, render_parametric,
+    write_plf,
 };
 use std::path::Path;
+pub use worker::{
+    FLAG as WORKER_FLAG, serve as serve_worker, use_executable as use_worker_executable,
+};
 
 /// Largest file that is read for import.
 pub const MAX_FILE_BYTES: u64 = 25 * 1024 * 1024;

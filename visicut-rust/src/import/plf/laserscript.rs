@@ -56,16 +56,15 @@ pub fn run(source: String, limit: Duration) -> Result<Drawing, String> {
 }
 
 fn run_with(source: String, limit: Duration, max_points: usize) -> Result<Drawing, String> {
-    match (script::Job::LaserScript { source, max_points }).run(limit)? {
-        script::Output::Drawing(drawing) => Ok(drawing),
-        script::Output::Rendered(_) => {
-            Err(tr("Skriptausführung ist unerwartet abgebrochen").into())
-        }
+    use crate::import::worker::{Job, Output};
+    match (Job::LaserScript { source, max_points }).run(limit)? {
+        Output::Drawing(drawing) => Ok(drawing),
+        _ => Err(tr("Skriptausführung ist unerwartet abgebrochen").into()),
     }
 }
 
 /// [`run`] on a thread of this process.
-pub(super) fn run_here(
+pub(crate) fn run_here(
     source: String,
     limit: Duration,
     max_points: usize,

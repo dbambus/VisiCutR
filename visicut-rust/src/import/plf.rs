@@ -24,12 +24,10 @@ mod script;
 mod write;
 mod xml;
 
+pub(super) use laserscript::{Drawing, run_here as laserscript_here};
 pub use mappings::import_templates;
 pub use parametric::{Kind as ParameterKind, Parameter, Value as ParameterValue};
-pub use script::{
-    WORKER_FLAG as SCRIPT_WORKER_FLAG, serve_worker as serve_script_worker,
-    use_worker as use_script_worker,
-};
+pub(super) use parametric::{Rendered, render_here as parametric_here};
 pub use write::{plf_bytes, write_plf};
 
 use super::{Imported, MAX_FILE_BYTES};

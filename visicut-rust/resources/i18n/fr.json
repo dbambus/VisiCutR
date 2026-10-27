@@ -988,6 +988,9 @@
   "Weitere Ansichtsoptionen": "Autres options d'affichage",
   "Bild „{name}“ liegt nicht im Ordner der Zeichnung und wurde eingebettet: {path}. Vor dem Weitergeben des Projekts prüfen.": "L’image « {name} » ne se trouve pas dans le dossier du dessin et a été intégrée : {path}. Vérifiez avant de partager le projet.",
   "Archiv ist entpackt größer als erlaubt": "L’archive décompressée dépasse la taille autorisée",
-  "Skript abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Script interrompu : trop de mémoire utilisée ou arrêt inattendu",
-  "SVG ist tiefer als {depth} Ebenen verschachtelt": "Le SVG est imbriqué sur plus de {depth} niveaux"
+  "SVG ist tiefer als {depth} Ebenen verschachtelt": "Le SVG est imbriqué sur plus de {depth} niveaux",
+  "Hilfsprozess für den Import konnte nicht gestartet werden: {error}": "Le processus auxiliaire d’importation n’a pas pu être démarré : {error}",
+  "Import nach {seconds} s abgebrochen (Datei zu aufwendig)": "Importation interrompue après {seconds} s (fichier trop complexe)",
+  "Import ist unerwartet abgebrochen": "L’importation s’est arrêtée de manière inattendue",
+  "Import abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Importation interrompue : trop de mémoire utilisée ou arrêt inattendu"
 }

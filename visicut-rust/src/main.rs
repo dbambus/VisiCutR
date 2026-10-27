@@ -4622,12 +4622,12 @@ fn window_icon() -> Option<egui::IconData> {
 }
 
 fn main() -> eframe::Result {
-    // Hilfsprozess für Skripte aus Dateien (LaserScript, parametrische SVG).
-    if std::env::args().nth(1).as_deref() == Some(import::SCRIPT_WORKER_FLAG) {
-        std::process::exit(import::serve_script_worker());
+    // Hilfsprozess für Skripte und PDF-Seiten aus Dateien (import::worker).
+    if std::env::args().nth(1).as_deref() == Some(import::WORKER_FLAG) {
+        std::process::exit(import::serve_worker());
     }
     if let Ok(executable) = std::env::current_exe() {
-        import::use_script_worker(executable);
+        import::use_worker_executable(executable);
     }
     let cwd = std::env::current_dir().unwrap_or_default();
     let launch = match instance::parse(std::env::args().skip(1), &cwd) {

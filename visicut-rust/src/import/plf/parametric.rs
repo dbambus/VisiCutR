@@ -119,20 +119,21 @@ pub fn render(
     saved: Vec<(String, Value)>,
     limit: Duration,
 ) -> Result<Rendered, String> {
-    match (script::Job::Parametric {
+    use crate::import::worker::{Job, Output};
+    match (Job::Parametric {
         source,
         psvg,
         saved,
     })
     .run(limit)?
     {
-        script::Output::Rendered(rendered) => Ok(rendered),
-        script::Output::Drawing(_) => Err(tr("Skriptausführung ist unerwartet abgebrochen").into()),
+        Output::Rendered(rendered) => Ok(rendered),
+        _ => Err(tr("Skriptausführung ist unerwartet abgebrochen").into()),
     }
 }
 
 /// [`render`] on a thread of this process.
-pub(super) fn render_here(
+pub(crate) fn render_here(
     source: String,
     psvg: bool,
     saved: Vec<(String, Value)>,

@@ -85,6 +85,7 @@ pub struct ComposeUi {
     gap_y_mm: f64,
     nest: NestSettings,
     fonts: Vec<String>,
+    samples: FontSamples,
 }
 
 impl Default for ComposeUi {
@@ -120,6 +121,7 @@ impl Default for ComposeUi {
             gap_y_mm: 5.0,
             nest: NestSettings::default(),
             fonts: Vec::new(),
+            samples: FontSamples::default(),
         }
     }
 }
@@ -163,7 +165,54 @@ fn mm(ui: &mut egui::Ui, label: &str, value: &mut f64, range: std::ops::RangeInc
     number(ui, label, value, range, "mm");
 }
 
-fn font_choice(ui: &mut egui::Ui, fonts: &[String], font: &mut String) {
+/// Schriftproben für die Schriftauswahl, je Schrift einmal gerendert.
+#[derive(Default)]
+struct FontSamples {
+    /// Text, fett, kursiv der vorhandenen Proben.
+    key: (String, bool, bool),
+    textures: std::collections::HashMap<String, Option<egui::TextureHandle>>,
+}
+
+impl FontSamples {
+    /// Der Text in der Schrift `font` als Tooltip-Inhalt.
+    fn show(&mut self, ui: &mut egui::Ui, font: &str, text: &str, bold: bool, italic: bool) {
+        if self.key.0 != text || self.key.1 != bold || self.key.2 != italic {
+            self.key = (text.to_string(), bold, italic);
+            self.textures.clear();
+        }
+        let ppp = ui.ctx().pixels_per_point();
+        let texture = self.textures.entry(font.to_string()).or_insert_with(|| {
+            compose::font_sample(text, font, bold, italic, (28.0 * ppp) as f64).map(|image| {
+                ui.ctx().load_texture(
+                    format!("font-sample-{font}"),
+                    image,
+                    egui::TextureOptions::LINEAR,
+                )
+            })
+        });
+        match texture {
+            Some(texture) => {
+                let size = texture.size_vec2() / ppp;
+                let max = egui::vec2(CONTENT_WIDTH, 160.0);
+                let scale = (max.x / size.x).min(max.y / size.y).min(1.0);
+                ui.add(egui::Image::new((texture.id(), size * scale)));
+            }
+            None => {
+                ui.label(tr("Die Schrift hat keine passenden Zeichen"));
+            }
+        }
+    }
+}
+
+/// Schriftauswahl; beim Überfahren einer Schrift zeigt ein Tooltip den Text
+/// in dieser Schrift.
+fn font_choice(
+    ui: &mut egui::Ui,
+    fonts: &[String],
+    font: &mut String,
+    samples: &mut FontSamples,
+    (text, bold, italic): (&str, bool, bool),
+) {
     crate::form::row(ui, tr("Schrift"), |ui| {
         crate::form::Dropdown::from_id_salt("font")
             .width(FIELD)
@@ -171,7 +220,8 @@ fn font_choice(ui: &mut egui::Ui, fonts: &[String], font: &mut String) {
             .height(320.0)
             .show_ui(ui, |ui| {
                 for name in fonts {
-                    ui.selectable_value(font, name.clone(), name);
+                    ui.selectable_value(font, name.clone(), name)
+                        .on_hover_ui(|ui| samples.show(ui, name, text, bold, italic));
                 }
             });
     });
@@ -436,7 +486,13 @@ impl ComposeUi {
     fn text_form(&mut self, ui: &mut egui::Ui) {
         let t = &mut self.text;
         text_field(ui, &mut t.text, 3);
-        font_choice(ui, &self.fonts, &mut t.font);
+        font_choice(
+            ui,
+            &self.fonts,
+            &mut t.font,
+            &mut self.samples,
+            (&t.text, t.bold, t.italic),
+        );
         mm(ui, tr("Schriftgröße"), &mut t.size_mm, 0.5..=1000.0);
         crate::form::row(ui, tr("Stil"), |ui| {
             ui.checkbox(&mut t.italic, tr("Kursiv"));
@@ -532,7 +588,13 @@ impl ComposeUi {
             &mut s.frame_inset_mm,
             0.0..=100.0,
         );
-        font_choice(ui, &self.fonts, &mut s.font);
+        font_choice(
+            ui,
+            &self.fonts,
+            &mut s.font,
+            &mut self.samples,
+            (&s.text, s.bold, false),
+        );
         mm(ui, tr("Schriftgröße"), &mut s.size_mm, 0.5..=500.0);
         crate::form::row(ui, tr("Stil"), |ui| {
             ui.checkbox(&mut s.bold, tr("Fett"));

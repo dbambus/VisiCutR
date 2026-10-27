@@ -68,6 +68,7 @@
   "Datei öffnen ({shortcut}) oder hierher ziehen": "Open a file ({shortcut}) or drag it here",
   "Datei öffnen, hierher ziehen oder das Beispiel öffnen": "Open a file, drag it here or open the example",
   "Der Text ergibt keine Umrisse (Schrift ohne passende Zeichen?)": "The text produces no outlines (font without matching glyphs?)",
+  "Die Schrift hat keine passenden Zeichen": "The font has no matching glyphs",
   "Der Text wird in Umrisse umgewandelt und ist danach nicht mehr editierbar.": "The text is converted to outlines and can no longer be edited afterwards.",
   "Doppelte Linien": "Duplicate lines",
   "Doppelte Linien entfernen": "Remove duplicate lines",

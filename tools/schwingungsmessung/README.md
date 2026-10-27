@@ -25,12 +25,16 @@ Der ADXL345 hat selbst kein USB; zwischen Sensor und Laptop sitzt immer ein
 RP2040. Beide Varianten verwenden dieselbe Firmware, die das Board beim Start
 selbst erkennt.
 
-**A: USB-C-Sensorboard mit RP2040** (BIGTREETECH ADXL345 V2, FYSETC Portable
-Input Shaper und ähnliche). Diese Boards laufen ab Werk meist mit
-Klipper-Firmware und müssen einmal auf MicroPython umgestellt werden:
+**A: USB-C-Sensorboard mit RP2040** (Mellow FLY ADXL345 USB, BIGTREETECH
+ADXL345 V2, FYSETC Portable Input Shaper und ähnliche). Der RP2040 sitzt
+hier schon auf der Platine (beim Mellow-Board auf der Rückseite), ein
+zusätzlicher Pico ist nicht nötig: Das Board kommt direkt per USB-C an den
+Laptop. Ab Werk laufen diese Boards meist mit Klipper-Firmware und müssen
+einmal auf MicroPython umgestellt werden:
 
-1. BOOT-Taste gedrückt halten und das Board per USB-C anstecken; es erscheint
-   das Laufwerk `RPI-RP2`.
+1. Die Taste auf dem Board (BOOT) gedrückt halten und das Board per USB-C
+   an den Laptop anstecken, dann loslassen; es erscheint das Laufwerk
+   `RPI-RP2`.
 2. MicroPython für den Raspberry Pi Pico
    (<https://micropython.org/download/RPI_PICO/>, Datei `.uf2`) auf das
    Laufwerk ziehen. Das Board startet neu.
@@ -57,7 +61,11 @@ MicroPython und `main.py` wie bei A, Schritte 1–3.
 
 Andere Boards: in `firmware/main.py` unter `PRESETS` die Pins aus der
 Klipper-Konfiguration des Boards ergänzen. Antwortet der Sensor nicht,
-meldet die Aufnahme `ADXL345 nicht gefunden`.
+meldet die Aufnahme `ADXL345 nicht gefunden`. Die Firmware versucht jedes
+Board erst mit Hardware-SPI, dann mit Software-SPI; `--pruefen` zeigt, was
+gefunden wurde (z. B. `preset=mellow-btt` oder `preset=mellow-btt-soft`).
+Mit Software-SPI reicht die Geschwindigkeit eventuell nicht für 3200 Hz;
+melden sich Überläufe, mit `--rate 1600` aufnehmen.
 
 ### Montage
 
@@ -66,7 +74,8 @@ meldet die Aufnahme `ADXL345 nicht gefunden`.
   und Kabelbinder dämpfen die Schwingung weg.
 - Die Achsen des Sensors möglichst parallel zu den Maschinenachsen
   ausrichten und die Zuordnung notieren, z. B. „Sensor-X zeigt nach
-  Maschinen-−Y“ (Aufdruck auf der Platine).
+  Maschinen-−Y“. Die Sensorachsen sind als Pfeile X, Y, Z auf die Platine
+  gedruckt.
 - Das USB-Kabel so führen und zugentlasten, dass es den ganzen Verfahrweg
   mitmacht, nicht in den Strahlengang hängt und nirgends einhakt.
 - **Keine Sicherheitsabschaltung überbrücken.** Lässt sich das Kabel bei

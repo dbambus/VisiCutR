@@ -1,9 +1,9 @@
 # ADXL345 am RP2040 → USB, für die Schwingungsmessung am Lasercutter.
 #
 # MicroPython-Programm für einen Raspberry Pi Pico mit angeschlossenem
-# ADXL345 oder für fertige USB-C-Sensorboards mit RP2040 (BIGTREETECH
-# ADXL345 V2, FYSETC Portable Input Shaper). Als `main.py` auf das Board
-# kopieren; es startet dann bei jedem Einstecken.
+# ADXL345 oder für fertige USB-C-Sensorboards mit RP2040 (Mellow FLY
+# ADXL345 USB, BIGTREETECH ADXL345 V2, FYSETC Portable Input Shaper). Als
+# `main.py` auf das Board kopieren; es startet dann bei jedem Einstecken.
 #
 # Befehle über die USB-Schnittstelle (eine Zeile, abgeschlossen mit \n):
 #   I        Info-Zeile ausgeben
@@ -21,14 +21,14 @@ import sys
 import time
 
 import micropython
-from machine import SPI, Pin
+from machine import SPI, Pin, SoftSPI
 
 # (Name, SPI-Bus, SCK, MOSI/SDA, MISO/SDO, CS). Die Boards werden in dieser
-# Reihenfolge ausprobiert; gefunden ist der Sensor, wenn er sich mit seiner
-# Kennung 0xE5 meldet. Für ein anderes Board die Pins aus dessen
-# Klipper-Konfiguration ergänzen.
+# Reihenfolge ausprobiert, je erst mit Hardware-, dann mit Software-SPI;
+# gefunden ist der Sensor, wenn er sich mit seiner Kennung 0xE5 meldet. Für
+# ein anderes Board die Pins aus dessen Klipper-Konfiguration ergänzen.
 PRESETS = (
-    ("btt", 1, 10, 11, 12, 9),  # BIGTREETECH ADXL345 V2 (USB-C)
+    ("mellow-btt", 1, 10, 11, 12, 9),  # Mellow FLY ADXL345 USB, BTT ADXL345 V2
     ("fysetc", 1, 10, 11, 12, 13),  # FYSETC Portable Input Shaper
     ("pico", 0, 2, 3, 0, 1),  # Pico: SCL→GP2, SDA→GP3, SDO→GP0, CS→GP1
 )
@@ -54,19 +54,17 @@ SLOT = 7
 
 
 class Sensor:
-    def __init__(self, preset):
+    def __init__(self, preset, soft):
         self.name, bus, sck, mosi, miso, cs = preset
         self.cs = Pin(cs, Pin.OUT, value=1)
         # SPI-Modus 3, höchstens 5 MHz; 3200 Hz brauchen mindestens 2 MHz.
-        self.spi = SPI(
-            bus,
-            baudrate=5_000_000,
-            polarity=1,
-            phase=1,
-            sck=Pin(sck),
-            mosi=Pin(mosi),
-            miso=Pin(miso),
-        )
+        # Software-SPI für Boards, deren Pins nicht zur Hardware passen.
+        pins = {"sck": Pin(sck), "mosi": Pin(mosi), "miso": Pin(miso)}
+        if soft:
+            self.name += "-soft"
+            self.spi = SoftSPI(baudrate=5_000_000, polarity=1, phase=1, **pins)
+        else:
+            self.spi = SPI(bus, baudrate=5_000_000, polarity=1, phase=1, **pins)
         self.tx = bytearray(2)
         self.rx = bytearray(2)
 
@@ -108,10 +106,11 @@ def find():
     for preset in PRESETS:
         if PRESET is not None and preset[0] != PRESET:
             continue
-        sensor = Sensor(preset)
-        if sensor.read(DEVID) == 0xE5 and sensor.read(DEVID) == 0xE5:
-            return sensor
-        sensor.release()
+        for soft in (False, True):
+            sensor = Sensor(preset, soft)
+            if sensor.read(DEVID) == 0xE5 and sensor.read(DEVID) == 0xE5:
+                return sensor
+            sensor.release()
     return None
 
 

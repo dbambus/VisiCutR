@@ -494,7 +494,7 @@
   "Anfrage fehlgeschlagen: {error}": "Richiesta non riuscita: {error}",
   "Aufnahme ist kein Bild": "La ripresa non è un'immagine",
   "Aufnahmebefehl fehlgeschlagen ({status}): {error}": "Comando di acquisizione non riuscito ({status}): {error}",
-  "Aufruf: visicutr-cameraserver [--bind ADRESSE] [--port 8088] [--rotate 0|90|180|270] [--output DATEI] -- AUFNAHMEBEFEHL [ARGUMENTE …]\nOhne --output muss der Befehl das Bild (JPEG oder PNG) auf stdout schreiben.": "Uso: visicutr-cameraserver [--bind INDIRIZZO] [--port 8088] [--rotate 0|90|180|270] [--output FILE] -- COMANDO_ACQUISIZIONE [ARGOMENTI …]\nSenza --output il comando deve scrivere l'immagine (JPEG o PNG) su stdout.",
+  "Aufruf: visicutr-cameraserver [--bind ADRESSE] [--port 8088] [--rotate 0|90|180|270] [--output DATEI] [--user NAME --password KENNWORT] -- AUFNAHMEBEFEHL [ARGUMENTE …]\nOhne --output muss der Befehl das Bild (JPEG oder PNG) auf stdout schreiben. Mit --user verlangt der Server eine Anmeldung; das Kennwort kann statt mit --password auch in VISICUTR_CAMERA_PASSWORD stehen.": "Uso: visicutr-cameraserver [--bind INDIRIZZO] [--port 8088] [--rotate 0|90|180|270] [--output FILE] [--user NOME --password PASSWORD] -- COMANDO_ACQUISIZIONE [ARGOMENTI …]\nSenza --output il comando deve scrivere l'immagine (JPEG o PNG) su stdout. Con --user il server richiede un accesso; invece di --password la password può trovarsi anche in VISICUTR_CAMERA_PASSWORD.",
   "Ausdruck „{shown}“: {error}": "Espressione “{shown}”: {error}",
   "Ausdruck „{text}“: Anführungszeichen nicht geschlossen": "Espressione “{text}”: virgolette non chiuse",
   "Ausdruck „{text}“: schließende Klammer fehlt": "Espressione “{text}”: manca la parentesi di chiusura",
@@ -995,5 +995,10 @@
   "Import abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Importazione interrotta: troppa memoria utilizzata o terminata inaspettatamente",
   "PDF ist größer als 100 MB": "Il PDF è più grande di 100 MB",
   "Dateien werden gelesen …": "Lettura dei file …",
-  "Bitte warten, bis die Dateien gelesen sind": "Attendere che i file siano stati letti"
+  "Bitte warten, bis die Dateien gelesen sind": "Attendere che i file siano stati letti",
+  "--user benötigt ein Kennwort (--password oder VISICUTR_CAMERA_PASSWORD)": "--user richiede una password (--password o VISICUTR_CAMERA_PASSWORD)",
+  "Aufnahmebefehl nach {seconds} s abgebrochen": "Comando di acquisizione interrotto dopo {seconds} s",
+  "Aufnahme ist größer als 64 MB": "L’immagine è più grande di 64 MB",
+  "Anfrage ist zu lang": "La richiesta è troppo lunga",
+  "Aufnahme fehlgeschlagen": "Acquisizione non riuscita"
 }

@@ -522,7 +522,13 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
   `visicutr-cameraserver -- gphoto2 --capture-image-and-download --stdout` oder
   `visicutr-cameraserver --output snap.jpg -- imagesnap -q snap.jpg`
   (`--port`, `--rotate 90`). Er liegt in `VisiCutR.app/Contents/MacOS`
-  bzw. neben der Windows-/Linux-Programmdatei.
+  bzw. neben der Windows-/Linux-Programmdatei. Er lauscht im ganzen Netz;
+  mit `--user NAME` und einem Kennwort (`--password` oder die
+  Umgebungsvariable `VISICUTR_CAMERA_PASSWORD`) verlangt er eine Anmeldung,
+  die VisiCutR mit Kamera-Benutzer und -Kennwort des Geräts sendet. Jede
+  Verbindung hat Fristen (Anfrage 10 s, Antwort 30 s), der Aufnahmebefehl
+  wird nach 30 s beendet, Fehlerdetails stehen nur in der Konsole des
+  Servers.
 
 Windows und Linux bieten dieselben Funktionen in der egui-Oberfläche mit
 Menüleiste Datei, Bearbeiten, Darstellung und Job.

@@ -993,5 +993,7 @@
   "Import nach {seconds} s abgebrochen (Datei zu aufwendig)": "Import stopped after {seconds} s (file too complex)",
   "Import ist unerwartet abgebrochen": "The import ended unexpectedly",
   "Import abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Import stopped: it used too much memory or ended unexpectedly",
-  "PDF ist größer als 100 MB": "The PDF is larger than 100 MB"
+  "PDF ist größer als 100 MB": "The PDF is larger than 100 MB",
+  "Dateien werden gelesen …": "Reading files …",
+  "Bitte warten, bis die Dateien gelesen sind": "Please wait until the files have been read"
 }

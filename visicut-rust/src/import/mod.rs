@@ -99,7 +99,57 @@ pub(crate) fn time_left(limit: std::time::Duration) -> Result<std::time::Duratio
     }
 }
 
+/// Files read ahead on another thread (see [`prefetch`]).
+pub struct Prefetched(std::collections::HashMap<std::path::PathBuf, Result<Imported, String>>);
+
+thread_local! {
+    static PREFETCHED: std::cell::RefCell<Option<Prefetched>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Reads the importable files among `paths`, meant for a background thread:
+/// the window stays responsive while a large or slow file is read. The
+/// application then [`install`]s the result and runs its usual import, whose
+/// [`read_file`] calls take the files from it.
+pub fn prefetch(paths: &[std::path::PathBuf]) -> Prefetched {
+    Prefetched(
+        paths
+            .iter()
+            .filter(|p| is_importable(p))
+            .map(|p| (p.clone(), read_file(p)))
+            .collect(),
+    )
+}
+
+/// Makes `prefetched` the source of [`read_file`] on this thread until
+/// [`uninstall`].
+pub fn install(prefetched: Prefetched) {
+    PREFETCHED.set(Some(prefetched));
+}
+
+pub fn uninstall() {
+    PREFETCHED.set(None);
+}
+
+/// Whether every importable file among `paths` has been read ahead.
+pub fn is_prefetched<'a>(paths: impl IntoIterator<Item = &'a Path>) -> bool {
+    PREFETCHED.with_borrow(|prefetched| {
+        paths.into_iter().filter(|p| is_importable(p)).all(|p| {
+            prefetched
+                .as_ref()
+                .is_some_and(|prefetched| prefetched.0.contains_key(p))
+        })
+    })
+}
+
 pub fn read_file(path: &Path) -> Result<Imported, String> {
+    let ready = PREFETCHED.with_borrow(|prefetched| {
+        prefetched
+            .as_ref()
+            .and_then(|prefetched| prefetched.0.get(path).cloned())
+    });
+    if let Some(result) = ready {
+        return result;
+    }
     struct Outermost;
     impl Drop for Outermost {
         fn drop(&mut self) {

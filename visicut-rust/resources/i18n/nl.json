@@ -993,5 +993,7 @@
   "Import nach {seconds} s abgebrochen (Datei zu aufwendig)": "Importeren na {seconds} s afgebroken (bestand te complex)",
   "Import ist unerwartet abgebrochen": "Het importeren is onverwacht afgebroken",
   "Import abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Importeren afgebroken: te veel geheugen gebruikt of onverwacht beëindigd",
-  "PDF ist größer als 100 MB": "De PDF is groter dan 100 MB"
+  "PDF ist größer als 100 MB": "De PDF is groter dan 100 MB",
+  "Dateien werden gelesen …": "Bestanden worden gelezen …",
+  "Bitte warten, bis die Dateien gelesen sind": "Wacht tot de bestanden zijn gelezen"
 }

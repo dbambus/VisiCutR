@@ -21,7 +21,7 @@ const SVG_NS: &str = "http://www.w3.org/2000/svg";
 const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
 const SODIPODI_NS: &str = "http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd";
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Imported {
     pub svg: String,
     /// German, user-facing notes about images that were not embedded.
@@ -39,6 +39,7 @@ pub struct Imported {
 }
 
 /// A part of an import that keeps its own drawing (see [`Imported::extra_parts`]).
+#[derive(Clone)]
 pub struct ExtraPart {
     pub name: String,
     pub svg: String,

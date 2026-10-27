@@ -305,6 +305,23 @@ struct PendingExport {
 
 /// Stand vor einer Werkzeug- oder Löschaktion: Projekt mit allen Teilen und
 /// deren Texturen.
+/// Dateien, die ein Hintergrund-Thread liest, und was danach mit ihnen
+/// geschieht: Große oder aufwendige Dateien halten so das Fenster nicht an.
+struct Reading {
+    result: std::sync::mpsc::Receiver<import::Prefetched>,
+    then: Deferred,
+    /// Wahl aus der Rückfrage „Zeichnung größer als die Zeichenfläche“.
+    fit_policy: Option<bool>,
+}
+
+/// Ein Import, der nach dem Lesen der Dateien weiterläuft.
+enum Deferred {
+    Open(PathBuf),
+    Drop(Vec<PathBuf>),
+    Request(instance::Request),
+    Reload,
+}
+
 struct Snapshot {
     project: Project,
     texture: Option<egui::TextureHandle>,
@@ -489,6 +506,7 @@ struct VisiCutR {
     /// berechnet die Vorschau und wechselt in den Reiter „Vorschau“.
     show_preview: bool,
     send_result: Option<std::sync::mpsc::Receiver<Result<Vec<String>, String>>>,
+    reading: Option<Reading>,
     devices: devices_ui::DeviceUi,
     jobs: jobs_ui::JobUi,
     vectorize: vectorize_ui::VectorizeUi,
@@ -586,6 +604,7 @@ impl VisiCutR {
             settings_page: SettingsPage::Devices,
             preview: preview_ui::PreviewUi::default(),
             send_result: None,
+            reading: None,
             devices,
             jobs,
             vectorize: vectorize_ui::VectorizeUi::default(),
@@ -1015,12 +1034,79 @@ impl VisiCutR {
     }
 
     fn modal_open(&self) -> bool {
-        self.alert.is_some()
+        self.reading.is_some()
+            || self.alert.is_some()
             || self.replace.is_some()
             || self.overwrite.is_some()
             || self.confirm_clear_cache.is_some()
             || self.confirm_send.is_some()
             || self.lab_offer.is_some()
+    }
+
+    /// Liest die Grafiken unter `paths` im Hintergrund, falls das noch
+    /// nicht geschehen ist; danach läuft `then` mit den gelesenen Dateien.
+    /// `true`, wenn der Import damit aufgeschoben ist.
+    fn read_first(&mut self, ctx: &egui::Context, paths: &[PathBuf], then: Deferred) -> bool {
+        if import::is_prefetched(paths.iter().map(PathBuf::as_path)) {
+            return false;
+        }
+        if self.reading.is_some() {
+            self.status = tr("Bitte warten, bis die Dateien gelesen sind").into();
+            return true;
+        }
+        let (sender, result) = std::sync::mpsc::channel();
+        let paths = paths.to_vec();
+        let repaint = ctx.clone();
+        let started = std::thread::Builder::new()
+            .name("visicutr-import".into())
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || {
+                let _ = sender.send(import::prefetch(&paths));
+                repaint.request_repaint();
+            });
+        if let Err(e) = started {
+            self.report(e.to_string());
+            return true;
+        }
+        self.reading = Some(Reading {
+            result,
+            then,
+            fit_policy: self.fit_policy,
+        });
+        self.status = tr("Dateien werden gelesen …").into();
+        true
+    }
+
+    /// Setzt einen aufgeschobenen Import fort, sobald seine Dateien gelesen sind.
+    fn poll_reading(&mut self, ctx: &egui::Context) {
+        let Some(reading) = &self.reading else {
+            return;
+        };
+        let prefetched = match reading.result.try_recv() {
+            Ok(prefetched) => prefetched,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.reading = None;
+                return self.report(tr("Import ist unerwartet abgebrochen").into());
+            }
+        };
+        let Some(Reading {
+            then, fit_policy, ..
+        }) = self.reading.take()
+        else {
+            return;
+        };
+        import::install(prefetched);
+        let fit_policy = std::mem::replace(&mut self.fit_policy, fit_policy);
+        match then {
+            // Mit Rückfrage, falls inzwischen ungesicherte Änderungen entstanden.
+            Deferred::Open(path) => self.request(ctx, Replace::Open(path)),
+            Deferred::Drop(paths) => self.drop_files(ctx, paths),
+            Deferred::Request(request) => self.open_request(ctx, request),
+            Deferred::Reload => self.reload(ctx),
+        }
+        self.fit_policy = fit_policy;
+        import::uninstall();
     }
 
     fn reset_project(&mut self) {
@@ -1238,6 +1324,9 @@ impl VisiCutR {
             return Err(tr("Datei ist größer als 25 MB").into());
         }
         if import::is_importable(path) {
+            if self.read_first(ctx, &[path.to_owned()], Deferred::Open(path.to_owned())) {
+                return Ok(());
+            }
             let mut imported = import::read_file(path)?;
             if let Some(whole) = visicut_core::svg_import::fit_to_content(&imported.svg) {
                 match self.fit_policy {
@@ -1288,6 +1377,9 @@ impl VisiCutR {
     /// `--add` oder mehreren Dateien wie abgelegt, sonst ersetzt die Datei das
     /// Projekt.
     fn open_request(&mut self, ctx: &egui::Context, mut request: instance::Request) {
+        if self.read_first(ctx, &request.files, Deferred::Request(request.clone())) {
+            return;
+        }
         let options = std::mem::take(&mut request.options);
         if !options.is_empty() {
             self.launch_options = Some(options);
@@ -1389,6 +1481,9 @@ impl VisiCutR {
     fn drop_files(&mut self, ctx: &egui::Context, mut paths: Vec<PathBuf>) {
         if self.busy() {
             self.status = tr("Bitte die laufende Übertragung abwarten").into();
+            return;
+        }
+        if self.read_first(ctx, &paths, Deferred::Drop(paths.clone())) {
             return;
         }
         let (graphics, projects): (Vec<PathBuf>, Vec<PathBuf>) =
@@ -1615,6 +1710,15 @@ impl VisiCutR {
     /// Liest die Dateien aller Teile neu ein (nach Änderungen etwa in
     /// Inkscape); Lage, Maßstab und Zuordnung bleiben.
     fn reload(&mut self, ctx: &egui::Context) {
+        let sources: Vec<PathBuf> = self
+            .project
+            .all_parts()
+            .into_iter()
+            .filter_map(|part| part.source_file.map(PathBuf::from))
+            .collect();
+        if self.read_first(ctx, &sources, Deferred::Reload) {
+            return;
+        }
         let (project, changed, notes) =
             visicut_core::compose::reload_parts(&self.project, self.fit_policy == Some(true));
         if changed == 0 {
@@ -4281,7 +4385,7 @@ impl VisiCutR {
 
     #[cfg(feature = "screenshot")]
     fn capture(&mut self, ctx: &egui::Context) {
-        let computing = self.preview.computing();
+        let computing = self.preview.computing() || self.reading.is_some();
         let Some((path, frames)) = &mut self.capture else {
             return;
         };
@@ -4401,6 +4505,7 @@ impl eframe::App for VisiCutR {
         #[cfg(feature = "screenshot")]
         self.capture(ctx);
         self.poll_send(ctx);
+        self.poll_reading(ctx);
         self.sendable = !self.busy() && self.project.validate().is_ok();
         // Nullpunkt unten links: Bezugspunkt standardmäßig unten links, wie
         // am Gerät; eine eigene Wahl bleibt erhalten.
@@ -4432,7 +4537,9 @@ impl eframe::App for VisiCutR {
                 .filter_map(|f| f.path.clone())
                 .collect()
         });
-        if !dropped.is_empty() && !self.modal_open() {
+        if !dropped.is_empty() && self.reading.is_some() {
+            self.status = tr("Bitte warten, bis die Dateien gelesen sind").into();
+        } else if !dropped.is_empty() && !self.modal_open() {
             self.drop_files(ctx, dropped);
         }
         // Ein späterer Start hat Dateien übergeben: Fenster nach vorn holen.

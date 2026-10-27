@@ -993,5 +993,7 @@
   "Import nach {seconds} s abgebrochen (Datei zu aufwendig)": "Importazione interrotta dopo {seconds} s (file troppo complesso)",
   "Import ist unerwartet abgebrochen": "L’importazione si è interrotta inaspettatamente",
   "Import abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Importazione interrotta: troppa memoria utilizzata o terminata inaspettatamente",
-  "PDF ist größer als 100 MB": "Il PDF è più grande di 100 MB"
+  "PDF ist größer als 100 MB": "Il PDF è più grande di 100 MB",
+  "Dateien werden gelesen …": "Lettura dei file …",
+  "Bitte warten, bis die Dateien gelesen sind": "Attendere che i file siano stati letti"
 }

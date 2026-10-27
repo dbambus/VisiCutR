@@ -1033,6 +1033,14 @@ impl VisiCutR {
         self.project_path = None;
         self.cached = None;
         self.dirty = false;
+        self.forget_history();
+    }
+
+    /// Ein anderes Projekt ersetzt das bisherige: dessen Stände dürfen nicht
+    /// mehr zurückkommen, sonst sicherte ⌘S sie unter dem neuen Dateinamen.
+    fn forget_history(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
     }
 
     fn snapshot(&self) -> Snapshot {
@@ -1185,6 +1193,7 @@ impl VisiCutR {
         self.project_path = None;
         self.cached = None;
         self.dirty = true;
+        self.forget_history();
         self.status = tr("Datei importiert · Maße aus der Datei übernommen").into();
         Ok(())
     }
@@ -1257,6 +1266,7 @@ impl VisiCutR {
                 self.project.material.clear();
             }
             self.devices.apply(&mut self.project);
+            self.forget_history();
             // Ein Zwischenstand hat noch keinen eigenen Speicherort.
             if session::is_cached(&session::dir(), path) {
                 self.project_path = None;

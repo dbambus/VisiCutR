@@ -1000,5 +1000,8 @@
   "Aufnahmebefehl nach {seconds} s abgebrochen": "Capture command stopped after {seconds} s",
   "Aufnahme ist größer als 64 MB": "The picture is larger than 64 MB",
   "Anfrage ist zu lang": "The request is too long",
-  "Aufnahme fehlgeschlagen": "Capture failed"
+  "Aufnahme fehlgeschlagen": "Capture failed",
+  "Änderungen an der Materialbibliothek sichern?": "Save changes to the material library?",
+  "Geräteliste nicht gesichert: {error}": "Device list not saved: {error}",
+  "Materialbibliothek nicht gesichert: {error}": "Material library not saved: {error}"
 }

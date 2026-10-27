@@ -501,6 +501,8 @@ struct VisiCutR {
     /// Wartet auf die Bestätigung „Zwischenspeicher leeren“ (Anzahl Stände).
     confirm_clear_cache: Option<usize>,
     confirm_send: Option<PreparedJob>,
+    /// Rückfrage beim Beenden mit ungesicherter Materialbibliothek.
+    confirm_library_quit: bool,
     preview: preview_ui::PreviewUi,
     /// „Vorschau & Zeit“ (Menü, Reiterleiste) setzt dieses Feld; `update`
     /// berechnet die Vorschau und wechselt in den Reiter „Vorschau“.
@@ -599,6 +601,7 @@ impl VisiCutR {
             overwrite: None,
             confirm_clear_cache: None,
             confirm_send: None,
+            confirm_library_quit: false,
             show_preview: false,
             page: Page::Prepare,
             settings_page: SettingsPage::Devices,
@@ -1040,6 +1043,7 @@ impl VisiCutR {
             || self.overwrite.is_some()
             || self.confirm_clear_cache.is_some()
             || self.confirm_send.is_some()
+            || self.confirm_library_quit
             || self.lab_offer.is_some()
     }
 
@@ -1589,7 +1593,28 @@ impl VisiCutR {
 
     /// Führt eine Aktion aus. Ungesicherte Änderungen kommen vorher ohne
     /// Rückfrage in den Zwischenspeicher; nur wenn das scheitert, wird gefragt.
+    /// Vor dem Beenden: Gerätewerte sichern, die noch auf das Verlassen
+    /// eines Felds warten, und bei ungesicherter Materialbibliothek
+    /// nachfragen. `false`, wenn das Beenden warten muss.
+    fn settings_saved_before_quit(&mut self) -> bool {
+        if !self.devices.save_draft(&mut self.project, &mut self.status) {
+            self.report(tr!(
+                "Geräteliste nicht gesichert: {error}",
+                error = self.status
+            ));
+            return false;
+        }
+        if self.jobs.library_unsaved() {
+            self.confirm_library_quit = true;
+            return false;
+        }
+        true
+    }
+
     fn request(&mut self, ctx: &egui::Context, action: Replace) {
+        if matches!(action, Replace::Quit) && !self.settings_saved_before_quit() {
+            return;
+        }
         if self.busy() && !matches!(action, Replace::Quit) {
             self.status = tr("Bitte die laufende Übertragung abwarten").into();
         } else if self.dirty && !self.stash(matches!(action, Replace::Quit)) {
@@ -4031,6 +4056,47 @@ impl VisiCutR {
 
     /// Dialoge: Hinweis, ungesicherte Änderungen, Ersetzen, Senden.
     fn dialogs(&mut self, ctx: &egui::Context) {
+        if self.confirm_library_quit {
+            // Some(true): sichern, Some(false): verwerfen.
+            let mut choice = None;
+            let modal = egui::Modal::new(egui::Id::new("library_quit")).show(ctx, |ui| {
+                ui.set_max_width(380.0);
+                ui.heading(tr("Änderungen an der Materialbibliothek sichern?"));
+                ui.label(tr("Nicht gesicherte Änderungen gehen verloren."));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button(tr("Sichern")).clicked() {
+                        choice = Some(true);
+                    }
+                    if ui.button(tr("Nicht sichern")).clicked() {
+                        choice = Some(false);
+                    }
+                    if ui.button(tr("Abbrechen")).clicked() {
+                        ui.close();
+                    }
+                });
+            });
+            match choice {
+                Some(save) => {
+                    self.confirm_library_quit = false;
+                    let saved = if save {
+                        self.jobs.save_library()
+                    } else {
+                        self.jobs.discard_library();
+                        Ok(())
+                    };
+                    match saved {
+                        Ok(()) => self.request(ctx, Replace::Quit),
+                        Err(e) => self.report(tr!(
+                            "Materialbibliothek nicht gesichert: {error}",
+                            error = e
+                        )),
+                    }
+                }
+                None if modal.should_close() => self.confirm_library_quit = false,
+                None => {}
+            }
+        }
         if let Some(action) = self.replace.take() {
             let mut choice = None;
             let modal = egui::Modal::new(egui::Id::new("replace")).show(ctx, |ui| {
@@ -4525,6 +4591,8 @@ impl eframe::App for VisiCutR {
             if self.busy() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.status = tr("Bitte die laufende Übertragung vor dem Beenden abwarten").into();
+            } else if !self.settings_saved_before_quit() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             } else if self.dirty && !self.stash(true) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.replace = Some(Replace::Quit);

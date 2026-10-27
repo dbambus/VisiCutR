@@ -2015,6 +2015,33 @@ impl JobUi {
         self.editor = Some(Editor { draft, selected });
     }
 
+    /// Ob die Materialbibliothek ungesicherte Änderungen hat.
+    pub fn library_unsaved(&self) -> bool {
+        self.editor
+            .as_ref()
+            .is_some_and(|e| e.draft != self.library.materials)
+    }
+
+    /// Sichert den Entwurf der Materialbibliothek (wie „Sichern“).
+    pub fn save_library(&mut self) -> Result<(), String> {
+        let Some(editor) = &self.editor else {
+            return Ok(());
+        };
+        let library = Library {
+            materials: editor.draft.clone(),
+            ..self.library.clone()
+        };
+        library.save(&device::config_dir())?;
+        self.library = library;
+        self.custom = true;
+        Ok(())
+    }
+
+    /// Verwirft den Entwurf der Materialbibliothek.
+    pub fn discard_library(&mut self) {
+        self.editor = None;
+    }
+
     /// Verwirft den Entwurf der Bibliothek, wenn er nichts Ungesichertes enthält.
     pub fn close_library_if_clean(&mut self) {
         if self

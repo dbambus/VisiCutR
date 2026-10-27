@@ -1000,5 +1000,8 @@
   "Aufnahmebefehl nach {seconds} s abgebrochen": "Commande de capture interrompue après {seconds} s",
   "Aufnahme ist größer als 64 MB": "L’image dépasse 64 MB",
   "Anfrage ist zu lang": "La requête est trop longue",
-  "Aufnahme fehlgeschlagen": "Échec de la capture"
+  "Aufnahme fehlgeschlagen": "Échec de la capture",
+  "Änderungen an der Materialbibliothek sichern?": "Enregistrer les modifications de la bibliothèque de matériaux ?",
+  "Geräteliste nicht gesichert: {error}": "Liste des appareils non enregistrée : {error}",
+  "Materialbibliothek nicht gesichert: {error}": "Bibliothèque de matériaux non enregistrée : {error}"
 }

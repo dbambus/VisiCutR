@@ -495,8 +495,9 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
   im lokalen Netz (UDP-Rundsendung „VisiCamDiscover“ an Port 8888, drei
   Sekunden); eine wird direkt übernommen, mehrere stehen zur Wahl. Benutzer und
   Passwort gehen als HTTP-Basic-Anmeldung mit, nur wenn beides gesetzt ist.
-  Unter macOS liegt das Passwort im Schlüsselbund, unter Windows und Linux in
-  der Geräteliste; Exporte lassen es immer weg. **Aktualisierung (ms)** (VisiCut
+  Das Passwort liegt in der Geräteliste (`devices.json`), die unter macOS und
+  Linux nur der eigene Benutzer lesen darf (Rechte 0600), unter Windows im
+  privaten Profilordner; Exporte lassen es immer weg. **Aktualisierung (ms)** (VisiCut
   „Zeiten (ms) Kamera“) holt bei eingeblendetem Bild nach jeder Pause (mindestens
   50 ms) ein neues, 0 lädt nur beim Einblenden und mit ⇧⌘K; nach Fehlern
   mit wachsendem Abstand ab 10 s. VisiCut-Geräte mit Zeiten 0 (dort 50 ms)

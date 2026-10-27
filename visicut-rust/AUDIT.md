@@ -18,6 +18,38 @@ sind die Gravur außerhalb des Betts, die Zip-Bombe und die beiden
 JavaScript-Grenzen (Speicher und Laufzeit). Die übrigen Funde stützen sich
 auf das Lesen des Codes.
 
+## Stand der Behebung
+
+Behoben auf dem Branch `claude/serene-planck-3r5kr0`, je Punkt ein Commit:
+
+| Befund | Commit |
+| --- | --- |
+| H1 Gravur außerhalb des Betts (Y) | `905f7d1` |
+| H2 Widerrufen nach „Öffnen“ | `194ff51` |
+| H3 Verknüpfte Bilder, Netzwerkpfade | `f7a75d4` |
+| M1 Durchgänge neuer Schritte | `b01ed60` |
+| M2 Zip-Bomben | `95c23d8` |
+| M3/M4 JavaScript (Speicher, Zeit) | `1a29327` |
+| M5 PLF-Fristen, Ghostscript-Ausgabe (auch N10) | `1fa5cb6` |
+| M6/M7 DXF-Blöcke und -Kurven | `d4e54d0` |
+| M8 Tiefe Verschachtelung (betraf alle XML-Importe) | `927a0eb` |
+| M9 PDF-Bomben | `f2d3b89` |
+| Importe im UI-Thread | `202c76f` |
+| M10 Kameraserver | `182a0db` |
+| M12 Drehen bläht den Rahmen auf | `c84351f` |
+| M13 Ungesicherte Bibliothek/Geräte beim Beenden | `8859b8a` |
+| N1 ⌘R/Strg+R | `cc27542` |
+| N8 Kamerapasswort, Rechte von `devices.json` (auch N9 für die Geräteliste) | `69d264d` |
+| N5 0,01-%-Markierprofile | `7d6826e` |
+| README im Hauptverzeichnis | `efe6d8b` |
+
+Noch offen sind:
+
+- M11 (Hover im Modus „Einzeln“)
+- die übrigen Punkte unter „Bedienung und Daten“
+- N2–N4, N6, N7, N9 (Materialbibliothek, Sitzung), N11–N15
+- `cargo update` der TLS-Kette und die CI-Punkte
+
 ## Ergebnis in Kürze
 
 | | |

@@ -8,17 +8,18 @@ the FAU FabLab LTT iLaser 4000.
 ## Downloads
 
 Get the packages from [GitHub Releases](https://github.com/dbambus/VisiCutR/releases).
-Versions before 1.0 are published as development prereleases.
+Versions with a suffix such as `1.0.0-rc.2` are published as prereleases.
 
 | Platform | Package | Interface |
 | --- | --- | --- |
 | Windows x64 | `VisiCutR-<version>-x86_64-pc-windows-msvc.zip` | Portable egui application |
 | Linux x64 | `VisiCutR-<version>-x86_64-unknown-linux-gnu.tar.gz` | Portable egui application; Ubuntu 24.04 or compatible |
-| macOS Universal (Intel + Apple Silicon) | `VisiCutR-<version>-universal-apple-darwin.zip` | Native AppKit/SwiftUI; macOS 14+ |
+| macOS Apple Silicon | `VisiCutR-<version>-aarch64-apple-darwin.zip` | `VisiCutR.app` with the egui application; macOS 14+ |
 
-No Java is required. macOS uses a native AppKit/SwiftUI interface, Windows
-and Linux an egui interface in their standard style; both offer the same
-functions. macOS applications are ad hoc signed and not Apple-notarized.
+No Java is required. All three platforms use the same egui interface with
+the same functions; Intel Macs are not supported. The macOS application is
+signed ad hoc unless the Developer ID secrets below are configured, in which
+case it is also notarized.
 See the [implementation documentation](visicut-rust/README.md) for build
 instructions, platform requirements and features, and the
 [protocol notes](visicut-rust/PROTOCOL.md) for hardware validation status.

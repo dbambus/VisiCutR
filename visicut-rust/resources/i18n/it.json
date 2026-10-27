@@ -1003,5 +1003,6 @@
   "Aufnahme fehlgeschlagen": "Acquisizione non riuscita",
   "Änderungen an der Materialbibliothek sichern?": "Salvare le modifiche alla libreria dei materiali?",
   "Geräteliste nicht gesichert: {error}": "Elenco dei dispositivi non salvato: {error}",
-  "Materialbibliothek nicht gesichert: {error}": "Libreria dei materiali non salvata: {error}"
+  "Materialbibliothek nicht gesichert: {error}": "Libreria dei materiali non salvata: {error}",
+  "{operation}: Leistung unter 0,1 % wird wie in VisiCut mit 0,1 % gesendet": "{operation}: una potenza inferiore allo 0,1 % viene inviata come 0,1 %, come in VisiCut"
 }

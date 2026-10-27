@@ -1003,5 +1003,6 @@
   "Aufnahme fehlgeschlagen": "Échec de la capture",
   "Änderungen an der Materialbibliothek sichern?": "Enregistrer les modifications de la bibliothèque de matériaux ?",
   "Geräteliste nicht gesichert: {error}": "Liste des appareils non enregistrée : {error}",
-  "Materialbibliothek nicht gesichert: {error}": "Bibliothèque de matériaux non enregistrée : {error}"
+  "Materialbibliothek nicht gesichert: {error}": "Bibliothèque de matériaux non enregistrée : {error}",
+  "{operation}: Leistung unter 0,1 % wird wie in VisiCut mit 0,1 % gesendet": "{operation} : une puissance inférieure à 0,1 % est envoyée à 0,1 %, comme dans VisiCut"
 }

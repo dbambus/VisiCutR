@@ -1003,5 +1003,6 @@
   "Aufnahme fehlgeschlagen": "Opname mislukt",
   "Änderungen an der Materialbibliothek sichern?": "Wijzigingen in de materiaalbibliotheek opslaan?",
   "Geräteliste nicht gesichert: {error}": "Apparatenlijst niet opgeslagen: {error}",
-  "Materialbibliothek nicht gesichert: {error}": "Materiaalbibliotheek niet opgeslagen: {error}"
+  "Materialbibliothek nicht gesichert: {error}": "Materiaalbibliotheek niet opgeslagen: {error}",
+  "{operation}: Leistung unter 0,1 % wird wie in VisiCut mit 0,1 % gesendet": "{operation}: vermogen onder 0,1 % wordt zoals in VisiCut als 0,1 % verzonden"
 }

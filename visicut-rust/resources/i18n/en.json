@@ -1003,5 +1003,6 @@
   "Aufnahme fehlgeschlagen": "Capture failed",
   "Änderungen an der Materialbibliothek sichern?": "Save changes to the material library?",
   "Geräteliste nicht gesichert: {error}": "Device list not saved: {error}",
-  "Materialbibliothek nicht gesichert: {error}": "Material library not saved: {error}"
+  "Materialbibliothek nicht gesichert: {error}": "Material library not saved: {error}",
+  "{operation}: Leistung unter 0,1 % wird wie in VisiCut mit 0,1 % gesendet": "{operation}: power below 0.1 % is sent as 0.1 %, as in VisiCut"
 }

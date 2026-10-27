@@ -693,9 +693,18 @@ fn append_part(
     (preview, frame): (&mut tiny_skia::Pixmap, Frame),
     timeline: &mut Timeline,
 ) -> Result<(PreparedStep, Bounds), String> {
-    if part.sets.iter().any(|s| s.power_percent < 0.1) {
+    if part.sets.iter().any(|s| s.power_percent <= 0.0) {
         return Err(tr!(
             "{operation}: Leistung ist 0 %; im Schritt eine Leistung eintragen (mindestens 0,1 %)",
+            operation = operation_name(part.operation)
+        ));
+    }
+    // The cutter takes power in 0.1 % steps; like Java (at least 1 step)
+    // smaller values such as the FAU profiles' 0.01 % for marking paper
+    // are sent as 0.1 %.
+    if part.sets.iter().any(|s| s.power_percent < 0.1) {
+        warnings.push(tr!(
+            "{operation}: Leistung unter 0,1 % wird wie in VisiCut mit 0,1 % gesendet",
             operation = operation_name(part.operation)
         ));
     }
@@ -2601,6 +2610,20 @@ mod tests {
         p.steps[1].power_percent = 0.0;
         let error = prepare(&p).err().unwrap();
         assert!(error.starts_with("Gravieren: Leistung ist 0 %"), "{error}");
+        // The FAU mark profiles use 0.01 %: sent as the smallest step, 0.1 %.
+        p.steps[1].power_percent = 0.01;
+        let prepared = prepare(&p).unwrap();
+        assert!(
+            prepared.warnings.iter().any(|w| w.contains("0,1 %")),
+            "{:?}",
+            prepared.warnings
+        );
+        assert!(
+            prepared.jobs[0]
+                .bytes
+                .windows(4)
+                .any(|b| b == [0x1b, 0x4a, 0, 1])
+        );
     }
 
     #[test]

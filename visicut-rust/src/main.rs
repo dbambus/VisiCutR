@@ -102,7 +102,7 @@ const COMMAND_SHIFT: Modifiers = Modifiers::COMMAND.plus(Modifiers::SHIFT);
 impl Command {
     /// Reihenfolge der Tastaturprüfung: Kürzel mit Umschalt zuerst, weil egui
     /// zusätzliche Umschalttasten beim Vergleich ignoriert.
-    const KEYBOARD: [Command; 18] = [
+    const KEYBOARD: [Command; 19] = [
         Self::AddPart,
         Self::SaveAs,
         Self::Export,
@@ -111,6 +111,7 @@ impl Command {
         Self::Preview,
         Self::New,
         Self::Open,
+        Self::Reload,
         Self::Save,
         Self::Quit,
         Self::Devices,
@@ -4856,6 +4857,26 @@ mod tests {
             at(128, 20),
             [form::ACCENT.r(), form::ACCENT.g(), form::ACCENT.b()]
         );
+    }
+
+    #[test]
+    fn every_listed_shortcut_is_handled() {
+        // ⌘R stood in the menu and the shortcut list but did nothing.
+        // Undo, Redo, Duplicate and Delete are handled outside text fields.
+        let editing = [
+            Command::Undo,
+            Command::Redo,
+            Command::Duplicate,
+            Command::Delete,
+        ];
+        for command in SHORTCUT_LIST {
+            assert!(command.shortcut().is_some(), "{}", command.title());
+            assert!(
+                Command::KEYBOARD.contains(&command) || editing.contains(&command),
+                "{}",
+                command.title()
+            );
+        }
     }
 
     #[test]

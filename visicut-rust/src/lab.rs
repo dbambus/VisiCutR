@@ -266,6 +266,7 @@ const MAX_SETS: usize = 16;
 /// hintereinander werden zu Durchgängen zusammengefasst.
 fn settings(xml: &[u8]) -> Option<Vec<ParameterSet>> {
     let text = std::str::from_utf8(xml).ok()?;
+    crate::svg::check_nesting(text).ok()?;
     let document = roxmltree::Document::parse(text).ok()?;
     let mut result: Vec<ParameterSet> = Vec::new();
     for set in document
@@ -301,6 +302,7 @@ fn settings(xml: &[u8]) -> Option<Vec<ParameterSet>> {
 
 fn material_name(xml: &[u8]) -> Option<String> {
     let text = std::str::from_utf8(xml).ok()?;
+    crate::svg::check_nesting(text).ok()?;
     let document = roxmltree::Document::parse(text).ok()?;
     let name = document
         .root_element()

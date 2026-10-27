@@ -988,5 +988,6 @@
   "Weitere Ansichtsoptionen": "Meer weergaveopties",
   "Bild „{name}“ liegt nicht im Ordner der Zeichnung und wurde eingebettet: {path}. Vor dem Weitergeben des Projekts prüfen.": "Afbeelding ‘{name}’ staat niet in de map van de tekening en is ingesloten: {path}. Controleer dit voordat je het project deelt.",
   "Archiv ist entpackt größer als erlaubt": "Het archief is uitgepakt groter dan toegestaan",
-  "Skript abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Script afgebroken: te veel geheugen gebruikt of onverwacht beëindigd"
+  "Skript abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Script afgebroken: te veel geheugen gebruikt of onverwacht beëindigd",
+  "SVG ist tiefer als {depth} Ebenen verschachtelt": "De SVG is meer dan {depth} niveaus diep genest"
 }

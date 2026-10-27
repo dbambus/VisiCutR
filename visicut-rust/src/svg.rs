@@ -3,6 +3,76 @@ use resvg::usvg::fontdb;
 use resvg::{tiny_skia, usvg};
 use std::sync::{Arc, OnceLock};
 
+/// Deepest element nesting accepted in XML from files. roxmltree and usvg
+/// walk the tree recursively; 256 levels need less than 384 KB of stack,
+/// so they also fit the 1 MB main thread on Windows. Far deeper files
+/// (100 000 nested groups take 700 KB) overflowed the stack and ended the
+/// application.
+pub const MAX_NESTING: usize = 256;
+
+/// Refuses XML nested deeper than [`MAX_NESTING`]. Counts start and end
+/// tags without building a tree (and without recursion), skipping comments,
+/// CDATA, processing instructions, declarations and quoted attribute values.
+pub fn check_nesting(text: &str) -> Result<(), String> {
+    if nesting_depth(text) > MAX_NESTING {
+        return Err(tr!(
+            "SVG ist tiefer als {depth} Ebenen verschachtelt",
+            depth = MAX_NESTING
+        ));
+    }
+    Ok(())
+}
+
+fn nesting_depth(text: &str) -> usize {
+    let bytes = text.as_bytes();
+    let find = |from: usize, needle: &[u8]| {
+        bytes[from.min(bytes.len())..]
+            .windows(needle.len())
+            .position(|w| w == needle)
+            .map_or(bytes.len(), |p| from + p + needle.len())
+    };
+    // End of a tag at `from`: the '>' outside quotes, and whether "/>".
+    let tag_end = |from: usize| {
+        let mut quote = None;
+        let mut i = from;
+        while i < bytes.len() {
+            match (quote, bytes[i]) {
+                (None, b'"' | b'\'') => quote = Some(bytes[i]),
+                (Some(q), c) if c == q => quote = None,
+                (None, b'>') => return (i + 1, i > from && bytes[i - 1] == b'/'),
+                _ => {}
+            }
+            i += 1;
+        }
+        (bytes.len(), false)
+    };
+    let (mut depth, mut deepest, mut i) = (0usize, 0usize, 0usize);
+    while let Some(offset) = bytes[i..].iter().position(|b| *b == b'<') {
+        let start = i + offset + 1;
+        let rest = &bytes[start..];
+        i = if rest.starts_with(b"!--") {
+            find(start, b"-->")
+        } else if rest.starts_with(b"![CDATA[") {
+            find(start, b"]]>")
+        } else if rest.starts_with(b"?") {
+            find(start, b"?>")
+        } else if rest.starts_with(b"!") {
+            tag_end(start).0
+        } else if rest.starts_with(b"/") {
+            depth = depth.saturating_sub(1);
+            tag_end(start).0
+        } else {
+            let (end, empty) = tag_end(start);
+            if !empty {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            end
+        };
+    }
+    deepest
+}
+
 pub struct Preview {
     pub width_mm: f32,
     pub height_mm: f32,
@@ -198,6 +268,7 @@ pub fn render(source: &str) -> Result<Preview, String> {
     if source.len() > 20 * 1024 * 1024 {
         return Err(tr("SVG ist größer als 20 MB").into());
     }
+    check_nesting(source)?;
     let tree = usvg::Tree::from_str(source, &options())
         .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
     let size = tree.size();
@@ -233,6 +304,25 @@ pub fn render(source: &str) -> Result<Preview, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn nesting_counts_elements_but_not_markup_in_quotes_comments_or_cdata() {
+        use super::nesting_depth;
+        assert_eq!(nesting_depth("<svg/>"), 0);
+        assert_eq!(nesting_depth("<svg><g><rect/></g><g></g></svg>"), 2);
+        assert_eq!(
+            nesting_depth(
+                r#"<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY a "x">]><!-- <g><g> --><svg a="1 > 0" b='<'><![CDATA[<g><g>]]><g th:if="a > b"/></svg>"#
+            ),
+            1
+        );
+        let deep = |n: usize| format!("<svg>{}{}</svg>", "<g>".repeat(n), "</g>".repeat(n));
+        assert!(super::check_nesting(&deep(super::MAX_NESTING - 1)).is_ok());
+        assert!(super::check_nesting(&deep(super::MAX_NESTING)).is_err());
+        // 100 000 levels ended the application in roxmltree.
+        let error = super::render(&deep(100_000)).err().expect("refused");
+        assert!(error.contains("verschachtelt"), "{error}");
+    }
+
     use super::*;
     #[test]
     fn respects_physical_svg_dimensions() {

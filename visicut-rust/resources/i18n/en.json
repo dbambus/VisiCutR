@@ -988,5 +988,6 @@
   "Weitere Ansichtsoptionen": "More view options",
   "Bild „{name}“ liegt nicht im Ordner der Zeichnung und wurde eingebettet: {path}. Vor dem Weitergeben des Projekts prüfen.": "Image “{name}” is not in the drawing's folder and was embedded: {path}. Check before sharing the project.",
   "Archiv ist entpackt größer als erlaubt": "The archive unpacks to more than allowed",
-  "Skript abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Script stopped: it used too much memory or ended unexpectedly"
+  "Skript abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Script stopped: it used too much memory or ended unexpectedly",
+  "SVG ist tiefer als {depth} Ebenen verschachtelt": "The SVG is nested more than {depth} levels deep"
 }

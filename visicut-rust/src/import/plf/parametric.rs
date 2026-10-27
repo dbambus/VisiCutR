@@ -144,6 +144,7 @@ pub(super) fn render_here(
             allow_dtd: true,
             ..Default::default()
         };
+        crate::svg::check_nesting(&source)?;
         let document = roxmltree::Document::parse_with_options(&source, options)
             .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
         engine.eval(BOOTSTRAP)?;
@@ -955,6 +956,22 @@ mod tests {
 
     fn render_ok(source: &str, psvg: bool) -> Rendered {
         render(source.into(), psvg, Vec::new(), script::TIME_LIMIT).unwrap()
+    }
+
+    #[test]
+    fn deep_nesting_is_refused_instead_of_overflowing_the_stack() {
+        let nested = |depth: usize| {
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm">{}<rect width="1" height="1"/>{}</svg>"#,
+                "<g>".repeat(depth),
+                "</g>".repeat(depth)
+            )
+        };
+        assert!(render_ok(&nested(200), true).svg.contains("<rect"));
+        let error = render(nested(100_000), true, Vec::new(), script::TIME_LIMIT)
+            .err()
+            .expect("refused");
+        assert!(error.contains("verschachtelt"), "{error}");
     }
 
     #[test]

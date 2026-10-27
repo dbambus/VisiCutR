@@ -125,6 +125,7 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Entry>, String> {
 /// Liest einen Zuordnungssatz mit seinem Namen (`name`, fehlt in PLF-Dateien).
 fn parse_named(bytes: &[u8]) -> Result<(Option<String>, Vec<Entry>), String> {
     let source = String::from_utf8_lossy(bytes);
+    crate::svg::check_nesting(&source)?;
     let document = roxmltree::Document::parse(&source).map_err(|e| e.to_string())?;
     let root = document.root_element();
     let name = text(child(root, "name"));

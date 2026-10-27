@@ -55,6 +55,7 @@ pub fn read_svg_file(path: &Path) -> Result<Imported, String> {
         return Err(tr("Datei ist größer als 25 MB").into());
     }
     let source = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    crate::svg::check_nesting(&source)?;
     Ok(embed_external_images(
         &source,
         path.parent().unwrap_or(Path::new(".")),
@@ -66,6 +67,7 @@ pub fn read_svg_file(path: &Path) -> Result<Imported, String> {
 /// everything lies inside. Scale and position of the drawing are unchanged.
 pub fn fit_to_content(source: &str) -> Option<String> {
     use resvg::usvg;
+    crate::svg::check_nesting(source).ok()?;
     let tree = usvg::Tree::from_str(source, &crate::svg::options()).ok()?;
     let bbox = tree.root().abs_stroke_bounding_box();
     let canvas = tree.size();
@@ -164,7 +166,10 @@ pub fn embed_external_images(source: &str, base_dir: &Path) -> Imported {
         allow_dtd: true,
         ..Default::default()
     };
-    let Ok(document) = roxmltree::Document::parse_with_options(source, options) else {
+    let parsed = crate::svg::check_nesting(source).and_then(|()| {
+        roxmltree::Document::parse_with_options(source, options).map_err(|e| e.to_string())
+    });
+    let Ok(document) = parsed else {
         return Imported {
             svg: source.to_owned(),
             warnings,
@@ -607,6 +612,19 @@ mod tests {
             );
         let result = embed_external_images(&source, &dir.0);
         assert!(result.warnings[0].contains("nicht gefunden"));
+    }
+
+    #[test]
+    fn deeply_nested_files_are_refused_before_parsing() {
+        let dir = TempDir::new("deep");
+        let path = dir.0.join("deep.svg");
+        let depth = 100_000;
+        let deep = format!("<svg>{}{}</svg>", "<g>".repeat(depth), "</g>".repeat(depth));
+        std::fs::write(&path, &deep).unwrap();
+        let error = read_svg_file(&path).err().expect("refused");
+        assert!(error.contains("verschachtelt"), "{error}");
+        assert_eq!(embed_external_images(&deep, &dir.0).svg, deep);
+        assert!(fit_to_content(&deep).is_none());
     }
 
     #[test]

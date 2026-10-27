@@ -365,6 +365,7 @@ fn points(node: Option<roxmltree::Node>) -> Result<Vec<[f64; 2]>, String> {
 /// Reads a VisiCut `LaserDevice` XML file. Only LTT iLaser 4000 devices with the
 /// machine geometry of the Rust driver are accepted.
 pub fn from_visicut_xml(source: &str) -> Result<LaserDevice, String> {
+    crate::svg::check_nesting(source)?;
     let doc = roxmltree::Document::parse(source).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     if !root.has_tag_name("laserDevice") {

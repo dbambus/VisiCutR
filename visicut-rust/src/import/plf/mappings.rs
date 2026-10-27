@@ -699,6 +699,7 @@ pub fn import_templates(
     let mut archive =
         zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
     let mut templates = Vec::new();
+    let mut budget = crate::import::ZipBudget::new(50 * 1024 * 1024);
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
         let name = file.name().map_err(|e| e.to_string())?.to_string();
@@ -708,8 +709,9 @@ pub fn import_templates(
         if !in_mappings || !name.ends_with(".xml") || file.size() > 5 * 1024 * 1024 {
             continue;
         }
-        let mut source = Vec::new();
-        std::io::Read::read_to_end(&mut file, &mut source).map_err(|e| e.to_string())?;
+        let Some(source) = budget.read(&mut file, 5 * 1024 * 1024)? else {
+            continue;
+        };
         let stem = name.rsplit('/').next().unwrap_or(&name);
         let stem = stem.strip_suffix(".xml").unwrap_or(stem);
         match template(&source, stem, &mut warnings) {

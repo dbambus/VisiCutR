@@ -10,10 +10,12 @@ use crate::materials::{Library, Material, MaterialProfile};
 use crate::project::{Operation, ParameterSet};
 use crate::tr;
 use std::collections::BTreeMap;
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 
 /// Größte Datei im Archiv, die gelesen wird.
 const MAX_ENTRY: u64 = 5 * 1024 * 1024;
+/// All entries together, unpacked.
+const MAX_ARCHIVE: u64 = 100 * 1024 * 1024;
 /// Laserprofil-Dateien und ihr Verfahren; bei mehreren gilt die erste
 /// (wie `scripts/import-fau-materials.py`).
 const OPERATIONS: [(&str, Operation); 5] = [
@@ -79,6 +81,7 @@ pub fn read(bytes: &[u8], name: &str) -> Result<LabSettings, String> {
 fn entries(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, String> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| e.to_string())?;
     let mut result = BTreeMap::new();
+    let mut budget = crate::import::ZipBudget::new(MAX_ARCHIVE);
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
         if !file.is_file() || file.size() > MAX_ENTRY {
@@ -92,8 +95,9 @@ fn entries(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, String> {
         else {
             continue;
         };
-        let mut content = Vec::new();
-        file.read_to_end(&mut content).map_err(|e| e.to_string())?;
+        let Some(content) = budget.read(&mut file, MAX_ENTRY)? else {
+            continue;
+        };
         result.insert(parts[start..].join("/"), content);
     }
     Ok(result)

@@ -21,6 +21,45 @@ use std::path::Path;
 /// Largest file that is read for import.
 pub const MAX_FILE_BYTES: u64 = 25 * 1024 * 1024;
 
+/// Reads ZIP entries within limits. The sizes an archive states for its
+/// entries are not binding: a few kilobytes can inflate to gigabytes (zip
+/// bomb), so only the bytes actually read count, per entry and in total.
+pub(crate) struct ZipBudget {
+    left: u64,
+}
+
+impl ZipBudget {
+    pub(crate) fn new(total: u64) -> Self {
+        Self { left: total }
+    }
+
+    /// The entry's content, or `None` for an entry larger than `limit`;
+    /// fails once the archive as a whole unpacks to more than the budget.
+    pub(crate) fn read(
+        &mut self,
+        entry: &mut impl std::io::Read,
+        limit: u64,
+    ) -> Result<Option<Vec<u8>>, String> {
+        use std::io::Read;
+        let cap = limit.min(self.left);
+        let mut bytes = Vec::new();
+        entry
+            .take(cap + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        let read = bytes.len() as u64;
+        self.left = self.left.saturating_sub(read);
+        if read > cap {
+            return if cap < limit {
+                Err(tr("Archiv ist entpackt größer als erlaubt").into())
+            } else {
+                Ok(None)
+            };
+        }
+        Ok(Some(bytes))
+    }
+}
+
 /// File extensions offered in the open dialogs (without the project format).
 pub const EXTENSIONS: &[&str] = &[
     "svg", "psvg", "dxf", "eps", "ps", "pdf", "png", "jpg", "jpeg", "bmp", "gif", "nc", "gcode",
@@ -76,5 +115,44 @@ mod tests {
         assert!(is_importable(Path::new("x.parametric.svg")));
         assert!(!is_importable(Path::new("job.vcr")));
         assert!(!is_importable(Path::new("noextension")));
+    }
+
+    #[test]
+    fn zip_budget_counts_bytes_read_not_stated_sizes() {
+        let mut budget = ZipBudget::new(10);
+        assert_eq!(
+            budget.read(&mut &b"1234"[..], 5).unwrap(),
+            Some(b"1234".to_vec())
+        );
+        // Larger than the entry limit: skipped, but it still costs.
+        assert_eq!(budget.read(&mut &b"123456"[..], 5).unwrap(), None);
+        assert!(budget.read(&mut &b"12345"[..], 5).is_err());
+
+        // An entry that claims 100 bytes but inflates to 20 MB stops at the
+        // limit instead of filling memory.
+        use std::io::Write;
+        let mut bytes = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut bytes));
+            zip.start_file("bomb.xml", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(&vec![0; 20 * 1024 * 1024]).unwrap();
+            zip.finish().unwrap();
+        }
+        let real = (20u32 * 1024 * 1024).to_le_bytes();
+        let mut patched = 0;
+        for i in 0..bytes.len() - 4 {
+            if bytes[i..i + 4] == real {
+                bytes[i..i + 4].copy_from_slice(&100u32.to_le_bytes());
+                patched += 1;
+            }
+        }
+        assert_eq!(patched, 2, "local and central header");
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
+        let mut entry = archive.by_index(0).unwrap();
+        assert_eq!(entry.size(), 100);
+        let mut budget = ZipBudget::new(50 * 1024 * 1024);
+        assert_eq!(budget.read(&mut entry, 1024 * 1024).unwrap(), None);
+        assert_eq!(budget.left, 49 * 1024 * 1024 - 1, "read 1 MB + 1 byte");
     }
 }

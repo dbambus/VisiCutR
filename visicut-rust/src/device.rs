@@ -4,7 +4,7 @@ use crate::project::MachineSettings;
 use crate::{i18n::tr, tr};
 use serde::{Deserialize, Serialize};
 use std::{
-    io::{Cursor, Read},
+    io::Cursor,
     path::{Path, PathBuf},
 };
 
@@ -472,6 +472,7 @@ fn import_archive(bytes: &[u8]) -> Result<Vec<LaserDevice>, String> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| e.to_string())?;
     let mut devices = Vec::new();
     let mut skipped = Vec::new();
+    let mut budget = crate::import::ZipBudget::new(50 * 1024 * 1024);
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
         let name = file.name().map_err(|e| e.to_string())?.to_string();
@@ -480,9 +481,10 @@ fn import_archive(bytes: &[u8]) -> Result<Vec<LaserDevice>, String> {
         if !in_devices || !name.ends_with(".xml") || file.size() > 5 * 1024 * 1024 {
             continue;
         }
-        let mut source = String::new();
-        file.read_to_string(&mut source)
-            .map_err(|e| e.to_string())?;
+        let Some(source) = budget.read(&mut file, 5 * 1024 * 1024)? else {
+            continue;
+        };
+        let source = String::from_utf8(source).map_err(|e| e.to_string())?;
         match from_visicut_xml(&source) {
             Ok(device) => devices.push(device),
             Err(_) => skipped.push(name.rsplit('/').next().unwrap_or(&name).to_string()),

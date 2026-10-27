@@ -987,5 +987,6 @@
   "Über VisiCutR": "Informazioni su VisiCutR",
   "Weitere Ansichtsoptionen": "Altre opzioni di visualizzazione",
   "Bild „{name}“ liegt nicht im Ordner der Zeichnung und wurde eingebettet: {path}. Vor dem Weitergeben des Projekts prüfen.": "L’immagine «{name}» non si trova nella cartella del disegno ed è stata incorporata: {path}. Controllare prima di condividere il progetto.",
-  "Archiv ist entpackt größer als erlaubt": "L’archivio decompresso supera la dimensione consentita"
+  "Archiv ist entpackt größer als erlaubt": "L’archivio decompresso supera la dimensione consentita",
+  "Skript abgebrochen: zu viel Speicher belegt oder unerwartet beendet": "Script interrotto: troppa memoria utilizzata o terminato inaspettatamente"
 }

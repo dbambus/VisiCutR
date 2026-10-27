@@ -25,7 +25,7 @@ function promptFloat(title, defaultValue) {
 }
 "#;
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Drawing {
     pub path: String,
     pub bounds: Option<[f64; 4]>,
@@ -56,6 +56,20 @@ pub fn run(source: String, limit: Duration) -> Result<Drawing, String> {
 }
 
 fn run_with(source: String, limit: Duration, max_points: usize) -> Result<Drawing, String> {
+    match (script::Job::LaserScript { source, max_points }).run(limit)? {
+        script::Output::Drawing(drawing) => Ok(drawing),
+        script::Output::Rendered(_) => {
+            Err(tr("Skriptausführung ist unerwartet abgebrochen").into())
+        }
+    }
+}
+
+/// [`run`] on a thread of this process.
+pub(super) fn run_here(
+    source: String,
+    limit: Duration,
+    max_points: usize,
+) -> Result<Drawing, String> {
     script::run_isolated(limit, move |engine| execute(engine, &source, max_points))
 }
 

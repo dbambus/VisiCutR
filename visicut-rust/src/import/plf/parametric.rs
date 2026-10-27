@@ -81,7 +81,7 @@ impl Value {
 }
 
 /// Type of a parameter (`type` attribute of `<ref>`); decides the input field.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Kind {
     Number,
     Integer,
@@ -89,7 +89,7 @@ pub enum Kind {
     Text,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Parameter {
     pub name: String,
     /// `label_<language>` or `label`, otherwise the name (like VisiCut).
@@ -104,6 +104,7 @@ pub struct Parameter {
     pub max: Option<f64>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Rendered {
     pub svg: String,
     pub parameters: Vec<Parameter>,
@@ -113,6 +114,25 @@ pub struct Rendered {
 /// Evaluates the template with default parameter values, replaced by
 /// `saved` values where names match (VisiCut's `.parameters` file).
 pub fn render(
+    source: String,
+    psvg: bool,
+    saved: Vec<(String, Value)>,
+    limit: Duration,
+) -> Result<Rendered, String> {
+    match (script::Job::Parametric {
+        source,
+        psvg,
+        saved,
+    })
+    .run(limit)?
+    {
+        script::Output::Rendered(rendered) => Ok(rendered),
+        script::Output::Drawing(_) => Err(tr("Skriptausführung ist unerwartet abgebrochen").into()),
+    }
+}
+
+/// [`render`] on a thread of this process.
+pub(super) fn render_here(
     source: String,
     psvg: bool,
     saved: Vec<(String, Value)>,

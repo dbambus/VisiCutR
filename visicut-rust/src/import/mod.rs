@@ -13,8 +13,8 @@ mod raster;
 use crate::i18n::tr;
 pub use crate::svg_import::Imported;
 pub use plf::{
-    Parameter, ParameterKind, ParameterValue, import_templates, plf_bytes, render_parametric,
-    write_plf,
+    Parameter, ParameterKind, ParameterValue, SCRIPT_WORKER_FLAG, import_templates, plf_bytes,
+    render_parametric, serve_script_worker, use_script_worker, write_plf,
 };
 use std::path::Path;
 

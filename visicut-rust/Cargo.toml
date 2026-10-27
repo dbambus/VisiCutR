@@ -36,6 +36,10 @@ zip = { version = "9.0.0", default-features = false, features = ["deflate"] }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSAppleEventDescriptor", "NSAppleEventManager", "NSNotification", "NSString", "NSURL"] }
 
+# Linux: Speichergrenze des Skript-Hilfsprozesses (src/import/plf/script.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 # Windows: Dateitypen im Benutzerzweig der Registry zuordnen (src/file_types.rs).
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Registry", "Win32_UI_Shell"] }

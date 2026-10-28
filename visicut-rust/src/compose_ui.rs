@@ -230,7 +230,7 @@ fn bold_label(ui: &egui::Ui) -> egui::RichText {
 }
 
 /// „Kursiv“ in kursiver Schrift.
-fn italic_label(ui: &egui::Ui) -> egui::RichText {
+fn italic_label() -> egui::RichText {
     egui::RichText::new(tr("Kursiv")).italics()
 }
 
@@ -499,7 +499,7 @@ impl ComposeUi {
         );
         mm(ui, tr("Schriftgröße"), &mut t.size_mm, 0.5..=1000.0);
         crate::form::row(ui, tr("Stil"), |ui| {
-            ui.checkbox(&mut t.italic, italic_label(ui));
+            ui.checkbox(&mut t.italic, italic_label());
             ui.checkbox(&mut t.bold, bold_label(ui));
         });
         crate::form::row(ui, tr("Ausrichtung"), |ui| {

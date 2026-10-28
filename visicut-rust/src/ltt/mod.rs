@@ -644,6 +644,8 @@ struct DeviceState {
     power: f32,
     /// Job mode (`ESC M`) as last sent; the header sets one bit per pixel.
     job_mode: u8,
+    /// PPI divisor (`ESC P`) sent; like Java `setFrequency` only once per job.
+    ppi: bool,
 }
 
 impl DeviceState {
@@ -652,6 +654,7 @@ impl DeviceState {
             speed: -1.0,
             power: -1.0,
             job_mode: if project.rotary_axis { 0x10 } else { 0 },
+            ppi: false,
         }
     }
 
@@ -759,7 +762,10 @@ fn append_part(
             out.extend([0x1b, 0x45, 0, 0, 0, 0, 0, 0, 0]); // pulse mode off
             out.extend([0x1b, 0x4e, 1]); // colour code red
             out.extend(b"PS");
-            out.extend([0x1b, 0x50, 0, 4]); // PPI divisor
+            if !state.ppi {
+                out.extend([0x1b, 0x50, 0, 4]); // PPI divisor
+                state.ppi = true;
+            }
             let kind = if part.operation == Operation::Mark {
                 MotionKind::Mark
             } else {

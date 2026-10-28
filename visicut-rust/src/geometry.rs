@@ -292,10 +292,12 @@ pub fn outline_contours(project: &Project) -> Result<Vec<Contour>, String> {
         font_resolver: outline_fonts(&missing),
         ..crate::svg::options()
     };
-    let mut tree = usvg::Tree::from_str(&project.svg, &options).map_err(|e| e.to_string())?;
+    let source = with_ids(&project.svg).unwrap_or_else(|| project.svg.clone());
+    let mut tree = usvg::Tree::from_str(&source, &options).map_err(|e| e.to_string())?;
     if let Some(problem) = missing.lock().map_err(|e| e.to_string())?.first() {
         return Err(problem.clone());
     }
+    let even_odd = even_odd_ids(&source, &options);
     if contains_text(tree.root()) {
         let flattened = tree.to_string(&usvg::WriteOptions::default());
         tree = usvg::Tree::from_str(&flattened, &options).map_err(|e| e.to_string())?;
@@ -313,13 +315,15 @@ pub fn outline_contours(project: &Project) -> Result<Vec<Contour>, String> {
             rings.extend(area);
         }
     };
-    collect_areas(tree.root(), project, tree.size(), &mut add);
+    collect_areas(tree.root(), project, tree.size(), &even_odd, &mut add);
     let union = rings.simplify_shape(FillRule::NonZero);
+    // Each area is its outer ring followed by its holes.
     let mut result: Vec<Contour> = union
         .into_iter()
-        .flatten()
-        .filter(|ring| ring.len() >= 3)
-        .map(|mut ring| {
+        .flat_map(|area| area.into_iter().enumerate().map(|(i, ring)| (ring, i > 0)))
+        .filter(|(ring, _)| ring.len() >= 3)
+        .map(|(ring, hole)| {
+            let mut ring = java_ring(ring, hole);
             ring.push(ring[0]);
             ring
         })
@@ -344,10 +348,100 @@ pub fn outline_contours(project: &Project) -> Result<Vec<Contour>, String> {
 
 /// Calls `add` with the flattened subpaths and fill rule of every visible
 /// shape and with the rectangle of every image.
+/// A ring as `java.awt.geom.Area` (VisiCut's outline) returns it: outer
+/// rings counter-clockwise on screen, holes clockwise, each starting at the
+/// top vertex from which an edge leads downwards (the leftmost of several).
+fn java_ring(mut ring: Contour, hole: bool) -> Contour {
+    let n = ring.len();
+    // Shoelace sum with y downwards: negative is counter-clockwise on screen.
+    let area: f64 = (0..n)
+        .map(|i| {
+            let (a, b) = (ring[i], ring[(i + 1) % n]);
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum();
+    if (area < 0.0) == hole {
+        ring.reverse();
+    }
+    // Within 1e-6 mm, so rounding in the transform does not pick a corner.
+    let top = ring.iter().map(|p| p[1]).fold(f64::MAX, f64::min) + 1e-6;
+    let start = (0..n)
+        .filter(|&i| ring[i][1] <= top && ring[(i + 1) % n][1] > top)
+        .min_by(|&a, &b| ring[a][0].total_cmp(&ring[b][0]));
+    if let Some(start) = start {
+        ring.rotate_left(start);
+    }
+    ring
+}
+
+/// The document with an `id` on every element that has none, so the two
+/// parses in [`even_odd_ids`] can be matched; `None` if it is not XML.
+fn with_ids(svg: &str) -> Option<String> {
+    let document = usvg::roxmltree::Document::parse_with_options(
+        svg,
+        usvg::roxmltree::ParsingOptions {
+            allow_dtd: true,
+            ..Default::default()
+        },
+    )
+    .ok()?;
+    let mut inserts: Vec<usize> = document
+        .descendants()
+        .filter(|n| n.is_element() && n.attribute("id").is_none())
+        .map(|n| {
+            // Right behind the tag name as written (prefix included).
+            let start = n.range().start + 1;
+            start
+                + svg[start..]
+                    .find(|c: char| c.is_whitespace() || c == '/' || c == '>')
+                    .unwrap_or(0)
+        })
+        .collect();
+    inserts.sort_unstable();
+    let mut result = svg.to_owned();
+    for (k, at) in inserts.iter().enumerate().rev() {
+        result.insert_str(*at, &format!(" id=\"visicut-outline-{k}\""));
+    }
+    Some(result)
+}
+
+/// Ids of the paths whose fill rule is `evenodd`. usvg drops the fill of
+/// `fill="none"` shapes and with it the rule, which still shapes their area
+/// (SVG; Java's outline uses it too); a second parse forces a fill to read it.
+fn even_odd_ids(source: &str, options: &usvg::Options) -> std::collections::HashSet<String> {
+    fn walk(group: &usvg::Group, ids: &mut std::collections::HashSet<String>) {
+        for node in group.children() {
+            match node {
+                usvg::Node::Group(g) => walk(g, ids),
+                usvg::Node::Path(path)
+                    if path
+                        .fill()
+                        .is_some_and(|f| f.rule() == usvg::FillRule::EvenOdd) =>
+                {
+                    ids.insert(path.id().to_owned());
+                }
+                _ => {}
+            }
+        }
+    }
+    let options = usvg::Options {
+        style_sheet: Some("* { fill: #000 !important; }".into()),
+        fontdb: options.fontdb.clone(),
+        ..crate::svg::options()
+    };
+    let mut ids = std::collections::HashSet::new();
+    if let Ok(tree) = usvg::Tree::from_str(source, &options) {
+        walk(tree.root(), &mut ids);
+    }
+    ids.remove("");
+    ids
+}
+
 fn collect_areas(
     group: &usvg::Group,
     project: &Project,
     size: usvg::Size,
+    even_odd: &std::collections::HashSet<String>,
     add: &mut impl FnMut(Vec<(Contour, bool)>, i_overlay::core::fill_rule::FillRule),
 ) {
     use i_overlay::core::fill_rule::FillRule;
@@ -356,11 +450,13 @@ fn collect_areas(
     }
     for node in group.children() {
         match node {
-            usvg::Node::Group(group) => collect_areas(group, project, size, add),
+            usvg::Node::Group(group) => collect_areas(group, project, size, even_odd, add),
             usvg::Node::Path(path) if path.is_visible() => {
                 let rule = match path.fill().map(|f| f.rule()) {
                     Some(usvg::FillRule::EvenOdd) => FillRule::EvenOdd,
-                    _ => FillRule::NonZero,
+                    Some(_) => FillRule::NonZero,
+                    None if even_odd.contains(path.id()) => FillRule::EvenOdd,
+                    None => FillRule::NonZero,
                 };
                 add(
                     flatten_path(path.data(), affine_of(path.abs_transform()), project, size),
@@ -1634,6 +1730,50 @@ mod clip_tests {
             .sum::<f64>()
             .abs()
             / 2.0
+    }
+
+    #[test]
+    fn outline_rings_start_and_turn_like_java_area() {
+        // Square with a square hole: the outer ring from its top left corner
+        // downwards (counter-clockwise on screen), the hole from its top
+        // right corner downwards (clockwise).
+        let rings = outline_of(
+            r#"<path d="M 10 10 H 90 V 90 H 10 Z M 70 30 H 30 V 70 H 70 Z" fill="black"/>"#,
+        )
+        .unwrap();
+        assert_eq!(rings.len(), 2, "{rings:?}");
+        let start = |ring: &Contour| -> Vec<[f64; 2]> {
+            ring[..2]
+                .iter()
+                .map(|p| [(p[0] * 1e3).round() / 1e3, (p[1] * 1e3).round() / 1e3])
+                .collect()
+        };
+        assert_eq!(start(&rings[0]), [[10.0, 10.0], [10.0, 90.0]]);
+        assert_eq!(start(&rings[1]), [[70.0, 30.0], [70.0, 70.0]]);
+        // A triangle starts at its apex, then down the left side.
+        let triangle = outline_of(r#"<path d="M 50 10 L 90 90 L 10 90 Z" fill="black"/>"#).unwrap();
+        assert_eq!(start(&triangle[0]), [[50.0, 10.0], [10.0, 90.0]]);
+    }
+
+    #[test]
+    fn outline_keeps_the_even_odd_hole_of_an_unfilled_shape() {
+        // Only stroked, so usvg has no fill and no fill rule; the hole stays.
+        for style in [
+            r#"fill="none" fill-rule="evenodd""#,
+            r#"style="fill:none;fill-rule:evenodd""#,
+        ] {
+            let rings = outline_of(&format!(
+                r#"<g fill-rule="nonzero"><path d="M 10 10 H 90 V 90 H 10 Z M 30 30 H 70 V 70 H 30 Z" {style} stroke="red"/></g>"#
+            ))
+            .unwrap();
+            assert_eq!(rings.len(), 2, "{style}: {rings:?}");
+        }
+        // Without evenodd the inner square (same direction) is filled.
+        let rings = outline_of(
+            r#"<path d="M 10 10 H 90 V 90 H 10 Z M 30 30 H 70 V 70 H 30 Z" fill="none" stroke="red"/>"#,
+        )
+        .unwrap();
+        assert_eq!(rings.len(), 1, "{rings:?}");
     }
 
     #[test]

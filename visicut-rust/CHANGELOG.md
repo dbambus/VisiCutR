@@ -7,7 +7,9 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
 
 - **Schriftauswahl:** Jede Schrift steht in der Liste in ihrer eigenen
   Schrift. Geladen werden nur die gerade sichtbaren Einträge, wer die Liste
-  nicht öffnet, braucht keinen zusätzlichen Speicher. Jede Schrift erscheint
+  nicht öffnet, braucht keinen zusätzlichen Speicher. Sehr große Schriftdateien
+  (über 15 MB, vor allem chinesische, japanische und koreanische Schriften)
+  stehen in der normalen Schrift da. Jede Schrift erscheint
   nur noch einmal unter ihrem englischen Namen; die übersetzten Namen
   (russisch, japanisch, chinesisch …) standen bisher zusätzlich in der Liste,
   teils als Kästchen.

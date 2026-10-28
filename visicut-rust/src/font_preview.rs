@@ -2,6 +2,9 @@
 //!
 //! Geladen wird nur, was in der aufgeklappten Liste gerade zu sehen ist, und
 //! dann behalten: wer die Liste nie öffnet, braucht keinen Speicher dafür.
+//! Sehr große Dateien (CJK-Sammlungen bis 64 MB) bleiben in der
+//! Oberflächenschrift, sonst wächst der Speicher beim Durchscrollen um
+//! Hunderte MB.
 
 use eframe::egui;
 use resvg::usvg::fontdb;
@@ -9,12 +12,15 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use visicut_core::svg;
 
-/// Neue Schriften je Bild; große Dateien (CJK: bis 80 MB) sonst ruckeln.
+/// Neue Schriften je Bild, damit das Scrollen nicht ruckelt.
 const PER_PASS: usize = 3;
+/// Größere Schriftdateien werden für die Vorschau nicht geladen.
+const MAX_FILE: usize = 15 * 1024 * 1024;
 
 #[derive(Default)]
 struct Cache {
-    /// Schriftname → Familie zum Zeichnen; `None`, wenn die Schrift fehlt.
+    /// Schriftname → Familie zum Zeichnen; `None`, wenn die Schrift fehlt
+    /// oder ihre Datei zu groß ist.
     families: HashMap<String, Option<egui::FontFamily>>,
     /// Dateien, geteilt von allen Schriften einer `.ttc`-Sammlung.
     files: HashMap<String, &'static [u8]>,
@@ -28,7 +34,7 @@ static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
 pub static FALLBACK: std::sync::OnceLock<&'static [u8]> = std::sync::OnceLock::new();
 
 /// Familie, in der `name` gezeichnet wird; `None` heißt Oberflächenschrift
-/// (noch nicht geladen oder nicht gefunden).
+/// (noch nicht geladen, nicht gefunden oder zu groß).
 pub fn family(ctx: &egui::Context, name: &str) -> Option<egui::FontFamily> {
     let mut guard = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     let cache = guard.get_or_insert_with(Cache::default);
@@ -80,10 +86,10 @@ fn load(ctx: &egui::Context, cache: &mut Cache, name: &str) -> Option<egui::Font
         None => {
             // Bleibt bis zum Programmende: egui braucht `'static`, und eine
             // einmal gezeigte Schrift wird beim Scrollen wieder gebraucht.
-            let data: &'static [u8] = Box::leak(
-                db.with_face_data(id, |data, _| data.to_vec())?
-                    .into_boxed_slice(),
-            );
+            let data = db.with_face_data(id, |data, _| {
+                (data.len() <= MAX_FILE).then(|| data.to_vec())
+            })??;
+            let data: &'static [u8] = Box::leak(data.into_boxed_slice());
             cache.files.insert(key, data);
             data
         }

@@ -413,8 +413,6 @@
   "Werte aus der SVG": "Valeurs du SVG",
   "Widerrufen": "Annuler",
   "Winkel muss endlich sein": "L'angle doit être fini",
-  "X (links)": "X (gauche)",
-  "Y (oben)": "Y (haut)",
   "Y entspricht dem Umfang ({circumference} mm). Gravur zentriert am Gerät ausrichten. Schritte je Umdrehung aus LibLaserCut, am Gerät nicht validiert.": "Y correspond à la circonférence ({circumference} mm). Centrer la gravure sur la machine. Pas par tour repris de LibLaserCut, non validés sur la machine.",
   "Zacken": "Branches",
   "Zeilen": "Lignes",

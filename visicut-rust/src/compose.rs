@@ -360,21 +360,23 @@ pub fn sign(sign: &Sign) -> Result<Vec<NewObject>, String> {
     Ok(objects)
 }
 
-/// Adds elements to the motif. In the individual assignment the new objects
-/// join the step of their operation (a new step if there is none); rules
-/// match them by their colour. Returns the project and the new object ids.
 /// Inserts newly created elements (text, shape, sign). With artwork on the
 /// bed they become a part of their own named `name`, so they move and are
 /// assigned independently of what is already there; otherwise they start
-/// the motif.
+/// the motif. The objects keep their arrangement among each other; where
+/// they go on the bed decides [`place_in_view`] with the visible part of the
+/// bed `view` (x, y, width, height in mm).
 pub fn add_objects_as_part(
     project: &Project,
     objects: &[NewObject],
     name: &str,
+    view: [f32; 4],
 ) -> Result<Project, String> {
     if !project.has_artwork() {
         let (mut result, _) = add_objects(project, objects)?;
         result.part_name = name.to_string();
+        (result.x_mm, result.y_mm) =
+            place_in_view(project, result.width_mm, result.height_mm, view);
         return Ok(result);
     }
     let empty = Project {
@@ -390,30 +392,68 @@ pub fn add_objects_as_part(
     };
     let (created, _) = add_objects(&empty, objects)?;
     let mut part = created.active();
-    // Auf etwas Vorhandenem wäre das Neue nicht mehr anklickbar: daneben
-    // legen, sonst darunter (wie `add_part`).
-    let overlaps = |x: f32, y: f32| {
-        project.all_parts().iter().any(|p| {
-            x < p.x_mm + p.width_mm
-                && p.x_mm < x + part.width_mm
-                && y < p.y_mm + p.height_mm
-                && p.y_mm < y + part.height_mm
-        })
-    };
-    if overlaps(part.x_mm, part.y_mm) {
-        let [bx, by, bw, bh] = project.bounds();
-        let gap = APPEND_GAP_MM as f32;
-        if bx + bw + gap + part.width_mm <= project.bed_width_mm {
-            (part.x_mm, part.y_mm) = (bx + bw + gap, by);
-        } else if by + bh + gap + part.height_mm <= project.bed_height_mm {
-            (part.x_mm, part.y_mm) = (bx, by + bh + gap);
-        }
-    }
+    (part.x_mm, part.y_mm) = place_in_view(project, part.width_mm, part.height_mm, view);
     let mut result = project.clone();
     result.add_part(part);
     Ok(result)
 }
 
+/// Where a new part of `width` × `height` mm goes: in the middle of the
+/// visible part of the bed `view` (x, y, width, height in mm; empty means the
+/// whole bed). On something already there it would no longer be clickable,
+/// so it then takes the free spot in view closest to the middle, with
+/// [`APPEND_GAP_MM`] to the other parts. Without a free spot it stays in the
+/// middle. Never beyond the bed edges as long as it fits on the bed.
+fn place_in_view(project: &Project, width: f32, height: f32, view: [f32; 4]) -> (f32, f32) {
+    let (bed_w, bed_h) = (project.bed_width_mm, project.bed_height_mm);
+    let [mut vx, mut vy, mut vw, mut vh] = view;
+    // Auf das Bett beschränken.
+    (vw, vh) = (
+        (vx + vw).min(bed_w) - vx.max(0.0),
+        (vy + vh).min(bed_h) - vy.max(0.0),
+    );
+    (vx, vy) = (vx.max(0.0), vy.max(0.0));
+    if !(vw > 0.0 && vh > 0.0) {
+        [vx, vy, vw, vh] = [0.0, 0.0, bed_w, bed_h];
+    }
+    let fit = |v: f32, size: f32, bed: f32| v.min(bed - size).max(0.0);
+    let middle = (
+        fit(vx + (vw - width) / 2.0, width, bed_w),
+        fit(vy + (vh - height) / 2.0, height, bed_h),
+    );
+    let gap = APPEND_GAP_MM as f32;
+    let parts = project.all_parts();
+    let free = |(x, y): (f32, f32)| {
+        !parts.iter().any(|p| {
+            x < p.x_mm + p.width_mm + gap
+                && p.x_mm < x + width + gap
+                && y < p.y_mm + p.height_mm + gap
+                && p.y_mm < y + height + gap
+        })
+    };
+    if free(middle) {
+        return middle;
+    }
+    let step = (vw.min(vh) / 50.0).max(1.0);
+    let distance = |(x, y): (f32, f32)| (x - middle.0).powi(2) + (y - middle.1).powi(2);
+    let mut best: Option<(f32, f32)> = None;
+    let mut y = vy;
+    while y + height <= vy + vh {
+        let mut x = vx;
+        while x + width <= vx + vw {
+            if free((x, y)) && best.is_none_or(|b| distance((x, y)) < distance(b)) {
+                best = Some((x, y));
+            }
+            x += step;
+        }
+        y += step;
+    }
+    best.unwrap_or(middle)
+}
+
+/// Adds elements to the motif. In the individual assignment the new objects
+/// join the step of their operation (a new step if there is none); rules
+/// match them by their colour. Returns the project and the new object ids.
 pub fn add_objects(
     project: &Project,
     objects: &[NewObject],
@@ -2660,26 +2700,62 @@ mod tests {
     #[test]
     fn new_signs_become_parts_of_their_own() {
         let sign = super::sign(&Sign::default()).unwrap();
-        let first = add_objects_as_part(&Project::default(), &sign, "Schild").unwrap();
+        let bed = [0.0, 0.0, 1000.0, 600.0];
+        let first = add_objects_as_part(&Project::default(), &sign, "Schild", bed).unwrap();
         assert_eq!(first.part_count(), 1);
-        let moved: Vec<NewObject> = sign
-            .iter()
-            .cloned()
-            .map(|o| NewObject {
-                x_mm: o.x_mm + 200.0,
-                ..o
-            })
-            .collect();
-        let second = add_objects_as_part(&first, &moved, "Schild").unwrap();
+        let second = add_objects_as_part(&first, &sign, "Schild", bed).unwrap();
         assert_eq!(second.part_count(), 2);
         // Das erste Schild bleibt unverändert, das zweite ist gewählt.
         assert_eq!(second.parts[0].svg, first.svg);
         assert_eq!(second.active_part, 1);
-        assert!(second.x_mm > first.x_mm + 150.0);
-        // An derselben Stelle erstellt, kommt es rechts daneben statt darauf.
-        let third = add_objects_as_part(&first, &sign, "Schild").unwrap();
-        assert_eq!(third.y_mm, first.y_mm);
-        assert!((third.x_mm - (first.x_mm + first.width_mm + APPEND_GAP_MM as f32)).abs() < 0.01);
+        // Nicht auf das erste, sondern mit Abstand daneben.
+        let [a, b] = [second.parts[0].clone(), second.active()];
+        let gap = APPEND_GAP_MM as f32 - 0.01;
+        assert!(
+            b.x_mm >= a.x_mm + a.width_mm + gap
+                || a.x_mm >= b.x_mm + b.width_mm + gap
+                || b.y_mm >= a.y_mm + a.height_mm + gap
+                || a.y_mm >= b.y_mm + b.height_mm + gap,
+            "{a:?} {b:?}"
+        );
+    }
+
+    #[test]
+    fn new_parts_go_into_the_visible_part_of_the_bed() {
+        let sign = super::sign(&Sign::default()).unwrap();
+        // Auf 400 × 200 mm unten rechts gezoomt: mittig darin.
+        let view = [500.0, 300.0, 400.0, 200.0];
+        let first = add_objects_as_part(&Project::default(), &sign, "Schild", view).unwrap();
+        let centre = |p: &Project| (p.x_mm + p.width_mm / 2.0, p.y_mm + p.height_mm / 2.0);
+        let (cx, cy) = centre(&first);
+        assert!(
+            (cx - 700.0).abs() < 0.01 && (cy - 400.0).abs() < 0.01,
+            "{cx} {cy}"
+        );
+        // Weitere Teile bleiben im Ausschnitt.
+        let mut project = first;
+        for _ in 0..3 {
+            project = add_objects_as_part(&project, &sign, "Schild", view).unwrap();
+            let p = project.active();
+            assert!(p.x_mm >= 500.0 && p.x_mm + p.width_mm <= 900.0, "{p:?}");
+            assert!(p.y_mm >= 300.0 && p.y_mm + p.height_mm <= 500.0, "{p:?}");
+        }
+        // Ausschnitt über den Bettrand hinaus: das Teil bleibt auf dem Bett.
+        let edge = add_objects_as_part(
+            &Project::default(),
+            &sign,
+            "Schild",
+            [950.0, 0.0, 200.0, 600.0],
+        )
+        .unwrap();
+        assert!(edge.x_mm + edge.width_mm <= 1000.0 + 0.01, "{}", edge.x_mm);
+        // Ohne bekannten Ausschnitt mittig auf dem Bett.
+        let unknown = add_objects_as_part(&Project::default(), &sign, "Schild", [0.0; 4]).unwrap();
+        let (cx, cy) = centre(&unknown);
+        assert!(
+            (cx - 500.0).abs() < 0.01 && (cy - 300.0).abs() < 0.01,
+            "{cx} {cy}"
+        );
     }
 
     #[test]

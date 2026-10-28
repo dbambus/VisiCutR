@@ -493,6 +493,9 @@ struct VisiCutR {
     zoom: f32,
     /// Bildpunkte je mm auf dem Bildschirm, zuletzt in `bed` berechnet.
     view_scale: f32,
+    /// Sichtbarer Teil des Betts (x, y, Breite, Höhe in mm), zuletzt in `bed`
+    /// bestimmt; leer, solange das Bett nicht gezeigt wurde.
+    visible_mm: [f32; 4],
     show_grid: bool,
     /// Projekt ist vollständig und passt aufs Bett (pro Bild neu bestimmt).
     sendable: bool,
@@ -596,6 +599,7 @@ impl VisiCutR {
             allow_close: false,
             zoom: 1.0,
             view_scale: 1.0,
+            visible_mm: [0.0; 4],
             show_grid: true,
             sendable: false,
             replace: None,
@@ -2704,11 +2708,11 @@ impl VisiCutR {
             Command::Materials => self.show_settings(SettingsPage::Materials),
             Command::Preview => self.show_preview = true,
             Command::Send => self.send(),
-            Command::Text => self.compose.open(compose_ui::Tool::Text, &self.project),
-            Command::Shape => self.compose.open(compose_ui::Tool::Shape, &self.project),
-            Command::Sign => self.compose.open(compose_ui::Tool::Sign, &self.project),
-            Command::Array => self.compose.open(compose_ui::Tool::Array, &self.project),
-            Command::Nest => self.compose.open(compose_ui::Tool::Nest, &self.project),
+            Command::Text => self.compose.open(compose_ui::Tool::Text),
+            Command::Shape => self.compose.open(compose_ui::Tool::Shape),
+            Command::Sign => self.compose.open(compose_ui::Tool::Sign),
+            Command::Array => self.compose.open(compose_ui::Tool::Array),
+            Command::Nest => self.compose.open(compose_ui::Tool::Nest),
             Command::Undo => self.undo_last(),
             Command::Redo => self.redo_last(),
             Command::Delete => self.delete_part(),
@@ -3640,6 +3644,13 @@ impl VisiCutR {
                 ui.memory_mut(|m| m.surrender_focus(id));
             }
             let bed = Rect::from_min_size(rect.min + Vec2::splat(RULER), bed_mm * scale);
+            // Neue Text-, Form- und Schild-Teile kommen in den sichtbaren Ausschnitt.
+            let shown = bed.intersect(ui.clip_rect());
+            if shown.is_positive() {
+                let min = (shown.min - bed.min) / scale;
+                let size = shown.size() / scale;
+                self.visible_mm = [min.x, min.y, size.x, size.y];
+            }
             self.rulers(ui.painter(), bed, scale);
             let painter = ui.painter().with_clip_rect(bed.intersect(ui.clip_rect()));
             painter.rect_filled(bed, 0.0, Color32::WHITE);
@@ -4694,7 +4705,7 @@ impl eframe::App for VisiCutR {
         if let Some(object) = self.jobs.take_deleted_object() {
             self.delete_objects(ctx, &[object]);
         }
-        match self.compose.windows(ctx, &self.project) {
+        match self.compose.windows(ctx, &self.project, self.visible_mm) {
             Some(Ok((project, notes))) => self.apply_composed(ctx, project, notes),
             Some(Err(e)) => self.report(e),
             None => {}

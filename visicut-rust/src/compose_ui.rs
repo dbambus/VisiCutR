@@ -74,8 +74,6 @@ pub type Composed = Result<(Project, Vec<String>), String>;
 
 pub struct ComposeUi {
     open: Option<Tool>,
-    x_mm: f64,
-    y_mm: f64,
     text: TextForm,
     shape: ShapeForm,
     sign: Sign,
@@ -92,8 +90,6 @@ impl Default for ComposeUi {
     fn default() -> Self {
         Self {
             open: None,
-            x_mm: 10.0,
-            y_mm: 10.0,
             text: TextForm {
                 text: tr("Text").into(),
                 font: "sans-serif".into(),
@@ -299,26 +295,23 @@ fn shape_choice(ui: &mut egui::Ui, kind: &mut ShapeKind) {
 }
 
 impl ComposeUi {
-    /// Öffnet ein Werkzeug; neue Elemente erscheinen rechts neben dem Motiv.
-    pub fn open(&mut self, tool: Tool, project: &Project) {
+    /// Öffnet ein Werkzeug.
+    pub fn open(&mut self, tool: Tool) {
         if self.fonts.is_empty() {
             self.fonts = compose::font_families();
         }
-        if !project.svg.is_empty() {
-            let right = (project.x_mm + project.width_mm + 10.0) as f64;
-            (self.x_mm, self.y_mm) = if right < project.bed_width_mm as f64 - 20.0 {
-                (right, project.y_mm as f64)
-            } else {
-                (project.x_mm as f64, project.y_mm as f64)
-            };
-        }
-        self.sign.x_mm = self.x_mm;
-        self.sign.y_mm = self.y_mm;
         self.open = Some(tool);
     }
 
     /// Zeigt das offene Werkzeug; liefert das neue Projekt nach „Einfügen“.
-    pub fn windows(&mut self, ctx: &egui::Context, project: &Project) -> Option<Composed> {
+    /// Neue Elemente kommen in den sichtbaren Teil des Betts `view` (x, y,
+    /// Breite, Höhe in mm), wie er beim Einfügen ist.
+    pub fn windows(
+        &mut self,
+        ctx: &egui::Context,
+        project: &Project,
+        view: [f32; 4],
+    ) -> Option<Composed> {
         let tool = self.open?;
         let mut open = true;
         let mut apply = false;
@@ -396,14 +389,14 @@ impl ComposeUi {
         if !apply {
             return None;
         }
-        let result = self.compose(tool, project);
+        let result = self.compose(tool, project, view);
         if result.is_ok() {
             self.open = None;
         }
         Some(result)
     }
 
-    fn compose(&self, tool: Tool, project: &Project) -> Composed {
+    fn compose(&self, tool: Tool, project: &Project, view: [f32; 4]) -> Composed {
         // Jedes neue Element wird ein eigenes Teil (siehe `add_objects_as_part`).
         let name = match tool {
             Tool::Text => tr("Text"),
@@ -411,7 +404,7 @@ impl ComposeUi {
             _ => tr("Schild"),
         };
         let add = |objects: Vec<NewObject>| {
-            compose::add_objects_as_part(project, &objects, name).map(|p| (p, Vec::new()))
+            compose::add_objects_as_part(project, &objects, name, view).map(|p| (p, Vec::new()))
         };
         match tool {
             Tool::Text => {
@@ -427,8 +420,8 @@ impl ComposeUi {
                         line_spacing: t.line_spacing,
                     },
                     operation: t.operation,
-                    x_mm: self.x_mm,
-                    y_mm: self.y_mm,
+                    x_mm: 0.0,
+                    y_mm: 0.0,
                 }])
             }
             Tool::Shape => {
@@ -456,8 +449,8 @@ impl ComposeUi {
                 add(vec![NewObject {
                     shape,
                     operation: s.operation,
-                    x_mm: self.x_mm,
-                    y_mm: self.y_mm,
+                    x_mm: 0.0,
+                    y_mm: 0.0,
                 }])
             }
             Tool::Sign => add(compose::sign(&self.sign)?),
@@ -515,8 +508,6 @@ impl ComposeUi {
         });
         number(ui, tr("Zeilenabstand"), &mut t.line_spacing, 0.5..=5.0, "×");
         operation_choice(ui, "text_operation", &mut t.operation);
-        mm(ui, tr("X (links)"), &mut self.x_mm, 0.0..=1000.0);
-        mm(ui, tr("Y (oben)"), &mut self.y_mm, 0.0..=600.0);
         crate::form::caption(
             ui,
             tr("Der Text wird in Umrisse umgewandelt und ist danach nicht mehr editierbar."),
@@ -524,7 +515,7 @@ impl ComposeUi {
     }
 
     fn shape_form(&mut self, ui: &mut egui::Ui) {
-        let (s, x, y) = (&mut self.shape, &mut self.x_mm, &mut self.y_mm);
+        let s = &mut self.shape;
         shape_choice(ui, &mut s.kind);
         match s.kind {
             ShapeKind::Rectangle | ShapeKind::Ellipse => {
@@ -548,8 +539,6 @@ impl ComposeUi {
             }
         }
         operation_choice(ui, "shape_operation", &mut s.operation);
-        mm(ui, tr("X (links)"), x, 0.0..=1000.0);
-        mm(ui, tr("Y (oben)"), y, 0.0..=600.0);
     }
 
     fn sign_form(&mut self, ui: &mut egui::Ui) {
@@ -617,8 +606,6 @@ impl ComposeUi {
                     }
                 });
         });
-        mm(ui, tr("X (links)"), &mut s.x_mm, 0.0..=1000.0);
-        mm(ui, tr("Y (oben)"), &mut s.y_mm, 0.0..=600.0);
         crate::form::caption(
             ui,
             tr("Platte und Löcher werden geschnitten, der Text mittig gesetzt."),

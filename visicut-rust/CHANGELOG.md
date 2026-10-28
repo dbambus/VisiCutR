@@ -12,6 +12,29 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
   werden sie unter Einstellungen → Software-Add-ins, im Windows-Download
   liegen sie unter `illustrator-script/` und `coreldraw-macro/`. VisiCutR legt
   dafür bei jedem Start seinen Programmpfad im Einstellungsordner ab.
+- **Schriftprobe:** Beim Überfahren einer Schrift im Auswahlfeld (Text,
+  Schild) zeigt ein Tooltip den eingegebenen Text in dieser Schrift.
+- **Leistung unter 0,1 %** wird wie in Java-VisiCut mit 0,1 % gesendet statt
+  abgelehnt; die FAU-Profile für Papier und Thermopapier sind damit nutzbar.
+- **Gravurzeilen außerhalb des Betts** werden abgelehnt, statt in Y
+  überzulaufen.
+- **Drehen um freie Winkel** wächst den Rahmen nicht mehr bei jeder Drehung;
+  das Motiv lag sonst nach wenigen Drehungen angeblich außerhalb des Betts.
+- **Beenden** fragt nach ungesicherten Änderungen an der Materialbibliothek
+  und sichert offene Gerätewerte.
+- **Neue Schritte** übernehmen die Durchgänge aus dem Profil statt vom Motiv;
+  Widerrufen beginnt beim Öffnen, Importieren und Neuanlegen von vorn;
+  ⌘R/Strg+R lädt die Teile wirklich neu.
+- **Robuster Import:** Dateien werden im Hintergrund gelesen, das Fenster
+  bleibt bedienbar. Skripte und PDF-Seiten laufen in einem Hilfsprozess mit
+  Zeit- und (unter Linux) Speichergrenze; eine Datei samt Inhalt hat
+  zusammen höchstens 90 s. Grenzen für Zip-Archive, Verschachtelungstiefe von
+  XML und DXF-Blöcke verhindern, dass präparierte Dateien VisiCutR beenden.
+  SVG-Dateien öffnen keine Netzwerkpfade; Bilder von außerhalb des Ordners
+  werden gemeldet.
+- **Kameraserver** mit Fristen, Größengrenzen und optionaler Anmeldung
+  (`--user`, `--password`); das Kamerapasswort in der Geräteliste ist nur
+  für den eigenen Benutzer lesbar.
 
 ## 0.21.0 – 28.10.2026
 

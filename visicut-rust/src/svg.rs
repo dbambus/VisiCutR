@@ -281,6 +281,17 @@ pub fn render(source: &str) -> Result<Preview, String> {
         tiny_skia::Transform::from_scale(scale, scale),
         &mut pixmap.as_mut(),
     );
+    let (width_mm, height_mm) = document_size_mm(source, size);
+    Ok(Preview {
+        width_mm,
+        height_mm,
+        image: color_image(pixmap),
+    })
+}
+
+/// The pixmap as an egui image.
+pub fn color_image(pixmap: tiny_skia::Pixmap) -> eframe::egui::ColorImage {
+    let size = [pixmap.width() as usize, pixmap.height() as usize];
     // tiny-skia stores premultiplied RGBA; convert before handing pixels to egui.
     let mut pixels = pixmap.take();
     for pixel in pixels.chunks_exact_mut(4) {
@@ -291,15 +302,7 @@ pub fn render(source: &str) -> Result<Preview, String> {
             }
         }
     }
-    let (width_mm, height_mm) = document_size_mm(source, size);
-    Ok(Preview {
-        width_mm,
-        height_mm,
-        image: eframe::egui::ColorImage::from_rgba_unmultiplied(
-            [width as usize, height as usize],
-            &pixels,
-        ),
-    })
+    eframe::egui::ColorImage::from_rgba_unmultiplied(size, &pixels)
 }
 
 #[cfg(test)]

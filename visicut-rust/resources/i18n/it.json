@@ -68,6 +68,7 @@
   "Datei öffnen ({shortcut}) oder hierher ziehen": "Apri un file ({shortcut}) o trascinalo qui",
   "Datei öffnen, hierher ziehen oder das Beispiel öffnen": "Apri un file, trascinalo qui o apri l'esempio",
   "Der Text ergibt keine Umrisse (Schrift ohne passende Zeichen?)": "Il testo non produce contorni (font senza i caratteri necessari?)",
+  "Die Schrift hat keine passenden Zeichen": "Il font non ha i caratteri necessari",
   "Der Text wird in Umrisse umgewandelt und ist danach nicht mehr editierbar.": "Il testo viene convertito in contorni e poi non è più modificabile.",
   "Doppelte Linien": "Linee doppie",
   "Doppelte Linien entfernen": "Rimuovi linee doppie",

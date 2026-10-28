@@ -183,6 +183,61 @@ pub fn font_families() -> Vec<String> {
         .collect()
 }
 
+/// A sample of `text` in `font` for the font picker: at most three lines of
+/// up to 40 characters, `line_px` pixels per line, dark ink on a transparent
+/// background. Laid out like the outlines [`add_objects`] makes. `None` when
+/// the font draws nothing for the text.
+pub fn font_sample(
+    text: &str,
+    font: &str,
+    bold: bool,
+    italic: bool,
+    line_px: f64,
+) -> Option<eframe::egui::ColorImage> {
+    let mut lines: Vec<String> = text
+        .lines()
+        .map(str::trim_end)
+        .filter(|l| !l.trim().is_empty())
+        .take(3)
+        .map(|l| {
+            if l.chars().count() > 40 {
+                l.chars().take(39).chain(['…']).collect()
+            } else {
+                l.to_string()
+            }
+        })
+        .collect();
+    if lines.is_empty() {
+        lines.push("AaBbCc 123".into());
+    }
+    let (d, [x, y, w, h]) = text_outline(&Shape::Text {
+        text: lines.join("\n"),
+        font: font.into(),
+        size_mm: line_px,
+        bold,
+        italic,
+        align: Align::Left,
+        line_spacing: 1.2,
+    })
+    .ok()?;
+    let pad = (line_px / 8.0).ceil();
+    let width = (w + 2.0 * pad).ceil().clamp(1.0, 4096.0) as u32;
+    let height = (h + 2.0 * pad).ceil().clamp(1.0, 4096.0) as u32;
+    let source = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}"><path transform="translate({} {})" fill="#1e1e1e" d="{d}"/></svg>"##,
+        num(pad - x),
+        num(pad - y),
+    );
+    let tree = usvg::Tree::from_str(&source, &svg::options()).ok()?;
+    let mut pixmap = tiny_skia::Pixmap::new(width, height)?;
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::identity(),
+        &mut pixmap.as_mut(),
+    );
+    Some(svg::color_image(pixmap))
+}
+
 /// The elements of a sign, ready for [`add_objects`].
 pub fn sign(sign: &Sign) -> Result<Vec<NewObject>, String> {
     if !(sign.width_mm > 0.0 && sign.height_mm > 0.0) {
@@ -2897,5 +2952,16 @@ mod tests {
         let fonts = font_families();
         assert_eq!(fonts[0], "sans-serif");
         assert!(fonts.len() > 3);
+    }
+
+    #[test]
+    fn font_sample_shows_the_text_in_the_font() {
+        let one = font_sample("Hallo", "sans-serif", false, false, 30.0).unwrap();
+        assert!(one.pixels.iter().any(|p| p.a() > 0));
+        assert!(one.size[0] > one.size[1], "{:?}", one.size);
+        let two = font_sample("Hallo\nWelt", "sans-serif", false, false, 30.0).unwrap();
+        assert!(two.size[1] > one.size[1] + 20, "{:?}", two.size);
+        // Leerer Text: Beispielzeichen statt nichts.
+        assert!(font_sample("  ", "serif", true, true, 30.0).is_some());
     }
 }

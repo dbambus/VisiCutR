@@ -83,8 +83,18 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String
         passes: case.get("passes").map_or(1, |p| p.parse().unwrap()),
         thickness_mm: case.get("thickness_mm").map_or(0.0, |t| t.parse().unwrap()),
         raster: raster(dir, case),
-        // Byte-gleich mit Java nur in VisiCuts Reihenfolge.
-        cut_order: CutOrder::VisiCut,
+        // VisiCut's orders under their Java names; INNER_FIRST is "Klassisch".
+        cut_order: match case.get("order").map_or("INNER_FIRST", String::as_str) {
+            "INNER_FIRST" => CutOrder::VisiCut,
+            "FILE" => CutOrder::File,
+            "NEAREST" => CutOrder::Nearest,
+            "SMALLEST_FIRST" => CutOrder::SmallestFirst,
+            other => panic!("{}: unbekannte Reihenfolge {other}", dir.display()),
+        },
+        rotary_axis: case.contains_key("rotary_diameter_mm"),
+        rotary_diameter_mm: case
+            .get("rotary_diameter_mm")
+            .map_or(100.0, |d| d.parse().unwrap()),
         // VisiCut schneidet doppelte Linien mehrfach.
         remove_duplicate_lines: false,
         ..Project::default()
@@ -174,24 +184,29 @@ fn ltt_output_matches_java_byte_for_byte() {
     let mut failures = Vec::new();
     let mut deviations = Vec::new();
     let mut resolved = Vec::new();
+    let mut count = 0;
     for dir in &dirs {
-        let name = dir.file_name().unwrap().to_string_lossy().into_owned();
+        let base = dir.file_name().unwrap().to_string_lossy().into_owned();
         let case = properties(&fs::read_to_string(dir.join("case.properties")).unwrap());
-        let known = case.get("deviation");
-        match compare(dir, &name, &case) {
-            Ok(()) => {
-                if let Some(reason) = known {
-                    resolved.push(format!(
-                        "{name}: byte-gleich, deviation-Eintrag ({reason}) kann entfallen"
-                    ));
+        for (suffix, case) in variants(&case) {
+            count += 1;
+            let name = format!("{base}{suffix}");
+            let known = case.get("deviation");
+            match compare(dir, &name, &case, &suffix) {
+                Ok(()) => {
+                    if let Some(reason) = known {
+                        resolved.push(format!(
+                            "{name}: byte-gleich, deviation-Eintrag ({reason}) kann entfallen"
+                        ));
+                    }
                 }
+                // A missing reference is a setup problem, never a documented deviation.
+                Err(Outcome::MissingReference(message)) => failures.push(message),
+                Err(Outcome::Different(message)) => match known {
+                    Some(reason) => deviations.push(format!("{message}\n  bekannt: {reason}")),
+                    None => failures.push(message),
+                },
             }
-            // A missing reference is a setup problem, never a documented deviation.
-            Err(Outcome::MissingReference(message)) => failures.push(message),
-            Err(Outcome::Different(message)) => match known {
-                Some(reason) => deviations.push(format!("{message}\n  bekannt: {reason}")),
-                None => failures.push(message),
-            },
         }
     }
     if !deviations.is_empty() {
@@ -208,7 +223,7 @@ fn ltt_output_matches_java_byte_for_byte() {
         failures.is_empty(),
         "{} von {} Fällen weichen von Java ab:\n{}",
         failures.len(),
-        dirs.len(),
+        count,
         failures.join("\n")
     );
 }
@@ -218,13 +233,44 @@ enum Outcome {
     Different(String),
 }
 
-/// Compares the Rust output of one case with its Java reference.
-fn compare(dir: &Path, name: &str, case: &HashMap<String, String>) -> Result<(), Outcome> {
-    let java_error = fs::read_to_string(dir.join("expected.error")).ok();
+/// The case itself (suffix "") and each of its `variants`, a comma-separated
+/// list of `key=value` overrides such as `order=FILE, rotary_diameter_mm=100`.
+/// A variant has the suffix `@key-value`, its references
+/// `expected@key-value.ltt`/`.error` and its own `deviation@key-value`.
+/// Variants run in release builds only (`cargo test --release`, also in CI):
+/// unoptimised, the 570 of them add three minutes.
+fn variants(case: &HashMap<String, String>) -> Vec<(String, HashMap<String, String>)> {
+    let mut all = vec![(String::new(), case.clone())];
+    let list = match case.get("variants") {
+        Some(list) if !cfg!(debug_assertions) => list.as_str(),
+        _ => "",
+    };
+    for (key, value) in list.split(',').filter_map(|v| v.trim().split_once('=')) {
+        let suffix = format!("@{key}-{value}");
+        let mut variant = case.clone();
+        variant.remove("variants");
+        variant.remove("deviation");
+        if let Some(reason) = case.get(&format!("deviation{suffix}")) {
+            variant.insert("deviation".into(), reason.clone());
+        }
+        variant.insert(key.into(), value.into());
+        all.push((suffix, variant));
+    }
+    all
+}
+
+/// Compares the Rust output of one case (or variant) with its Java reference.
+fn compare(
+    dir: &Path,
+    name: &str,
+    case: &HashMap<String, String>,
+    suffix: &str,
+) -> Result<(), Outcome> {
+    let java_error = fs::read_to_string(dir.join(format!("expected{suffix}.error"))).ok();
     // `expect=reject`: both sides must refuse the job (e.g. engraving rows
     // outside the bed).
     let reject = case.get("expect").is_some_and(|e| e == "reject");
-    let expected_file = match fs::read(dir.join("expected.ltt")) {
+    let expected_file = match fs::read(dir.join(format!("expected{suffix}.ltt"))) {
         Ok(_) if reject => {
             return Err(Outcome::Different(format!(
                 "{name}: Java erzeugt einen Auftrag, erwartet ist eine Ablehnung"
@@ -242,7 +288,7 @@ fn compare(dir: &Path, name: &str, case: &HashMap<String, String>) -> Result<(),
                     Outcome::Different(format!("{name}: Java lehnt ab: {}; {rust}", reason.trim()))
                 }
                 None => Outcome::MissingReference(format!(
-                    "{name}: expected.ltt fehlt, generate.sh ausführen; {rust}"
+                    "{name}: expected{suffix}.ltt fehlt, generate.sh ausführen; {rust}"
                 )),
             });
         }

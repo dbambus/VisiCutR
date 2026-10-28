@@ -12,7 +12,7 @@ cd visicut-rust
 bash scripts/java-parity/generate.sh             # alle Fälle
 bash scripts/java-parity/generate.sh cut_curves  # einzelne Fälle
 REBUILD=1 bash scripts/java-parity/generate.sh   # Java neu bauen
-cargo test --locked --test java_parity
+cargo test --locked --release --test java_parity  # mit Varianten (variants=); ohne --release nur die Grundfälle
 ```
 
 Benötigt werden Java 17 oder neuer, Maven, Zugriff auf Maven Central und das
@@ -40,6 +40,9 @@ Temp-Ordner und liest keine Benutzereinstellungen.
 | `scale` | Teil einheitlich skalieren wie in der VisiCut-Oberfläche (Rust: `width_mm`/`height_mm` entsprechend setzen) |
 | `rust_file` | Datei, die Rust statt `svg` liest (etwa eine PDF, während Java eine geometrisch gleiche SVG bekommt); Nicht-SVG-Dateien laufen auf beiden Seiten durch die Importer (DXF, EPS, PNG/JPG/BMP, G-Code) |
 | `place=bbox` | linke obere Ecke der Geometrie (ohne Konturbreiten) statt des Dokumentursprungs auf `x_mm`/`y_mm` legen, wie beim Platzieren in der Oberfläche; nötig für DXF, EPS und PDF |
+| `order` | VisiCut-Reihenfolge `FILE`, `NEAREST`, `INNER_FIRST` (Standard, „Klassisch“) oder `SMALLEST_FIRST` |
+| `rotary_diameter_mm` | Rotationsachse mit diesem Walzendurchmesser |
+| `variants` | weitere Läufe desselben Falls mit überschriebenen Schlüsseln, `order=FILE, rotary_diameter_mm=100`; Referenzen `expected@order-FILE.ltt`, Abweichungen `deviation@order-FILE=` |
 | `expect=reject` | beide Seiten müssen den Auftrag ablehnen (Java: `expected.error`), etwa bei Gravuren über den Bettrand |
 | `deviation` | dokumentierte Abweichung mit Grund: wird gemeldet, lässt den Test nicht scheitern; der Test weist darauf hin, wenn der Fall wieder byte-gleich ist |
 
@@ -71,4 +74,5 @@ Rust-Ausgabe unter `target/tmp/<fall>.ltt` ab.
   allein durch die Java-Fixes byte-gleich.
 - Das Audit vom 2026-10-28 (`AUDIT-2026-10-28.md`) prüft VisiCutR 0.23.0 und ergänzt
   11 Fälle für Leistungen unter 0,1 % und den Bettrand; seitdem muss wie in Java nur
-  die Zeichnung im Bett liegen, nicht die ganze Seite.
+  die Zeichnung im Bett liegen, nicht die ganze Seite. Im Nachtrag laufen die Reihenfolgen
+  FILE, NEAREST, SMALLEST_FIRST und die Rotationsachse als 570 Varianten mit.

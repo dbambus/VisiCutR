@@ -49,26 +49,35 @@ public class LttParity
     for (int i = 1; i < args.length; i++)
     {
       File dir = new File(args[i]);
-      try
+      Properties c = new Properties();
+      try (InputStreamReader in = new InputStreamReader(new FileInputStream(new File(dir, "case.properties")), StandardCharsets.UTF_8))
       {
-        generate(device, dir);
+        c.load(in);
       }
-      catch (Throwable t)
+      for (Map.Entry<String, Properties> variant : variants(c).entrySet())
       {
-        // A case Java cannot process: record the reason instead of stopping.
-        failed++;
-        new File(dir, "expected.ltt").delete();
-        StringBuilder reason = new StringBuilder();
-        for (Throwable cause = t; cause != null; cause = cause.getCause())
+        String suffix = variant.getKey();
+        try
         {
-          if (reason.length() > 0)
-          {
-            reason.append(" <- ");
-          }
-          reason.append(cause.getClass().getSimpleName()).append(": ").append(cause.getMessage());
+          generate(device, dir, variant.getValue(), suffix);
         }
-        java.nio.file.Files.writeString(new File(dir, "expected.error").toPath(), reason + "\n");
-        System.out.println(dir.getName() + ": JAVA ERROR " + reason);
+        catch (Throwable t)
+        {
+          // A case Java cannot process: record the reason instead of stopping.
+          failed++;
+          new File(dir, "expected" + suffix + ".ltt").delete();
+          StringBuilder reason = new StringBuilder();
+          for (Throwable cause = t; cause != null; cause = cause.getCause())
+          {
+            if (reason.length() > 0)
+            {
+              reason.append(" <- ");
+            }
+            reason.append(cause.getClass().getSimpleName()).append(": ").append(cause.getMessage());
+          }
+          java.nio.file.Files.writeString(new File(dir, "expected" + suffix + ".error").toPath(), reason + "\n");
+          System.out.println(dir.getName() + suffix + ": JAVA ERROR " + reason);
+        }
       }
     }
     if (failed > 0)
@@ -77,13 +86,31 @@ public class LttParity
     }
   }
 
-  private static void generate(LaserDevice device, File dir) throws Exception
+  /**
+   * The case itself (suffix "") and each of its "variants", a comma-separated
+   * list of key=value overrides such as "order=FILE, rotary_diameter_mm=100";
+   * a variant writes expected@key-value.ltt (see tests/java_parity.rs).
+   */
+  private static Map<String, Properties> variants(Properties c)
   {
-    Properties c = new Properties();
-    try (InputStreamReader in = new InputStreamReader(new FileInputStream(new File(dir, "case.properties")), StandardCharsets.UTF_8))
+    Map<String, Properties> all = new java.util.LinkedHashMap<>();
+    all.put("", c);
+    for (String v : c.getProperty("variants", "").split(","))
     {
-      c.load(in);
+      String[] kv = v.trim().split("=", 2);
+      if (kv.length != 2)
+      {
+        continue;
+      }
+      Properties p = (Properties) c.clone();
+      p.setProperty(kv[0].trim(), kv[1].trim());
+      all.put("@" + kv[0].trim() + "-" + kv[1].trim(), p);
     }
+    return all;
+  }
+
+  private static void generate(LaserDevice device, File dir, Properties c, String suffix) throws Exception
+  {
     LaserCutter cutter = device.getLaserCutter();
     String operation = c.getProperty("operation");
     LaserProfile profile;
@@ -96,6 +123,8 @@ public class LttParity
       {
         VectorProfile vp = new VectorProfile();
         vp.setIsCut("cut".equals(operation));
+        // FILE, NEAREST, INNER_FIRST (default) or SMALLEST_FIRST.
+        vp.setOrderStrategy(de.thomas_oster.liblasercut.vectoroptimizers.VectorOptimizer.OrderStrategy.valueOf(c.getProperty("order", "INNER_FIRST")));
         profile = vp;
         property = cutter.getLaserPropertyForVectorPart();
         prefix = "cut".equals(operation) ? "Cut" : "Mark";
@@ -157,6 +186,12 @@ public class LttParity
     model.setSelectedLaserDevice(device);
     // Added to the focus of every LaserProperty (useThicknessAsFocusOffset).
     model.setMaterialThickness(Float.parseFloat(c.getProperty("thickness_mm", "0")));
+    // Rotary engraving: Y becomes the rotation of a cylinder of this diameter.
+    if (c.getProperty("rotary_diameter_mm") != null)
+    {
+      model.setRotaryAxisEnabled(true);
+      model.setRotaryAxisDiameterMm(Double.parseDouble(c.getProperty("rotary_diameter_mm")));
+    }
     List<String> warnings = new ArrayList<>();
     PlfPart part = model.loadGraphicFile(new File(dir, c.getProperty("svg")), warnings);
     double x = Double.parseDouble(c.getProperty("x_mm"));
@@ -189,14 +224,14 @@ public class LttParity
     Map<LaserProfile, List<LaserProperty>> propmap = new HashMap<>();
     propmap.put(profile, props);
     String name = jobName(prefix, c.getProperty("name"));
-    File out = new File(dir, "expected.ltt");
-    new File(dir, "expected.error").delete();
+    File out = new File(dir, "expected" + suffix + ".ltt");
+    new File(dir, "expected" + suffix + ".error").delete();
     model.saveJob(name, out, null, propmap);
     for (String w : warnings)
     {
       System.err.println(dir.getName() + ": " + w);
     }
-    System.out.println(dir.getName() + ": " + out.length() + " bytes as " + name);
+    System.out.println(dir.getName() + suffix + ": " + out.length() + " bytes as " + name);
   }
 
   /** Union of the objects' geometry bounds in mm (basic transform, no strokes). */

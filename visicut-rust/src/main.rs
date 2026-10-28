@@ -1375,6 +1375,14 @@ impl VisiCutR {
         self.import(ctx, imported.svg, name.into(), imported.steps)?;
         self.project.part_source_file = Some(path.display().to_string());
         self.project.part_parametric = imported.parametric;
+        // Ein VisiCut-Projekt (PLF) ist auf den Bettursprung bezogen, nicht
+        // auf die Lage des vorigen Motivs.
+        if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("plf"))
+        {
+            (self.project.x_mm, self.project.y_mm) = (0.0, 0.0);
+        }
         // Ein zugeschnittenes Projektteil liegt dort, wo es im Projekt lag.
         self.project.x_mm += imported.offset_mm[0] as f32;
         self.project.y_mm += imported.offset_mm[1] as f32;

@@ -24,7 +24,8 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
   des gerade sichtbaren (gezoomten) Teils der Arbeitsfläche; liegt dort
   schon etwas, an der nächsten freien Stelle im Ausschnitt. Alle
   Eingabefelder der Werkzeugfenster sind weiß hinterlegt; Zahlenfelder
-  hatten bisher den grauen Fensterhintergrund.
+  hatten bisher den grauen Fensterhintergrund. Die Kästchen „Fett“ und
+  „Kursiv“ sind selbst fett bzw. kursiv beschriftet.
 - **Leistung unter 0,1 %** wird wie in Java-VisiCut mit 0,1 % gesendet statt
   abgelehnt; die FAU-Profile für Papier und Thermopapier sind damit nutzbar.
 - **Gravurzeilen außerhalb des Betts** werden abgelehnt, statt in Y

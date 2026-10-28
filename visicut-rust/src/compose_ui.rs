@@ -223,6 +223,17 @@ fn font_choice(
     });
 }
 
+/// „Fett“ in fetter Schrift, damit das Kästchen zeigt, was es bewirkt.
+fn bold_label(ui: &egui::Ui) -> egui::RichText {
+    let size = egui::TextStyle::Button.resolve(ui.style()).size;
+    egui::RichText::new(tr("Fett")).font(crate::form::bold(size))
+}
+
+/// „Kursiv“ in kursiver Schrift.
+fn italic_label(ui: &egui::Ui) -> egui::RichText {
+    egui::RichText::new(tr("Kursiv")).italics()
+}
+
 fn text_field(ui: &mut egui::Ui, text: &mut String, rows: usize) {
     ui.add(
         egui::TextEdit::multiline(text)
@@ -488,8 +499,8 @@ impl ComposeUi {
         );
         mm(ui, tr("Schriftgröße"), &mut t.size_mm, 0.5..=1000.0);
         crate::form::row(ui, tr("Stil"), |ui| {
-            ui.checkbox(&mut t.italic, tr("Kursiv"));
-            ui.checkbox(&mut t.bold, tr("Fett"));
+            ui.checkbox(&mut t.italic, italic_label(ui));
+            ui.checkbox(&mut t.bold, bold_label(ui));
         });
         crate::form::row(ui, tr("Ausrichtung"), |ui| {
             let title = |a: Align| match a {
@@ -586,7 +597,7 @@ impl ComposeUi {
         );
         mm(ui, tr("Schriftgröße"), &mut s.size_mm, 0.5..=500.0);
         crate::form::row(ui, tr("Stil"), |ui| {
-            ui.checkbox(&mut s.bold, tr("Fett"));
+            ui.checkbox(&mut s.bold, bold_label(ui));
         });
         crate::form::row(ui, tr("Text"), |ui| {
             crate::form::Dropdown::from_id_salt("sign_text")

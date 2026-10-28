@@ -3,7 +3,10 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
-## Unveröffentlicht
+## 0.23.0 – 28.10.2026
+
+Die Schriftauswahl zeigt jede Schrift in ihrer eigenen Schrift und jeden
+Namen nur noch einmal.
 
 - **Schriftauswahl:** Jede Schrift steht in der Liste in ihrer eigenen
   Schrift. Geladen werden nur die gerade sichtbaren Einträge, wer die Liste

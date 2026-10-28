@@ -3,6 +3,63 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## 0.21.0 – 28.10.2026
+
+Stabile Version mit dem Stand von 1.0.0-rc.2 für alle, die keine
+Release-Kandidaten nutzen. Der Vergleich mit Java-VisiCut steht bei
+1.0.0-rc.1.
+
+- **Parametrische Teile einstellen** wie in Java-VisiCut: Für `.psvg`- und
+  `.parametric.svg`-Teile zeigt die Seitenleiste ein Feld je Parameter (mit
+  Grenzen, Auswahllisten und Beschriftungen aus der Vorlage); die Grafik wird
+  bei jeder Eingabe neu erzeugt und bleibt an ihrem Platz. Parametrische Teile
+  in PLF-Dateien werden beim Öffnen eigene Teile an ihrer Stelle; Lage,
+  Drehung und Maßstab aus der PLF-Datei bleiben erhalten.
+- **FabLab-Einstellungen vollständig:** „Herunterladen“ übernimmt neben den
+  Lasercuttern auch Materialien mit Laserwerten und die Zuordnungen; ein
+  Dialog fragt, was übernommen wird. Auf Wunsch prüft VisiCutR wie
+  Java-VisiCut einmal am Tag beim Start, ob das FabLab eine neue Fassung hat.
+  Laserprofile mit mehreren Parametersätzen kommen mit: gleiche Sätze
+  hintereinander als Durchgänge, die übrigen als weitere Parametersätze. Der
+  Hinweis nennt den Einstellungs-Server (bisher „Labor-Einstellungen“).
+- **Sicherer ohne Materialprofil:** Gravieren und 3D-Gravur starten wie
+  Markieren mit 0 % Leistung, wenn das Material kein Profil dafür hat, statt
+  die Schneidwerte zu übernehmen.
+- **Mehrstufiges Widerrufen:** Widerrufen und Wiederholen über bis zu 50
+  Schritte statt nur einem.
+- **Befehlszeile wie Java-VisiCut:** `--laserdevice`, `--material`,
+  `--thickness` und `--execute` (zeigt gleich die Sende-Bestätigung) sowie
+  `--version`; auch an ein bereits laufendes Fenster.
+- **Hilfe** im Datei-Menü: Anleitung (F1), Tastenkürzel, Fehler melden und
+  Über VisiCutR.
+- **Neu laden** (Datei-Menü, ⌘R/Strg+R): Teile merken sich ihre Datei und
+  lassen sich nach Änderungen etwa in Inkscape neu einlesen; Lage, Maßstab und
+  Zuordnung bleiben.
+- **Aus Inkscape aktualisieren:** Schickt die Inkscape-Erweiterung eine
+  Zeichnung, die schon als Teil gleichen Namens im Projekt liegt, ersetzt
+  VisiCutR nur dessen Grafik; Lage, Maßstab und Zuordnung bleiben (neue
+  Option `--update`). Die Erweiterung unter Einstellungen → Allgemein neu
+  installieren.
+- **Zoom 1:1** (⌘1/Strg+1, Knopf „1:1“): Originalgröße bei 96 dpi; Zoom
+  jetzt bis 800 %.
+- **Sende-Bestätigung** im Stil der Hinweise: Gerät und Gesamtzeit oben, je
+  Schritt Verfahren, Werte, Zeit und die Datei, die am Gerät erscheint.
+- **Werkzeugfenster wie die Sende-Bestätigung:** Text, Form, Schild, Kopien
+  und Nesting mit Rahmen in der Akzentfarbe, Feldern wie in der Seitenleiste
+  und „Abbrechen“ / „Einfügen“ rechts unten. Formen werden über gezeichnete
+  Symbole gewählt. Zusatzfenster werden wieder kleiner, wenn ihr Inhalt
+  schrumpft.
+- **Text, Formen und Schilder als eigene Teile:** Jedes neu erstellte Element
+  wird ein eigenes Teil mit den Werten aus dem Materialprofil, statt im
+  gewählten Teil zu landen. Würde es auf etwas Vorhandenem liegen, kommt es
+  rechts daneben (sonst darunter).
+- **Überlappende Teile anklicken:** Ein Klick auf eine Stelle, an der ein
+  anderes Teil unter dem gewählten liegt, wählt dieses; Ziehen verschiebt
+  weiter das gewählte.
+- **Lesbarer:** Erläuterungen in Fließtextgröße; „1 Auftrag“ statt
+  „1 Einzelaufträge“.
+- **Update-Prüfung** kennt Vorabversionen.
+
 ## 1.0.0-rc.2 – 22.10.2026
 
 Zweiter Release-Kandidat für VisiCutR 1.0 mit Korrekturen aus den ersten

@@ -1,6 +1,6 @@
 [package]
 name = "visicutr"
-version = "1.0.0-rc.2"
+version = "0.21.0"
 edition = "2024"
 rust-version = "1.88"
 license = "LGPL-3.0-or-later"

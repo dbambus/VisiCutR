@@ -1,6 +1,7 @@
 mod compose_ui;
 mod devices_ui;
 mod file_types;
+mod font_preview;
 mod form;
 mod jobs_ui;
 mod object_bar;

@@ -3,6 +3,15 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## Unveröffentlicht
+
+- **Schriftauswahl:** Jede Schrift steht in der Liste in ihrer eigenen
+  Schrift. Geladen werden nur die gerade sichtbaren Einträge, wer die Liste
+  nicht öffnet, braucht keinen zusätzlichen Speicher. Jede Schrift erscheint
+  nur noch einmal unter ihrem englischen Namen; die übersetzten Namen
+  (russisch, japanisch, chinesisch …) standen bisher zusätzlich in der Liste,
+  teils als Kästchen.
+
 ## 0.22.0 – 28.10.2026
 
 Bearbeitbarer Text, Kopieren und Einfügen von Teilen, Platzierung im

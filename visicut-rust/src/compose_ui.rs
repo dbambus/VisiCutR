@@ -210,7 +210,7 @@ fn font_choice(
             .height(320.0)
             .show_ui(ui, |ui| {
                 for name in fonts {
-                    ui.selectable_value(font, name.clone(), name)
+                    font_row(ui, name, font)
                         .on_hover_ui(|ui| samples.show(ui, name, text, bold, italic));
                 }
             });
@@ -245,6 +245,62 @@ fn bold_label(ui: &egui::Ui) -> egui::RichText {
 /// „Kursiv“ in kursiver Schrift.
 fn italic_label() -> egui::RichText {
     egui::RichText::new(tr("Kursiv")).italics()
+}
+
+/// Eine Zeile der Schriftauswahl: der Name in seiner eigenen Schrift, sobald
+/// sie geladen ist. Feste Höhe, damit die Liste beim Nachladen nicht springt.
+fn font_row(ui: &mut egui::Ui, name: &str, font: &mut String) -> egui::Response {
+    const HEIGHT: f32 = 26.0;
+    let size = egui::vec2(ui.available_width(), HEIGHT);
+    let next = egui::Rect::from_min_size(ui.cursor().min, size);
+    let family = ui
+        .is_rect_visible(next)
+        .then(|| crate::font_preview::family(ui.ctx(), name))
+        .flatten()
+        .unwrap_or(egui::FontFamily::Proportional);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    if response.clicked() {
+        *font = name.to_owned();
+    }
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let visuals = ui.visuals();
+    let selected = font == name;
+    let fill = if selected {
+        Some(visuals.selection.bg_fill)
+    } else if response.hovered() {
+        Some(visuals.widgets.hovered.weak_bg_fill)
+    } else {
+        None
+    };
+    if let Some(fill) = fill {
+        ui.painter().rect_filled(rect, 3.0, fill);
+    }
+    let color = if selected {
+        visuals.selection.stroke.color
+    } else {
+        visuals.text_color()
+    };
+    // Zu lange Namen enden auf „…“ statt mitten im Buchstaben.
+    let galley = egui::WidgetText::from(
+        egui::RichText::new(name)
+            .font(egui::FontId::new(16.0, family))
+            .color(color),
+    )
+    .into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        rect.width() - 12.0,
+        egui::TextStyle::Body,
+    );
+    // Schreibschriften mit hohen Ober- und Unterlängen nicht in die Nachbarzeilen.
+    ui.painter_at(rect).galley(
+        egui::pos2(rect.left() + 6.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        color,
+    );
+    response
 }
 
 fn text_field(ui: &mut egui::Ui, text: &mut String, rows: usize) {

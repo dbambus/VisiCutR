@@ -79,9 +79,14 @@ pub fn apply_fonts(ctx: &egui::Context) {
     ];
     let mut fonts = egui::FontDefinitions::default();
     if let Some(data) = CANDIDATES.iter().find_map(|path| std::fs::read(path).ok()) {
-        fonts
-            .font_data
-            .insert("system".to_owned(), egui::FontData::from_owned(data).into());
+        // Lebt ohnehin bis zum Programmende; so teilt die Schriftauswahl die
+        // Daten als Ersatzschrift, ohne sie zu kopieren.
+        let data: &'static [u8] = Box::leak(data.into_boxed_slice());
+        let _ = crate::font_preview::FALLBACK.set(data);
+        fonts.font_data.insert(
+            "system".to_owned(),
+            egui::FontData::from_static(data).into(),
+        );
         fonts
             .families
             .entry(egui::FontFamily::Proportional)

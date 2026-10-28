@@ -43,8 +43,11 @@ Temp-Ordner und liest keine Benutzereinstellungen.
 | `order` | VisiCut-Reihenfolge `FILE`, `NEAREST`, `INNER_FIRST` (Standard, „Klassisch“) oder `SMALLEST_FIRST` |
 | `rotary_diameter_mm` | Rotationsachse mit diesem Walzendurchmesser |
 | `variants` | weitere Läufe desselben Falls mit überschriebenen Schlüsseln, `order=FILE, rotary_diameter_mm=100`; Referenzen `expected@order-FILE.ltt`, Abweichungen `deviation@order-FILE=` |
-| `mappings` | Zuordnungen in Reihenfolge, `Filter -> Leistung:Tempo[:Durchgänge]; …`; Filter `*` (alles Übrige), `all` (alles) oder mit `&` verbundene `[!]Attribut=Wert` bzw. `[!]Attribut<=Wert` mit VisiCuts Attributnamen (`Color`, `Stroke Color`, `Fill Color`, `Stroke Width`, `Type`, `Id`, `Group`) |
+| `mappings` | Zuordnungen in Reihenfolge, `[Verfahren:] Filter -> Leistung:Tempo[:Durchgänge]; …` (Verfahren `cut`, `mark`, `engrave`, `engrave3d`, sonst `operation`); Filter `*` (alles Übrige), `all` (alles) oder mit `&` verbundene `[!]Attribut=Wert` bzw. `[!]Attribut<=Wert` mit VisiCuts Attributnamen (`Color`, `Stroke Color`, `Fill Color`, `Stroke Width`, `Type`, `Id`, `Group`) |
 | `outline=true` | „Nur Umriss“ (VisiCuts `useOutline`) |
+| `svg=…plf` | VisiCut-Projekt: Lage, Teile und Zuordnungen aus der Datei (`x_mm`/`y_mm` = 0); geschrieben mit `make-plf.sh` (Java `MakePlf.java`), nicht von `generate.sh` |
+| `settings` | Laserwerte der PLF-Zuordnungen mit Profil in Teil- und Zuordnungsreihenfolge, `Leistung:Tempo[:Durchgänge]; …` |
+| `single_job=true` | alle Verfahren in einem Auftrag (Rust `prepare_with(…, true)`, Name `Job_…`) |
 | `expect=reject` | beide Seiten müssen den Auftrag ablehnen (Java: `expected.error`), etwa bei Gravuren über den Bettrand |
 | `deviation` | dokumentierte Abweichung mit Grund: wird gemeldet, lässt den Test nicht scheitern; der Test weist darauf hin, wenn der Fall wieder byte-gleich ist |
 

@@ -108,13 +108,17 @@ public class LttParity
     return all;
   }
 
-  private static void generate(LaserDevice device, File dir, Properties c, String suffix) throws Exception
+  /** A profile for one operation, its first LaserProperty and the job name prefix. */
+  private static final class Setup
   {
-    LaserCutter cutter = device.getLaserCutter();
-    String operation = c.getProperty("operation");
     LaserProfile profile;
     LaserProperty property;
     String prefix;
+  }
+
+  private static Setup setup(String operation, Properties c, LaserCutter cutter) throws Exception
+  {
+    Setup s = new Setup();
     switch (operation)
     {
       case "cut":
@@ -126,9 +130,9 @@ public class LttParity
         vp.setOrderStrategy(de.thomas_oster.liblasercut.vectoroptimizers.VectorOptimizer.OrderStrategy.valueOf(c.getProperty("order", "INNER_FIRST")));
         // "Nur Umriss": only the outline of all objects together.
         vp.setUseOutline(Boolean.parseBoolean(c.getProperty("outline", "false")));
-        profile = vp;
-        property = cutter.getLaserPropertyForVectorPart();
-        prefix = "cut".equals(operation) ? "Cut" : "Mark";
+        s.profile = vp;
+        s.property = cutter.getLaserPropertyForVectorPart();
+        s.prefix = "cut".equals(operation) ? "Cut" : "Mark";
         break;
       }
       case "engrave":
@@ -138,26 +142,56 @@ public class LttParity
         rp.setDitherAlgorithm((DitheringAlgorithm) Class.forName("de.thomas_oster.liblasercut.dithering." + c.getProperty("dither", "FloydSteinberg")).getDeclaredConstructor().newInstance());
         rp.setColorShift(Integer.parseInt(c.getProperty("color_shift", "0")));
         rp.setInvertColors(Boolean.parseBoolean(c.getProperty("invert", "false")));
-        profile = rp;
-        property = cutter.getLaserPropertyForRasterPart();
-        property.setProperty("engrave unidirectional", Boolean.parseBoolean(c.getProperty("unidirectional", "false")));
-        property.setProperty("engrave bottom up", Boolean.parseBoolean(c.getProperty("bottom_up", "false")));
-        prefix = "Engrav";
+        s.profile = rp;
+        s.property = rasterProperty(cutter, c);
+        s.prefix = "Engrav";
         break;
       }
       case "engrave3d":
       {
-        profile = new Raster3dProfile();
-        property = cutter.getLaserPropertyForRaster3dPart();
-        prefix = "Eng3D";
+        s.profile = new Raster3dProfile();
+        s.property = cutter.getLaserPropertyForRaster3dPart();
+        s.prefix = "Eng3D";
         break;
       }
       default:
-        throw new IllegalArgumentException(dir + ": unknown operation " + operation);
+        throw new IllegalArgumentException("unknown operation " + operation);
     }
-    profile.setDPI(500);
-    property.setProperty("power", Float.parseFloat(c.getProperty("power")));
-    property.setProperty("speed", Float.parseFloat(c.getProperty("speed")));
+    s.profile.setDPI(500);
+    return s;
+  }
+
+  private static LaserProperty rasterProperty(LaserCutter cutter, Properties c)
+  {
+    LaserProperty property = cutter.getLaserPropertyForRasterPart();
+    property.setProperty("engrave unidirectional", Boolean.parseBoolean(c.getProperty("unidirectional", "false")));
+    property.setProperty("engrave bottom up", Boolean.parseBoolean(c.getProperty("bottom_up", "false")));
+    return property;
+  }
+
+  /** "power:speed[:passes]": one LaserProperty per pass, like VisiCut's GUI. */
+  private static List<LaserProperty> passes(LaserProperty base, String values)
+  {
+    String[] v = values.trim().split(":");
+    LaserProperty p = base.clone();
+    p.setProperty("power", Float.parseFloat(v[0]));
+    p.setProperty("speed", Float.parseFloat(v[1]));
+    List<LaserProperty> result = new LinkedList<>();
+    for (int i = 0; i < (v.length > 2 ? Integer.parseInt(v[2]) : 1); i++)
+    {
+      result.add(p.clone());
+    }
+    return result;
+  }
+
+  private static void generate(LaserDevice device, File dir, Properties c, String suffix) throws Exception
+  {
+    LaserCutter cutter = device.getLaserCutter();
+    Setup base = setup(c.getProperty("operation"), c, cutter);
+    LaserProfile profile = base.profile;
+    LaserProperty property = base.property;
+    property.setProperty("power", Float.parseFloat(c.getProperty("power", "20")));
+    property.setProperty("speed", Float.parseFloat(c.getProperty("speed", "100")));
     // VisiCut has no pass counter: every further LaserProperty of a profile
     // processes the same objects once more.
     List<LaserProperty> props = new LinkedList<>();
@@ -169,17 +203,9 @@ public class LttParity
     // Further parameter sets: "power:speed:passes;power:speed:passes".
     for (String set : c.getProperty("additional", "").split(";"))
     {
-      if (set.isBlank())
+      if (!set.isBlank())
       {
-        continue;
-      }
-      String[] v = set.trim().split(":");
-      LaserProperty p = property.clone();
-      p.setProperty("power", Float.parseFloat(v[0]));
-      p.setProperty("speed", Float.parseFloat(v[1]));
-      for (int i = 0; i < Integer.parseInt(v[2]); i++)
-      {
-        props.add(p.clone());
+        props.addAll(passes(property, set));
       }
     }
 
@@ -194,61 +220,96 @@ public class LttParity
       model.setRotaryAxisDiameterMm(Double.parseDouble(c.getProperty("rotary_diameter_mm")));
     }
     List<String> warnings = new ArrayList<>();
-    PlfPart part = model.loadGraphicFile(new File(dir, c.getProperty("svg")), warnings);
-    double x = Double.parseDouble(c.getProperty("x_mm"));
-    double y = Double.parseDouble(c.getProperty("y_mm"));
-    // "place=bbox": the top left corner of the geometry (without strokes)
-    // goes to x/y, like placing a part in the GUI, instead of the document origin.
-    if ("bbox".equals(c.getProperty("place")))
-    {
-      java.awt.geom.Rectangle2D bounds = geometryBounds(part.getGraphicObjects());
-      x -= bounds.getX();
-      y -= bounds.getY();
-    }
-    AffineTransform t = AffineTransform.getTranslateInstance(x, y);
-    // Optional "scale": the part is resized like in VisiCut's GUI (uniform).
-    double scale = Double.parseDouble(c.getProperty("scale", "1"));
-    if (scale != 1)
-    {
-      t.scale(scale, scale);
-    }
-    t.concatenate(part.getGraphicObjects().getBasicTransform());
-    // Natural size of the import in mm, for cases that let both sides derive it.
-    java.awt.geom.Rectangle2D natural = part.getGraphicObjects().getBoundingBox();
-    System.out.println(dir.getName() + ": java import bounds " + natural);
-    part.getGraphicObjects().setTransform(t);
     // Profiles compare equal by their settings; each mapping needs its own.
     Map<LaserProfile, List<LaserProperty>> propmap = new java.util.IdentityHashMap<>();
-    MappingSet mapping = new MappingSet();
-    String mappings = c.getProperty("mappings");
-    if (mappings == null)
+    if (c.getProperty("svg").toLowerCase().endsWith(".plf"))
     {
-      mapping.add(new Mapping(null, profile));
-      propmap.put(profile, props);
+      // A VisiCut project: positions and mappings come from the file, the
+      // laser values ("settings", like "mappings") of every mapping with a
+      // profile in part and mapping order, as VisiCut builds the job.
+      de.thomas_oster.visicut.model.PlfFile plf = model.loadPlfFile(de.thomas_oster.visicut.managers.MappingManager.getInstance(), new File(dir, c.getProperty("svg")), warnings);
+      String[] settings = c.getProperty("settings", "").split(";");
+      int k = 0;
+      for (PlfPart p : plf)
+      {
+        model.getPlfFile().add(p);
+        if (p.getMapping() == null)
+        {
+          continue;
+        }
+        for (Mapping m : p.getMapping())
+        {
+          LaserProfile pr = m.getProfile();
+          if (pr == null)
+          {
+            continue;
+          }
+          LaserProperty first = pr instanceof Raster3dProfile ? cutter.getLaserPropertyForRaster3dPart()
+            : pr instanceof RasterProfile ? rasterProperty(cutter, c) : cutter.getLaserPropertyForVectorPart();
+          propmap.put(pr, passes(first, settings[k++]));
+        }
+      }
     }
     else
     {
-      // "filters -> power:speed[:passes]; …" in mapping order, see README.
-      for (String entry : mappings.split(";"))
+      PlfPart part = model.loadGraphicFile(new File(dir, c.getProperty("svg")), warnings);
+      double x = Double.parseDouble(c.getProperty("x_mm"));
+      double y = Double.parseDouble(c.getProperty("y_mm"));
+      // "place=bbox": the top left corner of the geometry (without strokes)
+      // goes to x/y, like placing a part in the GUI, instead of the document origin.
+      if ("bbox".equals(c.getProperty("place")))
       {
-        String[] parts = entry.split("->");
-        String[] v = parts[1].trim().split(":");
-        LaserProfile mapped = profile.clone();
-        LaserProperty p = property.clone();
-        p.setProperty("power", Float.parseFloat(v[0]));
-        p.setProperty("speed", Float.parseFloat(v[1]));
-        List<LaserProperty> mappedProps = new LinkedList<>();
-        for (int i = 0; i < (v.length > 2 ? Integer.parseInt(v[2]) : 1); i++)
-        {
-          mappedProps.add(p.clone());
-        }
-        mapping.add(new Mapping(filterSet(parts[0].trim()), mapped));
-        propmap.put(mapped, mappedProps);
+        java.awt.geom.Rectangle2D bounds = geometryBounds(part.getGraphicObjects());
+        x -= bounds.getX();
+        y -= bounds.getY();
       }
+      AffineTransform t = AffineTransform.getTranslateInstance(x, y);
+      // Optional "scale": the part is resized like in VisiCut's GUI (uniform).
+      double scale = Double.parseDouble(c.getProperty("scale", "1"));
+      if (scale != 1)
+      {
+        t.scale(scale, scale);
+      }
+      t.concatenate(part.getGraphicObjects().getBasicTransform());
+      // Natural size of the import in mm, for cases that let both sides derive it.
+      java.awt.geom.Rectangle2D natural = part.getGraphicObjects().getBoundingBox();
+      System.out.println(dir.getName() + ": java import bounds " + natural);
+      part.getGraphicObjects().setTransform(t);
+      MappingSet mapping = new MappingSet();
+      String mappings = c.getProperty("mappings");
+      if (mappings == null)
+      {
+        mapping.add(new Mapping(null, profile));
+        propmap.put(profile, props);
+      }
+      else
+      {
+        // "[operation:] filters -> power:speed[:passes]; …" in mapping order, see README.
+        for (String entry : mappings.split(";"))
+        {
+          String[] parts = entry.split("->");
+          String filters = parts[0].trim();
+          Setup s;
+          java.util.regex.Matcher op = java.util.regex.Pattern.compile("^(cut|mark|engrave|engrave3d):\\s*(.*)$").matcher(filters);
+          if (op.matches())
+          {
+            filters = op.group(2);
+            s = setup(op.group(1), c, cutter);
+          }
+          else
+          {
+            s = setup(c.getProperty("operation"), c, cutter);
+          }
+          mapping.add(new Mapping(filterSet(filters), s.profile));
+          propmap.put(s.profile, passes(s.property, parts[1]));
+        }
+      }
+      part.setMapping(mapping);
+      model.getPlfFile().add(part);
     }
-    part.setMapping(mapping);
-    model.getPlfFile().add(part);
 
+    // "single_job=true": all operations in one job, named like VisiCutR's.
+    String prefix = Boolean.parseBoolean(c.getProperty("single_job", "false")) ? "Job" : base.prefix;
     String name = jobName(prefix, c.getProperty("name"));
     File out = new File(dir, "expected" + suffix + ".ltt");
     new File(dir, "expected" + suffix + ".error").delete();
@@ -266,7 +327,7 @@ public class LttParity
    * "[!]Attribute<=value" with VisiCut's attribute names. Colours become
    * java.awt.Color, stroke widths Double, like SVGShape's attribute values.
    */
-  private static de.thomas_oster.visicut.model.mapping.FilterSet filterSet(String spec)
+  static de.thomas_oster.visicut.model.mapping.FilterSet filterSet(String spec)
   {
     if ("*".equals(spec))
     {

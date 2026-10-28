@@ -27,7 +27,7 @@ fi
 
 rm -rf "$work/classes"
 mkdir -p "$work/classes"
-javac -cp "$jar" -d "$work/classes" "$here/LttParity.java"
+javac -cp "$jar" -d "$work/classes" "$here/LttParity.java" "$here/MakePlf.java"
 
 # Same module openings as the Add-Opens entries of VisiCut's jar manifest.
 opens=()

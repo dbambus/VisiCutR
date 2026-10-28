@@ -513,8 +513,9 @@ pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, 
     }
     // Finishing operations first, cutting last; one LTT file per operation
     // holding its steps in order.
-    // One job per operation, or (`single_job`) one job with all of them like
-    // Java: engravings first, then marking and cutting.
+    // One job per operation, or (`single_job`) one job with all of them:
+    // engravings first like Java, then marking and cutting (Java keeps the
+    // mapping order of marking and cutting; cutting last is deliberate).
     let ordered: Vec<&Part> = Operation::ALL
         .iter()
         .flat_map(|operation| parts.iter().filter(move |p| p.operation == *operation))

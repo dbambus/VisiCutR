@@ -35,13 +35,16 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String
     // Rust reads `rust_file` (default: the Java file); anything but SVG goes
     // through the app's importers (DXF, EPS, PDF, raster, G-code, PLF).
     let rust_file = dir.join(case.get("rust_file").unwrap_or_else(|| get("svg")));
-    let svg_text = if rust_file.extension().is_some_and(|e| e == "svg") {
-        fs::read_to_string(&rust_file).unwrap()
+    let imported = if rust_file.extension().is_some_and(|e| e == "svg") {
+        visicut_core::svg_import::Imported {
+            svg: fs::read_to_string(&rust_file).unwrap(),
+            ..Default::default()
+        }
     } else {
         visicut_core::import::read_file(&rust_file)
             .map_err(|e| format!("Rust-Import lehnt ab: {e}"))?
-            .svg
     };
+    let svg_text = imported.svg.clone();
     // Without width_mm/height_mm both sides derive the size from the file
     // (Rust like the app's import: usvg size at 96 DPI).
     let natural = || {
@@ -50,7 +53,11 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String
     };
     let scale: f32 = case.get("scale").map_or(1.0, |s| s.parse().unwrap());
     // `place=bbox`: the top left corner of the geometry goes to x/y.
-    let (mut x_mm, mut y_mm) = (number("x_mm"), number("y_mm"));
+    // A PLF part keeps its place relative to the bed (offset of a cropped part).
+    let (mut x_mm, mut y_mm) = (
+        number("x_mm") + imported.offset_mm[0] as f32,
+        number("y_mm") + imported.offset_mm[1] as f32,
+    );
     if case.get("place").is_some_and(|p| p == "bbox") {
         let tree = resvg::usvg::Tree::from_str(&svg_text, &visicut_core::svg::options()).unwrap();
         let bbox = tree.root().abs_bounding_box();
@@ -64,13 +71,7 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String
     let height_mm = case
         .get("height_mm")
         .map_or_else(|| natural().1 * scale, |v| v.parse().unwrap());
-    let operation = match get("operation").as_str() {
-        "cut" => Operation::Cut,
-        "mark" => Operation::Mark,
-        "engrave" => Operation::Engrave,
-        "engrave3d" => Operation::Engrave3d,
-        other => panic!("{}: unbekanntes Verfahren {other}", dir.display()),
-    };
+    let operation = operation_named(get("operation")).unwrap();
     let mut project = Project {
         name: get("name").clone(),
         svg: svg_text.clone(),
@@ -79,8 +80,9 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String
         width_mm,
         height_mm,
         operation,
-        power_percent: number("power"),
-        speed_percent: number("speed"),
+        // Java's defaults where a case (PLF) gives its values per step.
+        power_percent: case.get("power").map_or(20.0, |p| p.parse().unwrap()),
+        speed_percent: case.get("speed").map_or(100.0, |p| p.parse().unwrap()),
         passes: case.get("passes").map_or(1, |p| p.parse().unwrap()),
         thickness_mm: case.get("thickness_mm").map_or(0.0, |t| t.parse().unwrap()),
         raster: raster(dir, case),
@@ -103,14 +105,52 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String
         ..Project::default()
     };
     let outline = case.get("outline").is_some_and(|o| o == "true");
-    if let Some(mappings) = case.get("mappings") {
+    if rust_file.extension().is_some_and(|e| e == "plf") {
+        // The PLF's mappings as steps; `settings` gives their laser values in
+        // part and mapping order, like the Java harness.
+        let settings: Vec<&str> = case
+            .get("settings")
+            .map_or("", String::as_str)
+            .split(';')
+            .collect();
+        assert_eq!(
+            settings.len(),
+            imported.steps.len(),
+            "{}: settings je Schritt",
+            dir.display()
+        );
+        project.steps = imported
+            .steps
+            .iter()
+            .zip(settings)
+            .map(|(step, values)| {
+                let v: Vec<&str> = values.trim().split(':').collect();
+                JobStep {
+                    power_percent: v[0].parse().unwrap(),
+                    speed_percent: v[1].parse().unwrap(),
+                    passes: v.get(2).map_or(1, |p| p.parse().unwrap()),
+                    ..step.clone()
+                }
+            })
+            .collect();
+        if !imported.extra_parts.is_empty() {
+            visicut_core::compose::add_extra_parts(&mut project, imported.extra_parts)?;
+        }
+    } else if let Some(mappings) = case.get("mappings") {
         // "filters -> power:speed[:passes]; …" in mapping order (README).
         project.steps = mappings
             .split(';')
             .map(|entry| {
                 let (filters, values) = entry.split_once("->").unwrap();
                 let v: Vec<&str> = values.trim().split(':').collect();
-                let (filters, rest) = filter_set(filters.trim());
+                // An optional `cut:`, `mark:`, `engrave:` … in front of the filters.
+                let (operation, filters) = match filters.trim().split_once(':') {
+                    Some((op, rest)) if operation_named(op).is_some() => {
+                        (operation_named(op).unwrap(), rest.trim())
+                    }
+                    _ => (operation, filters.trim()),
+                };
+                let (filters, rest) = filter_set(filters);
                 JobStep {
                     filters,
                     rest,
@@ -150,6 +190,16 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String
         }];
     }
     Ok(project)
+}
+
+fn operation_named(name: &str) -> Option<Operation> {
+    Some(match name {
+        "cut" => Operation::Cut,
+        "mark" => Operation::Mark,
+        "engrave" => Operation::Engrave,
+        "engrave3d" => Operation::Engrave3d,
+        _ => return None,
+    })
 }
 
 /// Filters of a mapping under VisiCut's attribute names (LttParity.java):
@@ -300,6 +350,11 @@ enum Outcome {
     Different(String),
 }
 
+/// `single_job=true`: all operations in one job, as Java writes them.
+fn prepare(project: &Project, case: &HashMap<String, String>) -> Result<ltt::PreparedJob, String> {
+    ltt::prepare_with(project, case.get("single_job").is_some_and(|s| s == "true"))
+}
+
 /// The case itself (suffix "") and each of its `variants`, a comma-separated
 /// list of `key=value` overrides such as `order=FILE, rotary_diameter_mm=100`.
 /// A variant has the suffix `@key-value`, its references
@@ -345,7 +400,7 @@ fn compare(
         }
         Ok(bytes) => bytes,
         Err(_) => {
-            let rust = match project(dir, case).and_then(|p| ltt::prepare(&p)) {
+            let rust = match project(dir, case).and_then(|p| prepare(&p, case)) {
                 Ok(p) => format!("Rust erzeugt {} Bytes", p.jobs[0].bytes.len()),
                 Err(_) if reject && java_error.is_some() => return Ok(()),
                 Err(e) => format!("Rust lehnt ab: {e}"),
@@ -361,7 +416,7 @@ fn compare(
         }
     };
     let prepared = project(dir, case)
-        .and_then(|p| ltt::prepare(&p))
+        .and_then(|p| prepare(&p, case))
         .map_err(|e| Outcome::Different(format!("{name}: Rust lehnt ab: {e}")))?;
     if prepared.jobs.len() != 1 {
         return Err(Outcome::Different(format!(

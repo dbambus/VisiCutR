@@ -221,11 +221,20 @@ enum Outcome {
 /// Compares the Rust output of one case with its Java reference.
 fn compare(dir: &Path, name: &str, case: &HashMap<String, String>) -> Result<(), Outcome> {
     let java_error = fs::read_to_string(dir.join("expected.error")).ok();
+    // `expect=reject`: both sides must refuse the job (e.g. engraving rows
+    // outside the bed).
+    let reject = case.get("expect").is_some_and(|e| e == "reject");
     let expected_file = match fs::read(dir.join("expected.ltt")) {
+        Ok(_) if reject => {
+            return Err(Outcome::Different(format!(
+                "{name}: Java erzeugt einen Auftrag, erwartet ist eine Ablehnung"
+            )));
+        }
         Ok(bytes) => bytes,
         Err(_) => {
             let rust = match project(dir, case).and_then(|p| ltt::prepare(&p)) {
                 Ok(p) => format!("Rust erzeugt {} Bytes", p.jobs[0].bytes.len()),
+                Err(_) if reject && java_error.is_some() => return Ok(()),
                 Err(e) => format!("Rust lehnt ab: {e}"),
             };
             return Err(match java_error {

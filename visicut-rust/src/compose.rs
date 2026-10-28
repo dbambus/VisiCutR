@@ -173,6 +173,7 @@ pub fn font_families() -> Vec<String> {
     let mut names: Vec<String> = svg::fonts()
         .faces()
         .flat_map(|face| face.families.iter().map(|(name, _)| name.clone()))
+        .filter(|name| is_listed_font(name))
         .collect();
     names.sort_by_key(|n| n.to_lowercase());
     names.dedup();
@@ -181,6 +182,13 @@ pub fn font_families() -> Vec<String> {
         .map(String::from)
         .chain(names)
         .collect()
+}
+
+/// Whether the font picker lists a family. macOS names its private system
+/// fonts with a leading dot (".SF NS", ".AppleSystemUIFont"); they cannot be
+/// chosen by name and draw nothing.
+fn is_listed_font(name: &str) -> bool {
+    !name.starts_with('.')
 }
 
 /// A sample of `text` in `font` for the font picker: at most three lines of
@@ -2952,6 +2960,14 @@ mod tests {
         let fonts = font_families();
         assert_eq!(fonts[0], "sans-serif");
         assert!(fonts.len() > 3);
+        assert!(fonts.iter().all(|f| !f.starts_with('.')), "{fonts:?}");
+    }
+
+    #[test]
+    fn hidden_macos_fonts_are_not_listed() {
+        assert!(!is_listed_font(".SF NS"));
+        assert!(!is_listed_font(".AppleSystemUIFont"));
+        assert!(is_listed_font("Helvetica Neue"));
     }
 
     #[test]

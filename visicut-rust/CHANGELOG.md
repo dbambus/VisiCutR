@@ -13,7 +13,9 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
   liegen sie unter `illustrator-script/` und `coreldraw-macro/`. VisiCutR legt
   dafür bei jedem Start seinen Programmpfad im Einstellungsordner ab.
 - **Schriftprobe:** Beim Überfahren einer Schrift im Auswahlfeld (Text,
-  Schild) zeigt ein Tooltip den eingegebenen Text in dieser Schrift.
+  Schild) zeigt ein Tooltip den eingegebenen Text in dieser Schrift. Die
+  privaten macOS-Systemschriften mit Punkt am Anfang (etwa „.SF NS“) stehen
+  nicht mehr in der Liste; sie ließen sich nicht verwenden.
 - **Leistung unter 0,1 %** wird wie in Java-VisiCut mit 0,1 % gesendet statt
   abgelehnt; die FAU-Profile für Papier und Thermopapier sind damit nutzbar.
 - **Gravurzeilen außerhalb des Betts** werden abgelehnt, statt in Y

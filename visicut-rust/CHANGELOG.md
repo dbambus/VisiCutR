@@ -3,7 +3,12 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
-## Unveröffentlicht
+## 0.22.0 – 28.10.2026
+
+Bearbeitbarer Text, Kopieren und Einfügen von Teilen, Platzierung im
+sichtbaren Ausschnitt, Anbindung an Illustrator und CorelDRAW sowie die
+Korrekturen aus der Prüfung von 1.0.0-rc.2 (Lasersicherheit, Import,
+Kameraserver).
 
 - **Illustrator und CorelDRAW:** Ein Skript für Adobe Illustrator (CS5.1 oder
   neuer) und ein VBA-Makro für CorelDRAW (2017 oder neuer, Windows) schicken

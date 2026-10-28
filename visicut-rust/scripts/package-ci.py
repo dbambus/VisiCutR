@@ -54,6 +54,16 @@ def main():
         # sie auch selbst (Einstellungen > Allgemein).
         shutil.copytree(project / "resources/inkscape", stage / "inkscape-extension",
                         ignore=shutil.ignore_patterns("__pycache__"))
+        if "windows" in target:
+            # Illustrator-Skript und CorelDRAW-Makro; VisiCutR speichert sie
+            # auch selbst (Einstellungen > Software-Add-ins). Byteweise
+            # kopieren: das Makro braucht CRLF.
+            for source, folder in [
+                (project / "resources/illustrator/VisiCutR.jsx", "illustrator-script"),
+                (project / "resources/coreldraw/VisiCutR.bas", "coreldraw-macro"),
+            ]:
+                (stage / folder).mkdir()
+                shutil.copy2(source, stage / folder / source.name)
         if "linux" in target:
             # Anwendungsmenü und Dateizuordnungen für ~/.local/share.
             linux = project / "resources/linux"
@@ -71,6 +81,9 @@ def main():
             )
         elif "windows" in target:
             associations = (
+                "illustrator-script/ holds a script for Adobe Illustrator (CS5.1 or later)\n"
+                "and coreldraw-macro/ a VBA module for CorelDRAW (2017 or later) that send\n"
+                "the drawing to VisiCutR; see README.md, \"Illustrator und CorelDRAW\".\n"
                 "Settings > General > File types associates .vcr, .plf and .ls files with\n"
                 "this visicutr.exe for the current user (SVG, PDF, DXF and EPS under\n"
                 "\"Open with\"); the same page removes the association again.\n"
@@ -82,7 +95,7 @@ def main():
             "library, text/shape/sign tools, copies, nesting, job preview with timeline,\n"
             "LTT iLaser 4000 devices, rotary jobs and the calibrated camera background.\n"
             "inkscape-extension/ holds the Inkscape extension \"Add to VisiCutR\";\n"
-            "VisiCutR installs it under Settings > General > Inkscape.\n"
+            "VisiCutR installs it under Settings > Software add-ins.\n"
             f"visicutr-cameraserver{suffix} serves photos from a capture command.\n"
             "Linux requires a graphical X11/Wayland session, OpenGL/EGL, libxkbcommon,\n"
             "and a desktop portal for file dialogs. Built on Ubuntu 24.04 (glibc 2.39).\n"

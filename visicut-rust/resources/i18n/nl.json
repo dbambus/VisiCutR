@@ -1005,5 +1005,14 @@
   "Änderungen an der Materialbibliothek sichern?": "Wijzigingen in de materiaalbibliotheek opslaan?",
   "Geräteliste nicht gesichert: {error}": "Apparatenlijst niet opgeslagen: {error}",
   "Materialbibliothek nicht gesichert: {error}": "Materiaalbibliotheek niet opgeslagen: {error}",
-  "{operation}: Leistung unter 0,1 % wird wie in VisiCut mit 0,1 % gesendet": "{operation}: vermogen onder 0,1 % wordt zoals in VisiCut als 0,1 % verzonden"
+  "{operation}: Leistung unter 0,1 % wird wie in VisiCut mit 0,1 % gesendet": "{operation}: vermogen onder 0,1 % wordt zoals in VisiCut als 0,1 % verzonden",
+  "Adobe Illustrator": "Adobe Illustrator",
+  "Illustrator-Skript speichern …": "Illustrator-script opslaan …",
+  "Für Illustrator CS5.1 oder neuer: schickt die Zeichnung oder die Auswahl als Teil an VisiCutR. In Illustrator mit Datei → Skripten → Anderes Skript … (Strg+F12) ausführen; im Skriptordner von Illustrator (z. B. Vorgaben/de_DE/Skripten im Programmordner) erscheint es direkt im Menü.": "Voor Illustrator CS5.1 of nieuwer: stuurt de tekening of de selectie als onderdeel naar VisiCutR. In Illustrator uitvoeren via Bestand → Scripts → Ander script … (Ctrl+F12); opgeslagen in de scriptmap van Illustrator (bijv. Presets/nl_NL/Scripts in de programmamap) verschijnt het direct in het menu.",
+  "CorelDRAW": "CorelDRAW",
+  "CorelDRAW-Makro speichern …": "CorelDRAW-macro opslaan …",
+  "Für CorelDRAW 2017 oder neuer mit VBA: im Makro-Editor (Alt+F11) im Projekt GlobalMacros mit Datei → Datei importieren … einfügen. Danach stehen AddToVisiCutR (als Teil hinzufügen) und OpenInVisiCutR (Projekt ersetzen) unter Extras → Makros und lassen sich unter Extras → Optionen → Anpassung als Symbol ablegen.": "Voor CorelDRAW 2017 of nieuwer met VBA: in de macro-editor (Alt+F11) aan het project GlobalMacros toevoegen via Bestand → Bestand importeren …. Daarna staan AddToVisiCutR (als onderdeel toevoegen) en OpenInVisiCutR (project vervangen) onder Extra → Macro’s en kunnen ze onder Extra → Opties → Aanpassing als knop worden geplaatst.",
+  "Skript und Makro finden VisiCutR über den Pfad, den VisiCutR bei jedem Start im Einstellungsordner ablegt. Nach dem Verschieben VisiCutR einmal starten.": "Script en macro vinden VisiCutR via het pad dat VisiCutR bij elke start in zijn instellingenmap opslaat. Start VisiCutR na het verplaatsen één keer.",
+  "Gespeichert unter {path}": "Opgeslagen in {path}",
+  "Nicht gespeichert: {error}": "Niet opgeslagen: {error}"
 }

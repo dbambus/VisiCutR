@@ -83,6 +83,12 @@ enum Command {
     Duplicate,
     /// Das gewählte Teil als neues Teil kopieren.
     DuplicatePart,
+    /// Das gewählte Teil in die Zwischenablage kopieren.
+    Copy,
+    /// Das kopierte Teil im sichtbaren Ausschnitt einfügen.
+    Paste,
+    /// Das kopierte Teil an seiner ursprünglichen Stelle einfügen.
+    PasteInPlace,
     RotateLeft,
     RotateRight,
     RotateBy,
@@ -165,6 +171,9 @@ impl Command {
             Self::Delete => tr("Löschen"),
             Self::Duplicate => tr("Duplizieren"),
             Self::DuplicatePart => tr("Teil duplizieren"),
+            Self::Copy => tr("Kopieren"),
+            Self::Paste => tr("Einfügen"),
+            Self::PasteInPlace => tr("An Originalposition einfügen"),
             Self::RotateLeft => tr("90° nach links drehen"),
             Self::RotateRight => tr("90° nach rechts drehen"),
             Self::RotateBy => tr("Um den Winkel drehen"),
@@ -202,6 +211,10 @@ impl Command {
             Self::Redo => (COMMAND_SHIFT, Key::Z),
             Self::Delete => (Modifiers::NONE, Key::Delete),
             Self::Duplicate => (Modifiers::COMMAND, Key::D),
+            // ⌘C und ⌘V meldet egui als Kopieren/Einfügen (siehe `keyboard`).
+            Self::Copy => (Modifiers::COMMAND, Key::C),
+            Self::Paste => (Modifiers::COMMAND, Key::V),
+            Self::PasteInPlace => (Modifiers::COMMAND, Key::F),
             Self::Demo
             | Self::Vectorize
             | Self::Remnants
@@ -355,7 +368,7 @@ impl ViewGroup {
 }
 
 /// Reihenfolge im Fenster „Tastenkürzel“.
-const SHORTCUT_LIST: [Command; 23] = [
+const SHORTCUT_LIST: [Command; 26] = [
     Command::New,
     Command::Open,
     Command::AddPart,
@@ -366,6 +379,9 @@ const SHORTCUT_LIST: [Command; 23] = [
     Command::Undo,
     Command::Redo,
     Command::Duplicate,
+    Command::Copy,
+    Command::Paste,
+    Command::PasteInPlace,
     Command::Delete,
     Command::ZoomIn,
     Command::ZoomOut,
@@ -496,6 +512,8 @@ struct VisiCutR {
     /// Sichtbarer Teil des Betts (x, y, Breite, Höhe in mm), zuletzt in `bed`
     /// bestimmt; leer, solange das Bett nicht gezeigt wurde.
     visible_mm: [f32; 4],
+    /// Zuletzt kopiertes Teil (für Einfügen aus dem Menü und ⌘F).
+    copied: Option<visicut_core::project::Part>,
     show_grid: bool,
     /// Projekt ist vollständig und passt aufs Bett (pro Bild neu bestimmt).
     sendable: bool,
@@ -600,6 +618,7 @@ impl VisiCutR {
             zoom: 1.0,
             view_scale: 1.0,
             visible_mm: [0.0; 4],
+            copied: None,
             show_grid: true,
             sendable: false,
             replace: None,
@@ -1252,6 +1271,50 @@ impl VisiCutR {
         self.arrange_textures(all);
         self.dirty = true;
         self.status = tr("Teil dupliziert · Widerrufen macht es rückgängig").into();
+    }
+
+    /// Kopiert das gewählte Teil, auch als Text in die Zwischenablage des
+    /// Systems: so kommt es mit ⌘V auch in ein anderes VisiCutR-Fenster.
+    fn copy_part(&mut self, ctx: &egui::Context) {
+        if self.texture.is_none() {
+            return;
+        }
+        let part = self.project.active();
+        ctx.copy_text(visicut_core::compose::part_to_clipboard(&part));
+        self.status = tr!(
+            "Teil „{name}“ kopiert",
+            name = part_title(&part.name, self.project.active_part)
+        );
+        self.copied = Some(part);
+    }
+
+    /// Fügt `part` (ohne: das zuletzt kopierte Teil) als neues Teil ein, an
+    /// seiner Stelle (`in_place`) oder im sichtbaren Ausschnitt.
+    fn paste_part(
+        &mut self,
+        ctx: &egui::Context,
+        part: Option<visicut_core::project::Part>,
+        in_place: bool,
+    ) {
+        let Some(part) = part.or_else(|| self.copied.clone()) else {
+            return;
+        };
+        if self.busy() {
+            return;
+        }
+        let view = (!in_place).then_some(self.visible_mm);
+        let pasted = visicut_core::compose::paste_part(&self.project, part, view)
+            .and_then(|project| Ok((self.textures_for(ctx, &project)?, project)));
+        match pasted {
+            Ok(((texture, part_textures), project)) => {
+                self.checkpoint();
+                self.project = project;
+                (self.texture, self.part_textures) = (texture, part_textures);
+                self.dirty = true;
+                self.status = tr("Teil eingefügt · Widerrufen macht es rückgängig").into();
+            }
+            Err(e) => self.report(e),
+        }
     }
 
     /// Grafiken über den Dateidialog als neue Teile hinzufügen.
@@ -2631,6 +2694,7 @@ impl VisiCutR {
             | Command::Delete
             | Command::Duplicate
             | Command::DuplicatePart
+            | Command::Copy
             | Command::RotateLeft
             | Command::RotateRight
             | Command::RotateBy
@@ -2640,6 +2704,7 @@ impl VisiCutR {
             Command::ClearRecent => !self.settings.recent.is_empty(),
             Command::ClearCache => !session::states(&session::dir()).is_empty(),
             Command::Device(_) => !self.busy(),
+            Command::Paste | Command::PasteInPlace => self.copied.is_some() && !self.busy(),
             Command::Undo => !self.undo.is_empty() && !self.busy(),
             Command::Redo => !self.redo.is_empty() && !self.busy(),
             Command::Center | Command::ExportPlf => self.texture.is_some() && !self.busy(),
@@ -2718,6 +2783,9 @@ impl VisiCutR {
             Command::Redo => self.redo_last(),
             Command::Delete => self.delete_part(),
             Command::DuplicatePart => self.duplicate_part(),
+            Command::Copy => self.copy_part(ctx),
+            Command::Paste => self.paste_part(ctx, None, false),
+            Command::PasteInPlace => self.paste_part(ctx, None, true),
             Command::Duplicate => {
                 let result = visicut_core::compose::duplicate(&self.project, 5.0);
                 self.composed(ctx, result);
@@ -2780,6 +2848,7 @@ impl VisiCutR {
         }
         // Widerrufen, Wiederholen, Löschen und Duplizieren nur ohne aktives Eingabefeld,
         // damit diese Tasten dort weiter Text bearbeiten.
+        let mut pasted = None;
         let editing = ctx.input_mut(|i| {
             let mut commands = Vec::new();
             // Erst mit Umschalt prüfen: egui ignoriert eine zusätzliche Umschalttaste.
@@ -2791,6 +2860,20 @@ impl VisiCutR {
             if i.consume_key(Modifiers::COMMAND, Key::D) {
                 commands.push(Command::Duplicate);
             }
+            if i.consume_key(Modifiers::COMMAND, Key::F) {
+                commands.push(Command::PasteInPlace);
+            }
+            // ⌘C und ⌘V kommen als Ereignisse, ⌘V nur mit Text in der
+            // Zwischenablage (dort liegt das kopierte Teil, siehe `copy_part`).
+            for event in &i.events {
+                match event {
+                    egui::Event::Copy => commands.push(Command::Copy),
+                    egui::Event::Paste(text) => {
+                        pasted = visicut_core::compose::part_from_clipboard(text);
+                    }
+                    _ => {}
+                }
+            }
             for modifiers in [Modifiers::NONE, Modifiers::COMMAND] {
                 if i.consume_key(modifiers, Key::Delete) || i.consume_key(modifiers, Key::Backspace)
                 {
@@ -2801,6 +2884,9 @@ impl VisiCutR {
         });
         for command in editing {
             self.run(ctx, command);
+        }
+        if pasted.is_some() {
+            self.paste_part(ctx, pasted, false);
         }
         // Pfeiltasten verschieben das Motiv, solange kein Eingabefeld aktiv ist.
         if self.texture.is_none() {
@@ -3644,6 +3730,19 @@ impl VisiCutR {
             {
                 ui.memory_mut(|m| m.surrender_focus(id));
             }
+            // Rechtsklick auf eine freie Stelle: kopiertes Teil einfügen.
+            let can_paste = self.enabled(Command::Paste);
+            response.context_menu(|ui| {
+                for command in [Command::Paste, Command::PasteInPlace] {
+                    let mut button = egui::Button::new(command.title());
+                    if let Some(shortcut) = command.shortcut() {
+                        button = button.shortcut_text(ui.ctx().format_shortcut(&shortcut));
+                    }
+                    if ui.add_enabled(can_paste, button).clicked() {
+                        *clicked = Some(command);
+                    }
+                }
+            });
             let bed = Rect::from_min_size(rect.min + Vec2::splat(RULER), bed_mm * scale);
             // Neue Text-, Form- und Schild-Teile kommen in den sichtbaren Ausschnitt.
             let shown = bed.intersect(ui.clip_rect());
@@ -3859,6 +3958,7 @@ impl VisiCutR {
                     .on_hover_cursor(egui::CursorIcon::Grab);
                 let editable = !self.busy();
                 let text = self.project.part_text.clone();
+                let copied = self.copied.is_some();
                 let mut edit_text = false;
                 response.context_menu(|ui| {
                     if text.is_some() {
@@ -3867,6 +3967,17 @@ impl VisiCutR {
                             .clicked();
                         ui.separator();
                     }
+                    for command in [Command::Copy, Command::Paste, Command::PasteInPlace] {
+                        let mut button = egui::Button::new(command.title());
+                        if let Some(shortcut) = command.shortcut() {
+                            button = button.shortcut_text(ui.ctx().format_shortcut(&shortcut));
+                        }
+                        let enabled = editable && (command == Command::Copy || copied);
+                        if ui.add_enabled(enabled, button).clicked() {
+                            *clicked = Some(command);
+                        }
+                    }
+                    ui.separator();
                     for group in [
                         &[
                             Command::Duplicate,
@@ -4960,12 +5071,16 @@ mod tests {
     #[test]
     fn every_listed_shortcut_is_handled() {
         // ⌘R stood in the menu and the shortcut list but did nothing.
-        // Undo, Redo, Duplicate and Delete are handled outside text fields.
+        // Undo, Redo, Duplicate, Delete, Copy and Paste are handled outside
+        // text fields.
         let editing = [
             Command::Undo,
             Command::Redo,
             Command::Duplicate,
             Command::Delete,
+            Command::Copy,
+            Command::Paste,
+            Command::PasteInPlace,
         ];
         for command in SHORTCUT_LIST {
             assert!(command.shortcut().is_some(), "{}", command.title());

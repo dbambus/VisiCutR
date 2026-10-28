@@ -514,6 +514,43 @@ pub fn add_objects_as_part(
     Ok(result)
 }
 
+/// First line of a copied part in the clipboard; the part follows as JSON.
+const CLIPBOARD_MARK: &str = "VisiCutR-Teil";
+
+/// The part as clipboard text, so it can be pasted, also in another window.
+pub fn part_to_clipboard(part: &crate::project::Part) -> String {
+    let json = serde_json::to_string(part).unwrap_or_default();
+    format!("{CLIPBOARD_MARK}\n{json}")
+}
+
+/// The part in clipboard text from [`part_to_clipboard`]; `None` for other
+/// text.
+pub fn part_from_clipboard(text: &str) -> Option<crate::project::Part> {
+    let json = text.strip_prefix(CLIPBOARD_MARK)?.strip_prefix('\n')?;
+    serde_json::from_str(json).ok()
+}
+
+/// Adds a copied part as a part of its own and makes it active: at its own
+/// place without `view` („An Originalposition einfügen“), otherwise like new
+/// elements in the visible part of the bed (see [`place_in_view`]).
+pub fn paste_part(
+    project: &Project,
+    mut part: crate::project::Part,
+    view: Option<[f32; 4]>,
+) -> Result<Project, String> {
+    if part.svg.is_empty() {
+        return Err(tr("Nichts zum Einfügen").into());
+    }
+    check_size(&part.svg)?;
+    if let Some(view) = view {
+        (part.x_mm, part.y_mm) = place_in_view(project, part.width_mm, part.height_mm, view);
+    }
+    let mut result = project.clone();
+    result.add_part(part);
+    result.validate_document()?;
+    Ok(result)
+}
+
 /// Where a new part of `width` × `height` mm goes: in the middle of the
 /// visible part of the bed `view` (x, y, width, height in mm; empty means the
 /// whole bed). On something already there it would no longer be clickable,
@@ -2923,6 +2960,47 @@ mod tests {
         let edited = set_text(&mirrored, &longer).unwrap();
         assert!(edited.part_text.as_ref().unwrap().mirrored);
         assert!(edited.svg.contains("scale(-1 1)"), "{}", edited.svg);
+    }
+
+    #[test]
+    fn copied_parts_paste_in_view_or_in_place() {
+        let bed = [0.0, 0.0, 1000.0, 600.0];
+        let sign = super::sign(&Sign::default()).unwrap();
+        let project = add_objects_as_part(&Project::default(), &sign, "Schild", bed).unwrap();
+        let part = project.active();
+        let text = part_to_clipboard(&part);
+        assert_eq!(part_from_clipboard(&text).as_ref(), Some(&part));
+        assert_eq!(part_from_clipboard("Hallo"), None);
+        assert_eq!(
+            part_from_clipboard(&format!("{CLIPBOARD_MARK}\nkein JSON")),
+            None
+        );
+        // An Originalposition: genau darauf, mit allen Einstellungen.
+        let in_place = paste_part(&project, part.clone(), None).unwrap();
+        assert_eq!(in_place.part_count(), 2);
+        assert_eq!(in_place.active_part, 1);
+        assert_eq!(in_place.active(), part);
+        // Einfügen: im sichtbaren Ausschnitt neben dem Original.
+        let view = [0.0, 0.0, 1000.0, 600.0];
+        let pasted = paste_part(&project, part.clone(), Some(view)).unwrap();
+        let copy = pasted.active();
+        assert_eq!(
+            (copy.width_mm, copy.svg.as_str()),
+            (part.width_mm, part.svg.as_str())
+        );
+        assert!(
+            copy.x_mm >= part.x_mm + part.width_mm
+                || copy.y_mm >= part.y_mm + part.height_mm
+                || copy.x_mm + copy.width_mm <= part.x_mm
+                || copy.y_mm + copy.height_mm <= part.y_mm,
+            "{copy:?}"
+        );
+        // Ein leeres Teil wird nicht eingefügt.
+        let empty = crate::project::Part {
+            svg: String::new(),
+            ..part
+        };
+        assert!(paste_part(&project, empty, None).is_err());
     }
 
     #[test]

@@ -1014,5 +1014,10 @@
   "Nicht gespeichert: {error}": "Niet opgeslagen: {error}",
   "Das gewählte Teil ist kein Text": "Het gekozen onderdeel is geen tekst",
   "Text bearbeiten": "Tekst bewerken",
-  "Text bearbeiten …": "Tekst bewerken …"
+  "Text bearbeiten …": "Tekst bewerken …",
+  "An Originalposition einfügen": "Op dezelfde plek plakken",
+  "Kopieren": "Kopiëren",
+  "Nichts zum Einfügen": "Niets om te plakken",
+  "Teil eingefügt · Widerrufen macht es rückgängig": "Onderdeel geplakt · Ongedaan maken draait dit terug",
+  "Teil „{name}“ kopiert": "Onderdeel ‘{name}’ gekopieerd"
 }

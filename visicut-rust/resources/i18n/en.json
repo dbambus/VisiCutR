@@ -1014,5 +1014,10 @@
   "Nicht gespeichert: {error}": "Not saved: {error}",
   "Das gewählte Teil ist kein Text": "The selected part is not a text",
   "Text bearbeiten": "Edit text",
-  "Text bearbeiten …": "Edit text …"
+  "Text bearbeiten …": "Edit text …",
+  "An Originalposition einfügen": "Paste in place",
+  "Kopieren": "Copy",
+  "Nichts zum Einfügen": "Nothing to paste",
+  "Teil eingefügt · Widerrufen macht es rückgängig": "Part pasted · Undo reverts this",
+  "Teil „{name}“ kopiert": "Part “{name}” copied"
 }

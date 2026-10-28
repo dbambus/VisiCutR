@@ -1014,5 +1014,10 @@
   "Nicht gespeichert: {error}": "Non salvato: {error}",
   "Das gewählte Teil ist kein Text": "La parte selezionata non è un testo",
   "Text bearbeiten": "Modifica testo",
-  "Text bearbeiten …": "Modifica testo …"
+  "Text bearbeiten …": "Modifica testo …",
+  "An Originalposition einfügen": "Incolla nella stessa posizione",
+  "Kopieren": "Copia",
+  "Nichts zum Einfügen": "Niente da incollare",
+  "Teil eingefügt · Widerrufen macht es rückgängig": "Parte incollata · Annulla per ripristinare",
+  "Teil „{name}“ kopiert": "Parte «{name}» copiata"
 }

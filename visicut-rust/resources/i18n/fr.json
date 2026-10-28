@@ -1014,5 +1014,10 @@
   "Nicht gespeichert: {error}": "Non enregistré : {error}",
   "Das gewählte Teil ist kein Text": "La pièce sélectionnée n’est pas un texte",
   "Text bearbeiten": "Modifier le texte",
-  "Text bearbeiten …": "Modifier le texte …"
+  "Text bearbeiten …": "Modifier le texte …",
+  "An Originalposition einfügen": "Coller à la même position",
+  "Kopieren": "Copier",
+  "Nichts zum Einfügen": "Rien à coller",
+  "Teil eingefügt · Widerrufen macht es rückgängig": "Pièce collée · Annuler pour revenir en arrière",
+  "Teil „{name}“ kopiert": "Pièce « {name} » copiée"
 }

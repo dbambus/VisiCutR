@@ -19,6 +19,13 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
   Emoji- und Symbolschriften wie Wingdings sowie Schriften in der alten
   Windows-Symbolkodierung (etwa die AutoCAD-Schriften). Mit ihnen erschien
   der Text bisher in einer Ersatzschrift oder gar nicht.
+- **Teile kopieren und einfügen:** ⌘C/Strg+C kopiert das gewählte Teil,
+  ⌘V/Strg+V fügt es im sichtbaren Ausschnitt ein (an der nächsten freien
+  Stelle), ⌘F/Strg+F genau an seiner ursprünglichen Stelle. Das Teil
+  behält Zuordnung und Laserwerte; ein Text bleibt bearbeitbar. Über die
+  Zwischenablage geht es auch in ein anderes VisiCutR-Fenster. Die Befehle
+  stehen auch im Rechtsklick-Menü des Teils, Einfügen auf einer freien
+  Stelle der Arbeitsfläche.
 - **Text bleibt bearbeitbar:** Ein Rechtsklick auf einen Text auf der
   Arbeitsfläche öffnet „Text bearbeiten …“ mit Text, Schrift und
   Einstellungen; „Übernehmen“ erzeugt die Umrisse an derselben Stelle neu.

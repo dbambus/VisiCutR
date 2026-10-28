@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 /// Command-line flag of the worker process.
 pub const FLAG: &str = "--import-worker";
 /// Address space of the worker process (Linux).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub const MEMORY: u64 = 2 * 1024 * 1024 * 1024;
 /// Time for one PDF page (as for Ghostscript).
 pub(super) const PDF_TIME_LIMIT: Duration = Duration::from_secs(60);

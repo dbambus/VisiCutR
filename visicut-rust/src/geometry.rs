@@ -171,6 +171,104 @@ pub fn contours(project: &Project) -> Result<Vec<Contour>, String> {
     contours_with_fonts(project, crate::svg::fonts())
 }
 
+/// Power and speed in percent after a `set` of a LaserScript; `None` keeps
+/// the value of the step.
+pub type ScriptSetting = (Option<f32>, Option<f32>);
+
+/// One polyline of a LaserScript part in mm on the bed, with the `set` calls
+/// around it (see `import::plf::laserscript::Segment`).
+#[derive(Debug)]
+pub struct ScriptPath {
+    pub points: Contour,
+    /// `set` calls before the path, in order.
+    pub sets: Vec<ScriptSetting>,
+    /// `set` calls after it (only after the last line of the script).
+    pub after: Vec<ScriptSetting>,
+    /// Continues at the end of the previous path without a move.
+    pub joined: bool,
+}
+
+/// The paths of a LaserScript part in script order, or `None` for a drawing
+/// that does not consist of LaserScript paths only. VisiCut runs the script
+/// again for the job; its `set` calls change power and speed there, and the
+/// lines keep the script's order.
+pub fn laser_script(project: &Project) -> Result<Option<Vec<ScriptPath>>, String> {
+    if !project.svg.contains("laserscript") {
+        return Ok(None);
+    }
+    fn walk(
+        group: &usvg::Group,
+        project: &Project,
+        size: usvg::Size,
+        paths: &mut Vec<ScriptPath>,
+        other: &mut bool,
+    ) {
+        for node in group.children() {
+            match node {
+                usvg::Node::Group(g) => walk(g, project, size, paths, other),
+                usvg::Node::Path(path) if path.is_visible() => {
+                    let Some((sets, after, joined)) = script_settings(path.id()) else {
+                        *other = true;
+                        continue;
+                    };
+                    let subpaths =
+                        flatten_path(path.data(), affine_of(path.abs_transform()), project, size);
+                    let last = subpaths.len().saturating_sub(1);
+                    for (i, (points, _)) in subpaths.into_iter().enumerate() {
+                        paths.push(ScriptPath {
+                            points,
+                            sets: if i == 0 { sets.clone() } else { Vec::new() },
+                            after: if i == last { after.clone() } else { Vec::new() },
+                            joined: joined && i == 0,
+                        });
+                    }
+                }
+                usvg::Node::Path(_) => {}
+                _ => *other = true,
+            }
+        }
+    }
+    let tree =
+        usvg::Tree::from_str(&project.svg, &crate::svg::options()).map_err(|e| e.to_string())?;
+    let (mut paths, mut other) = (Vec::new(), false);
+    walk(tree.root(), project, tree.size(), &mut paths, &mut other);
+    Ok((!other && !paths.is_empty()).then_some(paths))
+}
+
+/// The `set` calls before and after a LaserScript path and whether it is
+/// joined, from its id (`laserscript-<n>[_e<power>:<speed>]…[_j][_t…]…`,
+/// `n` for a value not set, possibly with a prefix for duplicated parts);
+/// the single `laserscript` path of older imports has none.
+fn script_settings(id: &str) -> Option<(Vec<ScriptSetting>, Vec<ScriptSetting>, bool)> {
+    let rest = &id[id.rfind("laserscript")? + "laserscript".len()..];
+    if rest.is_empty() {
+        return Some((Vec::new(), Vec::new(), false));
+    }
+    let mut fields = rest.strip_prefix('-')?.split('_');
+    fields.next()?.parse::<usize>().ok()?;
+    let setting = |text: &str| -> Option<ScriptSetting> {
+        let value = |v: &str| -> Option<Option<f32>> {
+            if v == "n" {
+                Some(None)
+            } else {
+                v.parse().ok().map(Some)
+            }
+        };
+        let (power, speed) = text.split_once(':')?;
+        Some((value(power)?, value(speed)?))
+    };
+    let (mut sets, mut after, mut joined) = (Vec::new(), Vec::new(), false);
+    for field in fields {
+        match field.split_at_checked(1)? {
+            ("e", value) => sets.push(setting(value)?),
+            ("t", value) => after.push(setting(value)?),
+            ("j", "") => joined = true,
+            _ => return None,
+        }
+    }
+    Some((sets, after, joined))
+}
+
 /// Outline of one object (index as in `selection::objects`) in mm relative
 /// to the top left corner of the motif: its contours, or for images and
 /// other objects without contours their bounding rectangle. For highlighting

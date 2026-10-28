@@ -1019,5 +1019,6 @@
   "Kopieren": "Copier",
   "Nichts zum Einfügen": "Rien à coller",
   "Teil eingefügt · Widerrufen macht es rückgängig": "Pièce collée · Annuler pour revenir en arrière",
-  "Teil „{name}“ kopiert": "Pièce « {name} » copiée"
+  "Teil „{name}“ kopiert": "Pièce « {name} » copiée",
+  "LaserScript setzt Leistung oder Geschwindigkeit selbst; die Werte des Schritts gelten nur, wo das Skript keine eigenen setzt": "Le LaserScript définit lui-même la puissance ou la vitesse ; les valeurs de l'étape ne s'appliquent que là où le script n'en définit pas"
 }

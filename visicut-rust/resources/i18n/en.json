@@ -1019,5 +1019,6 @@
   "Kopieren": "Copy",
   "Nichts zum Einfügen": "Nothing to paste",
   "Teil eingefügt · Widerrufen macht es rückgängig": "Part pasted · Undo reverts this",
-  "Teil „{name}“ kopiert": "Part “{name}” copied"
+  "Teil „{name}“ kopiert": "Part “{name}” copied",
+  "LaserScript setzt Leistung oder Geschwindigkeit selbst; die Werte des Schritts gelten nur, wo das Skript keine eigenen setzt": "The LaserScript sets power or speed itself; the step's values apply only where the script sets none of its own"
 }

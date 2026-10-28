@@ -336,6 +336,18 @@ pub fn read_laser_script(path: &Path) -> Result<Imported, String> {
     let source = String::from_utf8_lossy(&bytes).into_owned();
     let drawing = laserscript::run(source, script::TIME_LIMIT)?;
     let (svg, mut warnings) = laserscript::to_svg(&drawing)?;
+    // Applied in the job (`geometry::laser_script`), not shown in the steps.
+    let sets_values = drawing
+        .segments
+        .iter()
+        .flat_map(|s| &s.sets)
+        .any(|(power, speed)| power.is_some() || speed.is_some());
+    if sets_values {
+        warnings.push(
+            tr("LaserScript setzt Leistung oder Geschwindigkeit selbst; die Werte des Schritts gelten nur, wo das Skript keine eigenen setzt")
+                .into(),
+        );
+    }
     warnings.extend(drawing.messages);
     Ok(Imported {
         svg,

@@ -1019,5 +1019,6 @@
   "Kopieren": "Kopiëren",
   "Nichts zum Einfügen": "Niets om te plakken",
   "Teil eingefügt · Widerrufen macht es rückgängig": "Onderdeel geplakt · Ongedaan maken draait dit terug",
-  "Teil „{name}“ kopiert": "Onderdeel ‘{name}’ gekopieerd"
+  "Teil „{name}“ kopiert": "Onderdeel ‘{name}’ gekopieerd",
+  "LaserScript setzt Leistung oder Geschwindigkeit selbst; die Werte des Schritts gelten nur, wo das Skript keine eigenen setzt": "Het LaserScript stelt zelf vermogen of snelheid in; de waarden van de stap gelden alleen waar het script er zelf geen instelt"
 }

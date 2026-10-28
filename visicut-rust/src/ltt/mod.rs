@@ -721,10 +721,20 @@ fn append_part(
     let bounds;
     match part.operation {
         Operation::Cut | Operation::Mark => {
-            let paths = part.vector_paths(&source)?;
+            // A LaserScript part goes out as VisiCut runs the script for the
+            // job: in script order, with its own power and speed, on whole pixels.
+            let script = if part.outline {
+                None
+            } else {
+                geometry::laser_script(&source)?
+            };
+            let paths = match &script {
+                Some(script) => script.iter().map(|p| p.points.clone()).collect(),
+                None => part.vector_paths(&source)?,
+            };
             // Optional: parts that run along an earlier line of this step are
             // cut once (passes and parameter sets still repeat everything).
-            let (paths, duplicates) = if project.remove_duplicate_lines {
+            let (paths, duplicates) = if project.remove_duplicate_lines && script.is_none() {
                 crate::overlap::remove_duplicates(paths)
             } else {
                 (paths, crate::overlap::Removed::default())
@@ -786,29 +796,47 @@ fn append_part(
                     });
                 }
             }
-            // The shapes in pixels as VisiCut's ShapeConverter adds them.
-            let shapes: Vec<([f64; 2], Vec<[f64; 2]>)> = paths
-                .iter()
-                .filter_map(|path| shape_converter(path))
-                .collect();
-            let elements: Vec<order::Element> = (0..keys.len())
-                .flat_map(|set| {
-                    shapes.iter().map(move |(start, moves)| order::Element {
-                        set,
-                        start: *start,
-                        moves: moves.clone(),
-                    })
-                })
-                .collect();
+            // Paths of a LaserScript that continue without a move.
+            let mut joined = Vec::new();
+            let elements: Vec<order::Element> = match &script {
+                Some(script) => {
+                    let elements;
+                    (keys, elements) = script_elements(script, &keys, &mut joined);
+                    elements
+                }
+                None => {
+                    // The shapes in pixels as VisiCut's ShapeConverter adds them.
+                    let shapes: Vec<([f64; 2], Vec<[f64; 2]>)> = paths
+                        .iter()
+                        .filter_map(|path| shape_converter(path))
+                        .collect();
+                    (0..keys.len())
+                        .flat_map(|set| {
+                            shapes.iter().map(move |(start, moves)| order::Element {
+                                set,
+                                start: *start,
+                                moves: moves.clone(),
+                            })
+                        })
+                        .collect()
+                }
+            };
             // LaserJob.getBoundingBox: extent of the commands, px2mm per point.
             bounds = Bounds::of_points(
-                shapes
+                elements
                     .iter()
-                    .flat_map(|(start, moves)| std::iter::once(start).chain(moves))
+                    .enumerate()
+                    // Not the property changes of a LaserScript.
+                    .filter(|(i, e)| {
+                        !(joined.get(*i).copied().unwrap_or(false) && e.moves.is_empty())
+                    })
+                    .flat_map(|(_, e)| std::iter::once(&e.start).chain(&e.moves))
                     .map(|p| [p[0] / RASTER_DPI * 25.4, p[1] / RASTER_DPI * 25.4]),
             )
             .ok_or(tr("Keine Vektorpfade zum Bearbeiten"))?;
             let ordered = match project.cut_order {
+                // VisiCut does not optimise a LaserScript.
+                _ if script.is_some() => elements,
                 CutOrder::VisiCut => order::inner_first(elements, &keys),
                 CutOrder::File => elements,
                 CutOrder::Nearest => order::nearest(elements, &keys),
@@ -840,7 +868,7 @@ fn append_part(
                 encoder.curve_acceleration = project.machine.curve_acceleration_mm_s2;
                 encoder.pierce_delay = project.machine.pierce_delay_ms / 1000.0;
                 let mut current: Option<order::SetKey> = None;
-                for element in &ordered {
+                for (index, element) in ordered.iter().enumerate() {
                     let key = keys[element.set];
                     if !current.is_some_and(|c| c.same(key)) {
                         encoder.set_speed(key.speed);
@@ -852,7 +880,9 @@ fn append_part(
                         .iter()
                         .map(|p| (p[0], p[1] * scale_y))
                         .collect();
-                    encoder.move_to(element.start[0], element.start[1] * scale_y);
+                    if !joined.get(index).copied().unwrap_or(false) {
+                        encoder.move_to(element.start[0], element.start[1] * scale_y);
+                    }
                     encoder.polyline(&polyline)?;
                 }
                 encoder.finish();
@@ -1311,6 +1341,62 @@ fn content_bounds(group: &usvg::Group) -> Option<tiny_skia::Rect> {
     bounds
 }
 
+/// VisiCut's `VectorPartScriptInterface`: the script once per pass (every
+/// pass is one LaserProperty, set at its start), its points truncated to
+/// whole pixels, every `set` a property change over the values of the pass.
+/// Returns the parameter sets and the elements in script order; `joined`
+/// gets whether each element continues the previous one without a move. A
+/// property change alone is a joined element without moves.
+fn script_elements(
+    script: &[geometry::ScriptPath],
+    passes: &[order::SetKey],
+    joined: &mut Vec<bool>,
+) -> (Vec<order::SetKey>, Vec<order::Element>) {
+    let px = |p: &[f64; 2]| {
+        [
+            (p[0] / 25.4 * RASTER_DPI).trunc(),
+            (p[1] / 25.4 * RASTER_DPI).trunc(),
+        ]
+    };
+    let (mut keys, mut elements) = (Vec::new(), Vec::new());
+    for pass in passes {
+        let key = |(power, speed): geometry::ScriptSetting| order::SetKey {
+            power: power.unwrap_or(pass.power),
+            speed: speed.unwrap_or(pass.speed),
+            focus: pass.focus,
+        };
+        let mut push =
+            |key: order::SetKey, element: Option<(&[f64; 2], &[[f64; 2]])>, continues: bool| {
+                keys.push(key);
+                let (start, moves) = element.map_or(([0.0, 0.0], Vec::new()), |(first, rest)| {
+                    (px(first), rest.iter().map(px).collect())
+                });
+                elements.push(order::Element {
+                    set: keys.len() - 1,
+                    start,
+                    moves,
+                });
+                joined.push(element.is_none() || continues);
+            };
+        let mut current = (None, None);
+        push(key(current), None, true);
+        for path in script {
+            for set in &path.sets {
+                current = *set;
+                push(key(current), None, true);
+            }
+            if let Some((first, rest)) = path.points.split_first() {
+                push(key(current), Some((first, rest)), path.joined);
+            }
+            for set in &path.after {
+                current = *set;
+                push(key(current), None, true);
+            }
+        }
+    }
+    (keys, elements)
+}
+
 /// getEngraveShiftPixels: line offset in raster pixels for the given speed.
 fn engrave_shift_pixels(machine: &MachineSettings, speed: f32, dpi: f64) -> f64 {
     machine.engrave_shift_at(speed) as f64 * dpi / MACHINE_DPI + 0.5
@@ -1586,6 +1672,46 @@ mod tests {
                 JobStep { objects: vec![1], power_percent: 20.0, speed_percent: 70.0, passes: 1, ..JobStep::new(Operation::Engrave) },
             ], ..Default::default()
         }
+    }
+
+    #[test]
+    fn laser_script_keeps_its_order_and_its_power_per_path() {
+        // Right square first with 30 %, then the left one with the step's
+        // power: VisiCut runs the script for the job and does not reorder it.
+        let source = "move(20, 0); line(30, 0); line(30, 10); line(20, 10); line(20, 0); \
+                      set('power', 30); move(0, 0); line(10, 0); line(10, 10); line(0, 10); line(0, 0);";
+        let path = std::env::temp_dir().join(format!(
+            "visicut-laserscript-order-{}.ls",
+            std::process::id()
+        ));
+        std::fs::write(&path, source).unwrap();
+        let imported = crate::import::read_file(&path);
+        let _ = std::fs::remove_file(&path);
+        let project = Project {
+            svg: imported.unwrap().svg,
+            x_mm: 100.0,
+            y_mm: 100.0,
+            width_mm: 30.0,
+            height_mm: 10.0,
+            power_percent: 60.0,
+            speed_percent: 20.0,
+            cut_order: CutOrder::VisiCut,
+            ..Default::default()
+        };
+        let bytes = &prepare(&project).unwrap().jobs[0].bytes;
+        let find = |needle: &[u8]| bytes.windows(needle.len()).position(|w| w == needle);
+        // 60 % for the first square, then 30 %.
+        let first = find(&[0x1b, 0x4a, 0x02, 0x58]).expect("60 %");
+        let second = find(&[0x1b, 0x4a, 0x01, 0x2c]).expect("30 %");
+        assert!(first < second);
+        // The first move goes to the right square (x = 120 mm, whole pixels).
+        let x = |at: usize| u32::from_be_bytes(bytes[at + 2..at + 6].try_into().unwrap());
+        let moves: Vec<u32> = (0..bytes.len() - 1)
+            .filter(|&i| &bytes[i..i + 2] == b"PA")
+            .map(x)
+            .collect();
+        assert_eq!(moves[0], (120.0_f64 / 25.4 * 500.0) as u32 * 8);
+        assert_eq!(moves[1], (100.0_f64 / 25.4 * 500.0) as u32 * 8);
     }
 
     #[test]

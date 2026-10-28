@@ -43,6 +43,8 @@ Temp-Ordner und liest keine Benutzereinstellungen.
 | `order` | VisiCut-Reihenfolge `FILE`, `NEAREST`, `INNER_FIRST` (Standard, „Klassisch“) oder `SMALLEST_FIRST` |
 | `rotary_diameter_mm` | Rotationsachse mit diesem Walzendurchmesser |
 | `variants` | weitere Läufe desselben Falls mit überschriebenen Schlüsseln, `order=FILE, rotary_diameter_mm=100`; Referenzen `expected@order-FILE.ltt`, Abweichungen `deviation@order-FILE=` |
+| `mappings` | Zuordnungen in Reihenfolge, `Filter -> Leistung:Tempo[:Durchgänge]; …`; Filter `*` (alles Übrige), `all` (alles) oder mit `&` verbundene `[!]Attribut=Wert` bzw. `[!]Attribut<=Wert` mit VisiCuts Attributnamen (`Color`, `Stroke Color`, `Fill Color`, `Stroke Width`, `Type`, `Id`, `Group`) |
+| `outline=true` | „Nur Umriss“ (VisiCuts `useOutline`) |
 | `expect=reject` | beide Seiten müssen den Auftrag ablehnen (Java: `expected.error`), etwa bei Gravuren über den Bettrand |
 | `deviation` | dokumentierte Abweichung mit Grund: wird gemeldet, lässt den Test nicht scheitern; der Test weist darauf hin, wenn der Fall wieder byte-gleich ist |
 

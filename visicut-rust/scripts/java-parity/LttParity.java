@@ -29,7 +29,6 @@ import java.io.FileInputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -125,6 +124,8 @@ public class LttParity
         vp.setIsCut("cut".equals(operation));
         // FILE, NEAREST, INNER_FIRST (default) or SMALLEST_FIRST.
         vp.setOrderStrategy(de.thomas_oster.liblasercut.vectoroptimizers.VectorOptimizer.OrderStrategy.valueOf(c.getProperty("order", "INNER_FIRST")));
+        // "Nur Umriss": only the outline of all objects together.
+        vp.setUseOutline(Boolean.parseBoolean(c.getProperty("outline", "false")));
         profile = vp;
         property = cutter.getLaserPropertyForVectorPart();
         prefix = "cut".equals(operation) ? "Cut" : "Mark";
@@ -216,13 +217,38 @@ public class LttParity
     java.awt.geom.Rectangle2D natural = part.getGraphicObjects().getBoundingBox();
     System.out.println(dir.getName() + ": java import bounds " + natural);
     part.getGraphicObjects().setTransform(t);
+    // Profiles compare equal by their settings; each mapping needs its own.
+    Map<LaserProfile, List<LaserProperty>> propmap = new java.util.IdentityHashMap<>();
     MappingSet mapping = new MappingSet();
-    mapping.add(new Mapping(null, profile));
+    String mappings = c.getProperty("mappings");
+    if (mappings == null)
+    {
+      mapping.add(new Mapping(null, profile));
+      propmap.put(profile, props);
+    }
+    else
+    {
+      // "filters -> power:speed[:passes]; …" in mapping order, see README.
+      for (String entry : mappings.split(";"))
+      {
+        String[] parts = entry.split("->");
+        String[] v = parts[1].trim().split(":");
+        LaserProfile mapped = profile.clone();
+        LaserProperty p = property.clone();
+        p.setProperty("power", Float.parseFloat(v[0]));
+        p.setProperty("speed", Float.parseFloat(v[1]));
+        List<LaserProperty> mappedProps = new LinkedList<>();
+        for (int i = 0; i < (v.length > 2 ? Integer.parseInt(v[2]) : 1); i++)
+        {
+          mappedProps.add(p.clone());
+        }
+        mapping.add(new Mapping(filterSet(parts[0].trim()), mapped));
+        propmap.put(mapped, mappedProps);
+      }
+    }
     part.setMapping(mapping);
     model.getPlfFile().add(part);
 
-    Map<LaserProfile, List<LaserProperty>> propmap = new HashMap<>();
-    propmap.put(profile, props);
     String name = jobName(prefix, c.getProperty("name"));
     File out = new File(dir, "expected" + suffix + ".ltt");
     new File(dir, "expected" + suffix + ".error").delete();
@@ -232,6 +258,56 @@ public class LttParity
       System.err.println(dir.getName() + ": " + w);
     }
     System.out.println(dir.getName() + suffix + ": " + out.length() + " bytes as " + name);
+  }
+
+  /**
+   * "*": everything else (no FilterSet); "all": everything (empty FilterSet);
+   * otherwise filters joined by "&", each "[!]Attribute=value" or
+   * "[!]Attribute<=value" with VisiCut's attribute names. Colours become
+   * java.awt.Color, stroke widths Double, like SVGShape's attribute values.
+   */
+  private static de.thomas_oster.visicut.model.mapping.FilterSet filterSet(String spec)
+  {
+    if ("*".equals(spec))
+    {
+      return null;
+    }
+    de.thomas_oster.visicut.model.mapping.FilterSet set = new de.thomas_oster.visicut.model.mapping.FilterSet();
+    if ("all".equals(spec))
+    {
+      return set;
+    }
+    for (String f : spec.split("&"))
+    {
+      f = f.trim();
+      boolean inverted = f.startsWith("!");
+      if (inverted)
+      {
+        f = f.substring(1);
+      }
+      boolean compare = f.contains("<=");
+      String[] kv = f.split(compare ? "<=" : "=", 2);
+      String attribute = kv[0].trim();
+      String text = kv[1].trim();
+      Object value;
+      if (attribute.equals("Stroke Width"))
+      {
+        value = Double.parseDouble(text);
+      }
+      else if (attribute.endsWith("Color") && text.startsWith("#"))
+      {
+        value = java.awt.Color.decode(text);
+      }
+      else
+      {
+        value = text;
+      }
+      de.thomas_oster.visicut.model.mapping.MappingFilter filter = new de.thomas_oster.visicut.model.mapping.MappingFilter(attribute, value);
+      filter.setInverted(inverted);
+      filter.setCompare(compare);
+      set.add(filter);
+    }
+    return set;
   }
 
   /** Union of the objects' geometry bounds in mm (basic transform, no strokes). */

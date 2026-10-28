@@ -12,6 +12,7 @@
 use std::{collections::HashMap, fs, path::Path};
 use visicut_core::{
     ltt,
+    mapping::{Attribute, Filter},
     project::{CutOrder, JobStep, Operation, ParameterSet, Project},
     raster::{Dithering, RasterSettings},
 };
@@ -97,18 +98,44 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String
             .map_or(100.0, |d| d.parse().unwrap()),
         // VisiCut schneidet doppelte Linien mehrfach.
         remove_duplicate_lines: false,
+        // VisiCut vergleicht Farben exakt.
+        similar_colors: false,
         ..Project::default()
     };
-    // Further parameter sets need a step; filters `[]` select every object.
-    if let Some(additional) = case.get("additional") {
+    let outline = case.get("outline").is_some_and(|o| o == "true");
+    if let Some(mappings) = case.get("mappings") {
+        // "filters -> power:speed[:passes]; …" in mapping order (README).
+        project.steps = mappings
+            .split(';')
+            .map(|entry| {
+                let (filters, values) = entry.split_once("->").unwrap();
+                let v: Vec<&str> = values.trim().split(':').collect();
+                let (filters, rest) = filter_set(filters.trim());
+                JobStep {
+                    filters,
+                    rest,
+                    power_percent: v[0].parse().unwrap(),
+                    speed_percent: v[1].parse().unwrap(),
+                    passes: v.get(2).map_or(1, |p| p.parse().unwrap()),
+                    raster: project.raster,
+                    outline,
+                    ..JobStep::new(operation)
+                }
+            })
+            .collect();
+    } else if case.contains_key("additional") || outline {
+        // Further parameter sets need a step; filters `[]` select every object.
         project.steps = vec![JobStep {
             filters: Some(Vec::new()),
             power_percent: project.power_percent,
             speed_percent: project.speed_percent,
             passes: project.passes,
             raster: project.raster,
-            additional: additional
+            additional: case
+                .get("additional")
+                .map_or("", String::as_str)
                 .split(';')
+                .filter(|set| !set.trim().is_empty())
                 .map(|set| {
                     let v: Vec<&str> = set.trim().split(':').collect();
                     ParameterSet {
@@ -118,10 +145,50 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String
                     }
                 })
                 .collect(),
+            outline,
             ..JobStep::new(operation)
         }];
     }
     Ok(project)
+}
+
+/// Filters of a mapping under VisiCut's attribute names (LttParity.java):
+/// `*` is "everything else", `all` everything, otherwise filters joined by
+/// `&`, each `[!]Attribute=value` or `[!]Attribute<=value`.
+fn filter_set(spec: &str) -> (Option<Vec<Filter>>, bool) {
+    match spec {
+        "*" => return (None, true),
+        "all" => return (Some(Vec::new()), false),
+        _ => {}
+    }
+    let filters = spec
+        .split('&')
+        .map(|f| {
+            let f = f.trim();
+            let (inverted, f) = f.strip_prefix('!').map_or((false, f), |f| (true, f));
+            let (compare, (attribute, value)) = match f.split_once("<=") {
+                Some(kv) => (true, kv),
+                None => (false, f.split_once('=').unwrap()),
+            };
+            let attribute = match attribute.trim() {
+                "Color" => Attribute::Color,
+                "Stroke Color" => Attribute::StrokeColor,
+                "Fill Color" => Attribute::FillColor,
+                "Stroke Width" => Attribute::StrokeWidth,
+                "Type" => Attribute::Type,
+                "Id" => Attribute::Id,
+                "Group" => Attribute::Group,
+                other => panic!("unbekanntes Attribut {other}"),
+            };
+            Filter {
+                attribute,
+                value: value.trim().into(),
+                compare,
+                inverted,
+            }
+        })
+        .collect();
+    (Some(filters), false)
 }
 
 /// Raster options under the names of the Java harness (LttParity.java).

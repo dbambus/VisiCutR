@@ -13,9 +13,12 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
   liegen sie unter `illustrator-script/` und `coreldraw-macro/`. VisiCutR legt
   dafür bei jedem Start seinen Programmpfad im Einstellungsordner ab.
 - **Schriftprobe:** Beim Überfahren einer Schrift im Auswahlfeld (Text,
-  Schild) zeigt ein Tooltip den eingegebenen Text in dieser Schrift. Die
-  privaten macOS-Systemschriften mit Punkt am Anfang (etwa „.SF NS“) stehen
-  nicht mehr in der Liste; sie ließen sich nicht verwenden.
+  Schild) zeigt ein Tooltip den eingegebenen Text in dieser Schrift. Nicht
+  mehr in der Liste stehen Schriften, die keine Buchstaben zeichnen: die
+  privaten macOS-Systemschriften mit Punkt am Anfang (etwa „.SF NS“),
+  Emoji- und Symbolschriften wie Wingdings sowie Schriften in der alten
+  Windows-Symbolkodierung (etwa die AutoCAD-Schriften). Mit ihnen erschien
+  der Text bisher in einer Ersatzschrift oder gar nicht.
 - **Leistung unter 0,1 %** wird wie in Java-VisiCut mit 0,1 % gesendet statt
   abgelehnt; die FAU-Profile für Papier und Thermopapier sind damit nutzbar.
 - **Gravurzeilen außerhalb des Betts** werden abgelehnt, statt in Y

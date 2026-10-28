@@ -170,11 +170,25 @@ pub struct Nested {
 
 /// Font families available for text, generic families first.
 pub fn font_families() -> Vec<String> {
-    let mut names: Vec<String> = svg::fonts()
-        .faces()
-        .flat_map(|face| face.families.iter().map(|(name, _)| name.clone()))
-        .filter(|name| is_listed_font(name))
-        .collect();
+    let db = svg::fonts();
+    let mut names: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for face in db.faces() {
+        let new: Vec<&String> = face
+            .families
+            .iter()
+            .map(|(name, _)| name)
+            .filter(|name| is_listed_font(name) && !seen.contains(*name))
+            .collect();
+        // Jede Familie einmal prüfen: bis eine ihrer Schriften Buchstaben zeichnet.
+        if new.is_empty() || db.with_face_data(face.id, draws_letters) != Some(true) {
+            continue;
+        }
+        for name in new {
+            seen.insert(name.clone());
+            names.push(name.clone());
+        }
+    }
     names.sort_by_key(|n| n.to_lowercase());
     names.dedup();
     ["sans-serif", "serif", "monospace"]
@@ -189,6 +203,21 @@ pub fn font_families() -> Vec<String> {
 /// chosen by name and draw nothing.
 fn is_listed_font(name: &str) -> bool {
     !name.starts_with('.')
+}
+
+/// Whether a font draws the Latin alphabet as outlines. Colour emoji fonts
+/// (bitmaps), emoji and icon fonts and symbol fonts such as Wingdings
+/// (Windows symbol encoding) draw nothing for ordinary text.
+fn draws_letters(data: &[u8], index: u32) -> bool {
+    let Ok(face) = ttf_parser::Face::parse(data, index) else {
+        return false;
+    };
+    let mut glyphs = ('A'..='Z').chain('a'..='z').map(|c| face.glyph_index(c));
+    glyphs.all(|glyph| glyph.is_some())
+        && face
+            .glyph_index('A')
+            .and_then(|glyph| face.glyph_bounding_box(glyph))
+            .is_some()
 }
 
 /// A sample of `text` in `font` for the font picker: at most three lines of
@@ -2968,6 +2997,15 @@ mod tests {
         assert!(!is_listed_font(".SF NS"));
         assert!(!is_listed_font(".AppleSystemUIFont"));
         assert!(is_listed_font("Helvetica Neue"));
+    }
+
+    #[test]
+    fn fonts_without_letters_are_not_listed() {
+        assert!(draws_letters(epaint_default_fonts::UBUNTU_LIGHT, 0));
+        assert!(draws_letters(epaint_default_fonts::HACK_REGULAR, 0));
+        assert!(!draws_letters(epaint_default_fonts::NOTO_EMOJI_REGULAR, 0));
+        assert!(!draws_letters(epaint_default_fonts::EMOJI_ICON, 0));
+        assert!(!draws_letters(b"keine Schrift", 0));
     }
 
     #[test]

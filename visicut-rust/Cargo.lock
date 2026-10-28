@@ -3924,6 +3924,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sys-locale",
+ "ttf-parser",
  "ureq",
  "windows-sys 0.61.2",
  "winresource",

@@ -91,6 +91,8 @@ impl Default for ComposeUi {
                 align: Align::Left,
                 line_spacing: 1.2,
                 operation: Operation::Engrave,
+                rotate_deg: 0.0,
+                mirrored: false,
             },
             shape: ShapeForm {
                 kind: ShapeKind::Rectangle,

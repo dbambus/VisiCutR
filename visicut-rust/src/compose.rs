@@ -81,6 +81,13 @@ pub struct TextSource {
     /// Line distance in multiples of the font size.
     pub line_spacing: f64,
     pub operation: Operation,
+    /// Orientation from turning and mirroring the part: first mirrored left
+    /// to right if `mirrored`, then turned by `rotate_deg` (as [`transform`]
+    /// does it). Edited text keeps it.
+    #[serde(default)]
+    pub rotate_deg: f64,
+    #[serde(default)]
+    pub mirrored: bool,
 }
 
 impl TextSource {
@@ -100,24 +107,58 @@ impl TextSource {
             y_mm: 0.0,
         }
     }
+
+    /// The orientation after [`transform`] with these values. Mirroring is a
+    /// left-to-right mirror and a turn: top to bottom is left to right
+    /// turned by 180°, both are a turn by 180°.
+    fn turned(&self, rotate_deg: f64, flip_horizontal: bool, flip_vertical: bool) -> Self {
+        let (turn, mirror) = match (flip_horizontal, flip_vertical) {
+            (false, false) => (0.0, false),
+            (true, false) => (0.0, true),
+            (false, true) => (180.0, true),
+            (true, true) => (180.0, false),
+        };
+        // Ein Spiegeln nach der bisherigen Drehung kehrt deren Richtung um.
+        let before = if mirror {
+            -self.rotate_deg
+        } else {
+            self.rotate_deg
+        };
+        Self {
+            rotate_deg: (rotate_deg + turn + before).rem_euclid(360.0),
+            mirrored: self.mirrored != mirror,
+            ..self.clone()
+        }
+    }
 }
 
 /// Adds `source` as a text part of its own (see [`add_objects_as_part`]);
-/// the part keeps the text for editing.
+/// the part keeps the text for editing. New text is never turned.
 pub fn add_text(project: &Project, source: &TextSource, view: [f32; 4]) -> Result<Project, String> {
+    let source = TextSource {
+        rotate_deg: 0.0,
+        mirrored: false,
+        ..source.clone()
+    };
     let mut result = add_objects_as_part(project, &[source.object()], tr("Text"), view)?;
-    result.part_text = Some(source.clone());
+    result.part_text = Some(source);
     Ok(result)
 }
 
-/// Makes the outlines of the active text part again from `source`. Position
-/// and scale stay. With another operation the part loses its steps; the
-/// caller then sets the operation's laser values (as for a new part).
+/// Makes the outlines of the active text part again from `source`. Position,
+/// scale and orientation (turned, mirrored) stay. With another operation the
+/// part loses its steps; the caller then sets the operation's laser values
+/// (as for a new part).
 pub fn set_text(project: &Project, source: &TextSource) -> Result<Project, String> {
     let old = project
         .part_text
         .as_ref()
         .ok_or_else(|| tr("Das gewählte Teil ist kein Text").to_string())?;
+    let source = TextSource {
+        rotate_deg: old.rotate_deg,
+        mirrored: old.mirrored,
+        ..source.clone()
+    };
     let empty = Project {
         svg: String::new(),
         steps: Vec::new(),
@@ -125,13 +166,14 @@ pub fn set_text(project: &Project, source: &TextSource) -> Result<Project, Strin
         active_part: 0,
         ..project.clone()
     };
-    let (created, _) = add_objects(&empty, &[source.object()])?;
+    let (mut created, _) = add_objects(&empty, &[source.object()])?;
+    created = transform(&created, source.rotate_deg, source.mirrored, false)?;
     let mut part = project.active();
     replace_drawing(&mut part, created.svg)?;
     if source.operation != old.operation {
         part.steps.clear();
     }
-    part.text = Some(source.clone());
+    part.text = Some(source);
     let mut result = project.clone();
     let mut all = project.all_parts();
     let index = project.active_part.min(all.len() - 1);
@@ -643,13 +685,20 @@ pub fn transform(
     );
     let frame = [cx - bw / 2.0, cy - bh / 2.0, bw, bh];
     let turned = with_document(project, &body, frame)?;
-    if sin == 0.0 || cos == 0.0 {
-        return Ok(turned);
-    }
-    match content_mm(&turned.svg, frame) {
-        Some(content) => with_document(project, &body, content),
-        None => Ok(turned),
-    }
+    let mut result = if sin == 0.0 || cos == 0.0 {
+        turned
+    } else {
+        match content_mm(&turned.svg, frame) {
+            Some(content) => with_document(project, &body, content)?,
+            None => turned,
+        }
+    };
+    // Ein Text bleibt bearbeitbar und merkt sich, wie er liegt.
+    result.part_text = project
+        .part_text
+        .as_ref()
+        .map(|text| text.turned(rotate, flip_horizontal, flip_vertical));
+    Ok(result)
 }
 
 /// Bounding box including strokes of a document from [`with_document`]
@@ -2813,6 +2862,8 @@ mod tests {
             align: Align::Left,
             line_spacing: 1.2,
             operation: Operation::Engrave,
+            rotate_deg: 0.0,
+            mirrored: false,
         };
         let first = add_text(&Project::default(), &source, bed).unwrap();
         assert_eq!(first.part_text.as_ref(), Some(&source));
@@ -2849,10 +2900,101 @@ mod tests {
         let saved = serde_json::to_string(&both).unwrap();
         let opened: Project = serde_json::from_str(&saved).unwrap();
         assert_eq!(opened.parts[0].text.as_ref(), Some(&source));
-        // Gedreht passt der Text nicht mehr zur Zeichnung: nicht mehr bearbeitbar.
+        // Gedreht bleibt der Text bearbeitbar und behält die Drehung.
         let turned = transform(&first, 90.0, false, false).unwrap();
-        assert_eq!(turned.part_text, None);
-        assert!(set_text(&turned, &longer).is_err());
+        let stored = turned.part_text.as_ref().unwrap();
+        assert_eq!((stored.rotate_deg, stored.mirrored), (90.0, false));
+        assert!(turned.height_mm > turned.width_mm);
+        let edited = set_text(&turned, &longer).unwrap();
+        assert_eq!(edited.part_text.as_ref().unwrap().rotate_deg, 90.0);
+        assert!(
+            edited.height_mm > turned.height_mm + 10.0,
+            "{}",
+            edited.height_mm
+        );
+        assert!(
+            (edited.width_mm - turned.width_mm).abs() < 0.5,
+            "{}",
+            edited.width_mm
+        );
+        // Gespiegelt ebenso.
+        let mirrored = transform(&first, 0.0, true, false).unwrap();
+        assert!(mirrored.part_text.as_ref().unwrap().mirrored);
+        let edited = set_text(&mirrored, &longer).unwrap();
+        assert!(edited.part_text.as_ref().unwrap().mirrored);
+        assert!(edited.svg.contains("scale(-1 1)"), "{}", edited.svg);
+    }
+
+    #[test]
+    fn text_orientation_follows_turns_and_mirrors() {
+        // Lage als Matrix: erst waagrecht spiegeln, dann drehen (wie `transform`).
+        type M = [[f64; 2]; 2];
+        let mul = |a: M, b: M| -> M {
+            [
+                [
+                    a[0][0] * b[0][0] + a[0][1] * b[1][0],
+                    a[0][0] * b[0][1] + a[0][1] * b[1][1],
+                ],
+                [
+                    a[1][0] * b[0][0] + a[1][1] * b[1][0],
+                    a[1][0] * b[0][1] + a[1][1] * b[1][1],
+                ],
+            ]
+        };
+        let turn = |deg: f64| -> M {
+            let (s, c) = deg.to_radians().sin_cos();
+            [[c, -s], [s, c]]
+        };
+        let scale = |x: f64, y: f64| -> M { [[x, 0.0], [0.0, y]] };
+        let orientation = |t: &TextSource| {
+            mul(
+                turn(t.rotate_deg),
+                scale(if t.mirrored { -1.0 } else { 1.0 }, 1.0),
+            )
+        };
+        let mut text = TextSource {
+            text: "A".into(),
+            font: "sans-serif".into(),
+            size_mm: 10.0,
+            bold: false,
+            italic: false,
+            align: Align::Left,
+            line_spacing: 1.2,
+            operation: Operation::Engrave,
+            rotate_deg: 0.0,
+            mirrored: false,
+        };
+        let mut expected = scale(1.0, 1.0);
+        for (deg, h, v) in [
+            (90.0, false, false),
+            (0.0, true, false),
+            (30.0, false, false),
+            (0.0, false, true),
+            (0.0, true, true),
+            (45.0, true, false),
+        ] {
+            expected = mul(
+                mul(
+                    turn(deg),
+                    scale(if h { -1.0 } else { 1.0 }, if v { -1.0 } else { 1.0 }),
+                ),
+                expected,
+            );
+            text = text.turned(deg, h, v);
+            let got = orientation(&text);
+            for (row, want) in got.iter().zip(expected) {
+                for (g, w) in row.iter().zip(want) {
+                    assert!(
+                        (g - w).abs() < 1e-9,
+                        "{deg} {h} {v}: {got:?} != {expected:?}"
+                    );
+                }
+            }
+        }
+        // Zweimal spiegeln hebt sich auf.
+        let back = text.turned(0.0, true, false).turned(0.0, true, false);
+        assert_eq!(back.mirrored, text.mirrored);
+        assert!((back.rotate_deg - text.rotate_deg).abs() < 1e-9);
     }
 
     #[test]

@@ -24,7 +24,8 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
   Einstellungen; „Übernehmen“ erzeugt die Umrisse an derselben Stelle neu.
   Der Text wird im Projekt mitgespeichert. Wechselt die Bearbeitung (etwa
   von Gravieren auf Schneiden), gelten die Laserwerte aus dem Materialprofil.
-  Gedreht, gespiegelt oder im Motiv vervielfältigt ist ein Text wieder eine
+  Gedreht oder gespiegelt bleibt der Text bearbeitbar und behält dabei seine
+  Lage; nur im Motiv vervielfältigt oder mit anderem ergänzt wird er eine
   feste Grafik.
 - **Text, Formen und Schilder im sichtbaren Ausschnitt:** Die Felder X und Y
   in den Werkzeugfenstern entfallen. Neue Elemente erscheinen in der Mitte

@@ -2,9 +2,10 @@
 //!
 //! Geladen wird nur, was in der aufgeklappten Liste gerade zu sehen ist, und
 //! dann behalten: wer die Liste nie öffnet, braucht keinen Speicher dafür.
-//! Sehr große Dateien (CJK-Sammlungen bis 64 MB) bleiben in der
-//! Oberflächenschrift, sonst wächst der Speicher beim Durchscrollen um
-//! Hunderte MB.
+//! Sehr große Dateien (CJK-Sammlungen bis 74 MB) bleiben in der
+//! Oberflächenschrift, ebenso alles, was nach 150 MB geladener Schriften
+//! noch dazukäme: so bleibt der Speicher auf jedem System begrenzt, egal wie
+//! viele Schriften installiert sind.
 
 use eframe::egui;
 use resvg::usvg::fontdb;
@@ -16,14 +17,18 @@ use visicut_core::svg;
 const PER_PASS: usize = 3;
 /// Größere Schriftdateien werden für die Vorschau nicht geladen.
 const MAX_FILE: usize = 15 * 1024 * 1024;
+/// Höchstens so viel Schriftdaten insgesamt.
+const MAX_TOTAL: usize = 150 * 1024 * 1024;
 
 #[derive(Default)]
 struct Cache {
-    /// Schriftname → Familie zum Zeichnen; `None`, wenn die Schrift fehlt
-    /// oder ihre Datei zu groß ist.
+    /// Schriftname → Familie zum Zeichnen; `None`, wenn die Schrift fehlt,
+    /// ihre Datei zu groß ist oder die Gesamtgrenze erreicht.
     families: HashMap<String, Option<egui::FontFamily>>,
     /// Dateien, geteilt von allen Schriften einer `.ttc`-Sammlung.
     files: HashMap<String, &'static [u8]>,
+    /// Summe der Dateien in `files`.
+    total: usize,
     pass: u64,
     loaded: usize,
 }
@@ -86,9 +91,10 @@ fn load(ctx: &egui::Context, cache: &mut Cache, name: &str) -> Option<egui::Font
         None => {
             // Bleibt bis zum Programmende: egui braucht `'static`, und eine
             // einmal gezeigte Schrift wird beim Scrollen wieder gebraucht.
-            let data = db.with_face_data(id, |data, _| {
-                (data.len() <= MAX_FILE).then(|| data.to_vec())
-            })??;
+            let room = MAX_TOTAL.saturating_sub(cache.total).min(MAX_FILE);
+            let data =
+                db.with_face_data(id, |data, _| (data.len() <= room).then(|| data.to_vec()))??;
+            cache.total += data.len();
             let data: &'static [u8] = Box::leak(data.into_boxed_slice());
             cache.files.insert(key, data);
             data

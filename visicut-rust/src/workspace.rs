@@ -1,7 +1,11 @@
 //! Nicht-grafische Logik der egui-Arbeitsfläche: Zoom, Raster, Lineale,
 //! Verschieben des Motivs und das Schreiben von LTT-Dateien.
 use std::path::{Path, PathBuf};
-use visicut_core::{ltt::PreparedStep, project::Project, tr};
+use visicut_core::{
+    ltt::PreparedStep,
+    project::{self, Project},
+    tr,
+};
 
 /// Zoomstufen relativ zum ganzen Bett: 50 % bis 800 % in 25-%-Schritten.
 pub const ZOOM_MIN: f32 = 0.5;
@@ -73,15 +77,25 @@ pub fn ruler_marks(length_mm: f32, step_mm: f32) -> Vec<f32> {
     (0..=count).map(|i| i as f32 * step_mm).collect()
 }
 
-/// Größte zulässige Position, damit das Motiv auf dem Bett bleibt.
-fn limit(bed: f32, size: f32) -> f32 {
-    (bed - size).max(0.0)
+/// Zulässige Positionen der Seite, damit die Zeichnung auf dem Bett bleibt
+/// (wie Java darf die leere Seite darüber hinausragen); `x` bzw. `y` der
+/// Seite, `[kleinste, größte]`. Ist die Zeichnung größer als das Bett, liegt
+/// ihre linke bzw. obere Kante am Bettrand.
+fn limits(project: &Project) -> ([f32; 2], [f32; 2]) {
+    let [left, top, right, bottom] =
+        project::content_on_bed(&project.svg, 0.0, 0.0, project.width_mm, project.height_mm);
+    let range = |bed: f32, low: f32, high: f32| [-low, (bed - high).max(-low)];
+    (
+        range(project.bed_width_mm, left, right),
+        range(project.bed_height_mm, top, bottom),
+    )
 }
 
 /// Setzt die Position, auf das Arbeitsbett begrenzt; meldet eine Änderung.
 pub fn place(project: &mut Project, x_mm: f32, y_mm: f32) -> bool {
-    let x = x_mm.clamp(0.0, limit(project.bed_width_mm, project.width_mm));
-    let y = y_mm.clamp(0.0, limit(project.bed_height_mm, project.height_mm));
+    let ([x_min, x_max], [y_min, y_max]) = limits(project);
+    let x = x_mm.clamp(x_min, x_max);
+    let y = y_mm.clamp(y_min, y_max);
     let changed = x != project.x_mm || y != project.y_mm;
     (project.x_mm, project.y_mm) = (x, y);
     changed
@@ -94,8 +108,9 @@ pub fn nudge(project: &mut Project, dx_mm: f32, dy_mm: f32) -> bool {
 
 /// Zentriert das Motiv auf dem Bett, wie macOS.
 pub fn center(project: &mut Project) {
-    project.x_mm = limit(project.bed_width_mm, project.width_mm) / 2.0;
-    project.y_mm = limit(project.bed_height_mm, project.height_mm) / 2.0;
+    let ([x_min, x_max], [y_min, y_max]) = limits(project);
+    project.x_mm = (x_min + x_max) / 2.0;
+    project.y_mm = (y_min + y_max) / 2.0;
 }
 
 /// Kleinste Seitenlänge beim Ziehen an einem Anfasser.
@@ -391,6 +406,26 @@ mod tests {
         p.width_mm = 1200.0;
         assert!(nudge(&mut p, 5.0, 0.0));
         assert_eq!(p.x_mm, 0.0);
+    }
+
+    #[test]
+    fn the_empty_page_may_reach_beyond_the_bed() {
+        // A4 page, drawing from 10 to 30 mm across and 10 to 20 mm down.
+        let mut p = Project {
+            svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 210 297"><rect x="10" y="10" width="20" height="10"/></svg>"#.into(),
+            width_mm: 210.0,
+            height_mm: 297.0,
+            ..motif()
+        };
+        // usvg measures in px (96 DPI), hence the tolerance.
+        let at =
+            |p: &Project, x: f32, y: f32| (p.x_mm - x).abs() < 1e-3 && (p.y_mm - y).abs() < 1e-3;
+        assert!(nudge(&mut p, 10_000.0, 10_000.0));
+        assert!(at(&p, 970.0, 580.0), "{} {}", p.x_mm, p.y_mm);
+        assert!(nudge(&mut p, -10_000.0, -10_000.0));
+        assert!(at(&p, -10.0, -10.0), "{} {}", p.x_mm, p.y_mm);
+        center(&mut p);
+        assert!(at(&p, 480.0, 285.0), "{} {}", p.x_mm, p.y_mm);
     }
 
     #[test]

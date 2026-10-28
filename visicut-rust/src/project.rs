@@ -536,7 +536,13 @@ impl Default for Project {
 impl Project {
     pub fn validate(&self) -> Result<(), String> {
         self.validate_document()?;
-        if !self.fits_bed(self.x_mm, self.y_mm, self.width_mm, self.height_mm) {
+        if !self.fits_bed(
+            &self.svg,
+            self.x_mm,
+            self.y_mm,
+            self.width_mm,
+            self.height_mm,
+        ) {
             return Err(tr("Das Motiv liegt außerhalb des Arbeitsbetts").into());
         }
         if self.svg.is_empty() {
@@ -556,7 +562,13 @@ impl Project {
                     name = part.name
                 ));
             }
-            if !self.fits_bed(part.x_mm, part.y_mm, part.width_mm, part.height_mm) {
+            if !self.fits_bed(
+                &part.svg,
+                part.x_mm,
+                part.y_mm,
+                part.width_mm,
+                part.height_mm,
+            ) {
                 return Err(tr!(
                     "Teil „{name}“ liegt außerhalb des Arbeitsbetts",
                     name = part.name
@@ -566,13 +578,16 @@ impl Project {
         Ok(())
     }
 
-    fn fits_bed(&self, x: f32, y: f32, width: f32, height: f32) -> bool {
+    /// Like Java (`LaserCutter.checkJob`) only the drawing has to lie on the
+    /// bed, not the whole page.
+    fn fits_bed(&self, svg: &str, x: f32, y: f32, width: f32, height: f32) -> bool {
+        let [left, top, right, bottom] = content_on_bed(svg, x, y, width, height);
         x.is_finite()
             && y.is_finite()
-            && x >= 0.0
-            && y >= 0.0
-            && x + width <= self.bed_width_mm + 0.001
-            && y + height <= self.bed_height_mm + 0.001
+            && left >= -0.001
+            && top >= -0.001
+            && right <= self.bed_width_mm + 0.001
+            && bottom <= self.bed_height_mm + 0.001
     }
 
     /// Whether any part has artwork (the active part is never empty while
@@ -870,6 +885,19 @@ impl Project {
     }
 }
 
+/// Bed position (mm) of the drawing of a part placed at `x`/`y` with the
+/// given page size: `[left, top, right, bottom]`, see
+/// [`crate::svg::content_fraction`].
+pub fn content_on_bed(svg: &str, x: f32, y: f32, width: f32, height: f32) -> [f32; 4] {
+    let [left, top, right, bottom] = crate::svg::content_fraction(svg);
+    [
+        x + left * width,
+        y + top * height,
+        x + right * width,
+        y + bottom * height,
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -886,6 +914,35 @@ mod tests {
         p.x_mm = 950.0;
         assert!(p.validate().is_err());
         p.x_mm = f32::NAN;
+        assert!(p.validate().is_err());
+    }
+    #[test]
+    fn only_the_drawing_has_to_lie_on_the_bed() {
+        // A4 page with a 20 × 10 mm rect 10 mm from the top left corner.
+        let mut p = Project {
+            svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 210 297"><rect x="10" y="10" width="20" height="10" stroke="black" stroke-width="4"/></svg>"#.into(),
+            width_mm: 210.0,
+            height_mm: 297.0,
+            ..Default::default()
+        };
+        let content = content_on_bed(&p.svg, 5.0, 5.0, p.width_mm, p.height_mm);
+        let expected = [15.0, 15.0, 35.0, 25.0];
+        assert!(
+            content
+                .iter()
+                .zip(expected)
+                .all(|(a, b)| (a - b).abs() < 1e-3),
+            "{content:?}"
+        );
+        // The page reaches beyond the right and bottom edges, the rect not
+        // (strokes are not counted, like Java for vectors).
+        (p.x_mm, p.y_mm) = (970.0, 580.0);
+        assert!(p.validate().is_ok());
+        (p.x_mm, p.y_mm) = (970.1, 580.0);
+        assert!(p.validate().is_err());
+        (p.x_mm, p.y_mm) = (-10.0, -10.0);
+        assert!(p.validate().is_ok());
+        p.x_mm = -10.1;
         assert!(p.validate().is_err());
     }
     #[test]

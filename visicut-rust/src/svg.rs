@@ -264,6 +264,48 @@ pub fn options() -> usvg::Options<'static> {
     }
 }
 
+/// Bounding box of the drawing without stroke widths as fractions of the
+/// page, `[left, top, right, bottom]`; the whole page `[0, 0, 1, 1]` for
+/// documents without content or that cannot be read. The placement is
+/// checked every frame, so results are cached by document content.
+pub fn content_fraction(source: &str) -> [f32; 4] {
+    use std::hash::{Hash, Hasher};
+    static CACHE: std::sync::Mutex<Vec<(u64, [f32; 4])>> = std::sync::Mutex::new(Vec::new());
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut hasher);
+    let key = hasher.finish();
+    if let Some((_, fraction)) = CACHE.lock().unwrap().iter().find(|(k, _)| *k == key) {
+        return *fraction;
+    }
+    let fraction = measure_content(source).unwrap_or([0.0, 0.0, 1.0, 1.0]);
+    let mut cache = CACHE.lock().unwrap();
+    if cache.len() >= 64 {
+        cache.remove(0);
+    }
+    cache.push((key, fraction));
+    fraction
+}
+
+fn measure_content(source: &str) -> Option<[f32; 4]> {
+    if source.len() > 20 * 1024 * 1024 {
+        return None;
+    }
+    check_nesting(source).ok()?;
+    let tree = usvg::Tree::from_str(source, &options()).ok()?;
+    let size = tree.size();
+    if !tree.root().has_children() {
+        return None;
+    }
+    let bbox = tree.root().abs_bounding_box();
+    Some([
+        bbox.left() / size.width(),
+        bbox.top() / size.height(),
+        bbox.right() / size.width(),
+        bbox.bottom() / size.height(),
+    ])
+    .filter(|f| f.iter().all(|v| v.is_finite()))
+}
+
 pub fn render(source: &str) -> Result<Preview, String> {
     if source.len() > 20 * 1024 * 1024 {
         return Err(tr("SVG ist größer als 20 MB").into());

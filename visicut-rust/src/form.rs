@@ -159,6 +159,16 @@ pub fn unit_value<N: egui::emath::Numeric>(
     width: f32,
 ) -> egui::Response {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), egui::Sense::hover());
+    // Weiß wie Auswahl- und Textfelder, auch auf grauem Fensterhintergrund.
+    ui.painter().rect_filled(
+        rect,
+        3.0,
+        if ui.is_enabled() {
+            Color32::WHITE
+        } else {
+            Color32::from_gray(245)
+        },
+    );
     let unit_galley = ui.painter().layout_no_wrap(
         unit.to_owned(),
         egui::FontId::proportional(12.0),

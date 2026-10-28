@@ -22,7 +22,9 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
 - **Text, Formen und Schilder im sichtbaren Ausschnitt:** Die Felder X und Y
   in den Werkzeugfenstern entfallen. Neue Elemente erscheinen in der Mitte
   des gerade sichtbaren (gezoomten) Teils der Arbeitsfläche; liegt dort
-  schon etwas, an der nächsten freien Stelle im Ausschnitt.
+  schon etwas, an der nächsten freien Stelle im Ausschnitt. Alle
+  Eingabefelder der Werkzeugfenster sind weiß hinterlegt; Zahlenfelder
+  hatten bisher den grauen Fensterhintergrund.
 - **Leistung unter 0,1 %** wird wie in Java-VisiCut mit 0,1 % gesendet statt
   abgelehnt; die FAU-Profile für Papier und Thermopapier sind damit nutzbar.
 - **Gravurzeilen außerhalb des Betts** werden abgelehnt, statt in Y

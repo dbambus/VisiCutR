@@ -749,6 +749,19 @@ impl Project {
         if self.format_version != 2 {
             return Err(tr("Unbekannte Projektversion").into());
         }
+        // Before anything parses the drawings (see `svg::MAX_NESTING`).
+        let parametric = self.parts.iter().filter_map(|p| p.parametric.as_ref());
+        for svg in std::iter::once(&self.svg)
+            .chain(self.parts.iter().map(|p| &p.svg))
+            .chain(
+                self.part_parametric
+                    .iter()
+                    .chain(parametric)
+                    .map(|p| &p.template),
+            )
+        {
+            crate::svg::check_nesting(svg)?;
+        }
         for (message, value) in [
             (
                 tr("Bettbreite muss positiv und höchstens 100000 sein"),

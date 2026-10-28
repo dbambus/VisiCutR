@@ -102,7 +102,7 @@ const COMMAND_SHIFT: Modifiers = Modifiers::COMMAND.plus(Modifiers::SHIFT);
 impl Command {
     /// Reihenfolge der Tastaturprüfung: Kürzel mit Umschalt zuerst, weil egui
     /// zusätzliche Umschalttasten beim Vergleich ignoriert.
-    const KEYBOARD: [Command; 18] = [
+    const KEYBOARD: [Command; 19] = [
         Self::AddPart,
         Self::SaveAs,
         Self::Export,
@@ -111,6 +111,7 @@ impl Command {
         Self::Preview,
         Self::New,
         Self::Open,
+        Self::Reload,
         Self::Save,
         Self::Quit,
         Self::Devices,
@@ -305,6 +306,23 @@ struct PendingExport {
 
 /// Stand vor einer Werkzeug- oder Löschaktion: Projekt mit allen Teilen und
 /// deren Texturen.
+/// Dateien, die ein Hintergrund-Thread liest, und was danach mit ihnen
+/// geschieht: Große oder aufwendige Dateien halten so das Fenster nicht an.
+struct Reading {
+    result: std::sync::mpsc::Receiver<import::Prefetched>,
+    then: Deferred,
+    /// Wahl aus der Rückfrage „Zeichnung größer als die Zeichenfläche“.
+    fit_policy: Option<bool>,
+}
+
+/// Ein Import, der nach dem Lesen der Dateien weiterläuft.
+enum Deferred {
+    Open(PathBuf),
+    Drop(Vec<PathBuf>),
+    Request(instance::Request),
+    Reload,
+}
+
 struct Snapshot {
     project: Project,
     texture: Option<egui::TextureHandle>,
@@ -484,11 +502,14 @@ struct VisiCutR {
     /// Wartet auf die Bestätigung „Zwischenspeicher leeren“ (Anzahl Stände).
     confirm_clear_cache: Option<usize>,
     confirm_send: Option<PreparedJob>,
+    /// Rückfrage beim Beenden mit ungesicherter Materialbibliothek.
+    confirm_library_quit: bool,
     preview: preview_ui::PreviewUi,
     /// „Vorschau & Zeit“ (Menü, Reiterleiste) setzt dieses Feld; `update`
     /// berechnet die Vorschau und wechselt in den Reiter „Vorschau“.
     show_preview: bool,
     send_result: Option<std::sync::mpsc::Receiver<Result<Vec<String>, String>>>,
+    reading: Option<Reading>,
     devices: devices_ui::DeviceUi,
     jobs: jobs_ui::JobUi,
     vectorize: vectorize_ui::VectorizeUi,
@@ -581,11 +602,13 @@ impl VisiCutR {
             overwrite: None,
             confirm_clear_cache: None,
             confirm_send: None,
+            confirm_library_quit: false,
             show_preview: false,
             page: Page::Prepare,
             settings_page: SettingsPage::Devices,
             preview: preview_ui::PreviewUi::default(),
             send_result: None,
+            reading: None,
             devices,
             jobs,
             vectorize: vectorize_ui::VectorizeUi::default(),
@@ -1015,12 +1038,80 @@ impl VisiCutR {
     }
 
     fn modal_open(&self) -> bool {
-        self.alert.is_some()
+        self.reading.is_some()
+            || self.alert.is_some()
             || self.replace.is_some()
             || self.overwrite.is_some()
             || self.confirm_clear_cache.is_some()
             || self.confirm_send.is_some()
+            || self.confirm_library_quit
             || self.lab_offer.is_some()
+    }
+
+    /// Liest die Grafiken unter `paths` im Hintergrund, falls das noch
+    /// nicht geschehen ist; danach läuft `then` mit den gelesenen Dateien.
+    /// `true`, wenn der Import damit aufgeschoben ist.
+    fn read_first(&mut self, ctx: &egui::Context, paths: &[PathBuf], then: Deferred) -> bool {
+        if import::is_prefetched(paths.iter().map(PathBuf::as_path)) {
+            return false;
+        }
+        if self.reading.is_some() {
+            self.status = tr("Bitte warten, bis die Dateien gelesen sind").into();
+            return true;
+        }
+        let (sender, result) = std::sync::mpsc::channel();
+        let paths = paths.to_vec();
+        let repaint = ctx.clone();
+        let started = std::thread::Builder::new()
+            .name("visicutr-import".into())
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || {
+                let _ = sender.send(import::prefetch(&paths));
+                repaint.request_repaint();
+            });
+        if let Err(e) = started {
+            self.report(e.to_string());
+            return true;
+        }
+        self.reading = Some(Reading {
+            result,
+            then,
+            fit_policy: self.fit_policy,
+        });
+        self.status = tr("Dateien werden gelesen …").into();
+        true
+    }
+
+    /// Setzt einen aufgeschobenen Import fort, sobald seine Dateien gelesen sind.
+    fn poll_reading(&mut self, ctx: &egui::Context) {
+        let Some(reading) = &self.reading else {
+            return;
+        };
+        let prefetched = match reading.result.try_recv() {
+            Ok(prefetched) => prefetched,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.reading = None;
+                return self.report(tr("Import ist unerwartet abgebrochen").into());
+            }
+        };
+        let Some(Reading {
+            then, fit_policy, ..
+        }) = self.reading.take()
+        else {
+            return;
+        };
+        import::install(prefetched);
+        let fit_policy = std::mem::replace(&mut self.fit_policy, fit_policy);
+        match then {
+            // Mit Rückfrage, falls inzwischen ungesicherte Änderungen entstanden.
+            Deferred::Open(path) => self.request(ctx, Replace::Open(path)),
+            Deferred::Drop(paths) => self.drop_files(ctx, paths),
+            Deferred::Request(request) => self.open_request(ctx, request),
+            Deferred::Reload => self.reload(ctx),
+        }
+        self.fit_policy = fit_policy;
+        import::uninstall();
     }
 
     fn reset_project(&mut self) {
@@ -1033,6 +1124,14 @@ impl VisiCutR {
         self.project_path = None;
         self.cached = None;
         self.dirty = false;
+        self.forget_history();
+    }
+
+    /// Ein anderes Projekt ersetzt das bisherige: dessen Stände dürfen nicht
+    /// mehr zurückkommen, sonst sicherte ⌘S sie unter dem neuen Dateinamen.
+    fn forget_history(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
     }
 
     fn snapshot(&self) -> Snapshot {
@@ -1185,6 +1284,7 @@ impl VisiCutR {
         self.project_path = None;
         self.cached = None;
         self.dirty = true;
+        self.forget_history();
         self.status = tr("Datei importiert · Maße aus der Datei übernommen").into();
         Ok(())
     }
@@ -1229,6 +1329,9 @@ impl VisiCutR {
             return Err(tr("Datei ist größer als 25 MB").into());
         }
         if import::is_importable(path) {
+            if self.read_first(ctx, &[path.to_owned()], Deferred::Open(path.to_owned())) {
+                return Ok(());
+            }
             let mut imported = import::read_file(path)?;
             if let Some(whole) = visicut_core::svg_import::fit_to_content(&imported.svg) {
                 match self.fit_policy {
@@ -1257,6 +1360,7 @@ impl VisiCutR {
                 self.project.material.clear();
             }
             self.devices.apply(&mut self.project);
+            self.forget_history();
             // Ein Zwischenstand hat noch keinen eigenen Speicherort.
             if session::is_cached(&session::dir(), path) {
                 self.project_path = None;
@@ -1278,6 +1382,9 @@ impl VisiCutR {
     /// `--add` oder mehreren Dateien wie abgelegt, sonst ersetzt die Datei das
     /// Projekt.
     fn open_request(&mut self, ctx: &egui::Context, mut request: instance::Request) {
+        if self.read_first(ctx, &request.files, Deferred::Request(request.clone())) {
+            return;
+        }
         let options = std::mem::take(&mut request.options);
         if !options.is_empty() {
             self.launch_options = Some(options);
@@ -1379,6 +1486,9 @@ impl VisiCutR {
     fn drop_files(&mut self, ctx: &egui::Context, mut paths: Vec<PathBuf>) {
         if self.busy() {
             self.status = tr("Bitte die laufende Übertragung abwarten").into();
+            return;
+        }
+        if self.read_first(ctx, &paths, Deferred::Drop(paths.clone())) {
             return;
         }
         let (graphics, projects): (Vec<PathBuf>, Vec<PathBuf>) =
@@ -1484,7 +1594,28 @@ impl VisiCutR {
 
     /// Führt eine Aktion aus. Ungesicherte Änderungen kommen vorher ohne
     /// Rückfrage in den Zwischenspeicher; nur wenn das scheitert, wird gefragt.
+    /// Vor dem Beenden: Gerätewerte sichern, die noch auf das Verlassen
+    /// eines Felds warten, und bei ungesicherter Materialbibliothek
+    /// nachfragen. `false`, wenn das Beenden warten muss.
+    fn settings_saved_before_quit(&mut self) -> bool {
+        if !self.devices.save_draft(&mut self.project, &mut self.status) {
+            self.report(tr!(
+                "Geräteliste nicht gesichert: {error}",
+                error = self.status
+            ));
+            return false;
+        }
+        if self.jobs.library_unsaved() {
+            self.confirm_library_quit = true;
+            return false;
+        }
+        true
+    }
+
     fn request(&mut self, ctx: &egui::Context, action: Replace) {
+        if matches!(action, Replace::Quit) && !self.settings_saved_before_quit() {
+            return;
+        }
         if self.busy() && !matches!(action, Replace::Quit) {
             self.status = tr("Bitte die laufende Übertragung abwarten").into();
         } else if self.dirty && !self.stash(matches!(action, Replace::Quit)) {
@@ -1605,6 +1736,15 @@ impl VisiCutR {
     /// Liest die Dateien aller Teile neu ein (nach Änderungen etwa in
     /// Inkscape); Lage, Maßstab und Zuordnung bleiben.
     fn reload(&mut self, ctx: &egui::Context) {
+        let sources: Vec<PathBuf> = self
+            .project
+            .all_parts()
+            .into_iter()
+            .filter_map(|part| part.source_file.map(PathBuf::from))
+            .collect();
+        if self.read_first(ctx, &sources, Deferred::Reload) {
+            return;
+        }
         let (project, changed, notes) =
             visicut_core::compose::reload_parts(&self.project, self.fit_policy == Some(true));
         if changed == 0 {
@@ -3917,6 +4057,47 @@ impl VisiCutR {
 
     /// Dialoge: Hinweis, ungesicherte Änderungen, Ersetzen, Senden.
     fn dialogs(&mut self, ctx: &egui::Context) {
+        if self.confirm_library_quit {
+            // Some(true): sichern, Some(false): verwerfen.
+            let mut choice = None;
+            let modal = egui::Modal::new(egui::Id::new("library_quit")).show(ctx, |ui| {
+                ui.set_max_width(380.0);
+                ui.heading(tr("Änderungen an der Materialbibliothek sichern?"));
+                ui.label(tr("Nicht gesicherte Änderungen gehen verloren."));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button(tr("Sichern")).clicked() {
+                        choice = Some(true);
+                    }
+                    if ui.button(tr("Nicht sichern")).clicked() {
+                        choice = Some(false);
+                    }
+                    if ui.button(tr("Abbrechen")).clicked() {
+                        ui.close();
+                    }
+                });
+            });
+            match choice {
+                Some(save) => {
+                    self.confirm_library_quit = false;
+                    let saved = if save {
+                        self.jobs.save_library()
+                    } else {
+                        self.jobs.discard_library();
+                        Ok(())
+                    };
+                    match saved {
+                        Ok(()) => self.request(ctx, Replace::Quit),
+                        Err(e) => self.report(tr!(
+                            "Materialbibliothek nicht gesichert: {error}",
+                            error = e
+                        )),
+                    }
+                }
+                None if modal.should_close() => self.confirm_library_quit = false,
+                None => {}
+            }
+        }
         if let Some(action) = self.replace.take() {
             let mut choice = None;
             let modal = egui::Modal::new(egui::Id::new("replace")).show(ctx, |ui| {
@@ -4271,7 +4452,7 @@ impl VisiCutR {
 
     #[cfg(feature = "screenshot")]
     fn capture(&mut self, ctx: &egui::Context) {
-        let computing = self.preview.computing();
+        let computing = self.preview.computing() || self.reading.is_some();
         let Some((path, frames)) = &mut self.capture else {
             return;
         };
@@ -4391,6 +4572,7 @@ impl eframe::App for VisiCutR {
         #[cfg(feature = "screenshot")]
         self.capture(ctx);
         self.poll_send(ctx);
+        self.poll_reading(ctx);
         self.sendable = !self.busy() && self.project.validate().is_ok();
         // Nullpunkt unten links: Bezugspunkt standardmäßig unten links, wie
         // am Gerät; eine eigene Wahl bleibt erhalten.
@@ -4410,6 +4592,8 @@ impl eframe::App for VisiCutR {
             if self.busy() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.status = tr("Bitte die laufende Übertragung vor dem Beenden abwarten").into();
+            } else if !self.settings_saved_before_quit() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             } else if self.dirty && !self.stash(true) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.replace = Some(Replace::Quit);
@@ -4422,7 +4606,9 @@ impl eframe::App for VisiCutR {
                 .filter_map(|f| f.path.clone())
                 .collect()
         });
-        if !dropped.is_empty() && !self.modal_open() {
+        if !dropped.is_empty() && self.reading.is_some() {
+            self.status = tr("Bitte warten, bis die Dateien gelesen sind").into();
+        } else if !dropped.is_empty() && !self.modal_open() {
             self.drop_files(ctx, dropped);
         }
         // Ein späterer Start hat Dateien übergeben: Fenster nach vorn holen.
@@ -4612,6 +4798,13 @@ fn window_icon() -> Option<egui::IconData> {
 }
 
 fn main() -> eframe::Result {
+    // Hilfsprozess für Skripte und PDF-Seiten aus Dateien (import::worker).
+    if std::env::args().nth(1).as_deref() == Some(import::WORKER_FLAG) {
+        std::process::exit(import::serve_worker());
+    }
+    if let Ok(executable) = std::env::current_exe() {
+        import::use_worker_executable(executable);
+    }
     let cwd = std::env::current_dir().unwrap_or_default();
     let launch = match instance::parse(std::env::args().skip(1), &cwd) {
         Ok(launch) => launch,
@@ -4664,6 +4857,26 @@ mod tests {
             at(128, 20),
             [form::ACCENT.r(), form::ACCENT.g(), form::ACCENT.b()]
         );
+    }
+
+    #[test]
+    fn every_listed_shortcut_is_handled() {
+        // ⌘R stood in the menu and the shortcut list but did nothing.
+        // Undo, Redo, Duplicate and Delete are handled outside text fields.
+        let editing = [
+            Command::Undo,
+            Command::Redo,
+            Command::Duplicate,
+            Command::Delete,
+        ];
+        for command in SHORTCUT_LIST {
+            assert!(command.shortcut().is_some(), "{}", command.title());
+            assert!(
+                Command::KEYBOARD.contains(&command) || editing.contains(&command),
+                "{}",
+                command.title()
+            );
+        }
     }
 
     #[test]

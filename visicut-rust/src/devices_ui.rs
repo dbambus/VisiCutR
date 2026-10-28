@@ -814,6 +814,24 @@ impl DeviceUi {
         self.draft = Some((draft, editing));
     }
 
+    /// Sichert einen Entwurf, der noch auf das Verlassen eines Eingabefelds
+    /// wartet (etwa beim Beenden mit dem Tastenkürzel); `false`, wenn das
+    /// Sichern fehlschlug. Der Entwurf wird dann verworfen, damit ein
+    /// zweiter Versuch das Beenden nicht wieder aufhält.
+    pub fn save_draft(&mut self, project: &mut Project, status: &mut String) -> bool {
+        match &self.draft {
+            Some((draft, _)) if *draft != self.store => {
+                let draft = draft.clone();
+                let saved = self.save(draft, project, status);
+                if !saved {
+                    self.draft = None;
+                }
+                saved
+            }
+            _ => true,
+        }
+    }
+
     /// Verwirft den Entwurf der Verwaltung, wenn er nichts Ungesichertes
     /// enthält; so zeigt die Seite beim nächsten Öffnen die aktuelle Liste.
     pub fn close_manager_if_clean(&mut self) {

@@ -4,7 +4,7 @@ use crate::project::MachineSettings;
 use crate::{i18n::tr, tr};
 use serde::{Deserialize, Serialize};
 use std::{
-    io::{Cursor, Read},
+    io::Cursor,
     path::{Path, PathBuf},
 };
 
@@ -57,8 +57,10 @@ pub struct LaserDevice {
     pub job_sent_text: String,
     pub camera_url: String,
     /// Optional HTTP authentication for the camera URL (VisiCut `URLUser`,
-    /// `URLPassword`); sent only when both are set. The macOS app keeps the
-    /// password in the keychain and stores it empty here.
+    /// `URLPassword`); sent only when both are set. The password is stored
+    /// in `devices.json`, which only the user may read (mode 0600 on Linux
+    /// and macOS; on Windows the profile folder is private), and is left
+    /// out of exports.
     pub camera_user: String,
     pub camera_password: String,
     /// Pause in ms between two camera pictures while the picture is shown
@@ -255,8 +257,7 @@ impl DeviceStore {
         Ok(store)
     }
 
-    /// The same list without camera passwords (for the macOS keychain and
-    /// for exports).
+    /// The same list without camera passwords (for exports).
     pub fn without_passwords(&self) -> Self {
         let mut store = self.clone();
         for device in &mut store.devices {
@@ -269,10 +270,25 @@ impl DeviceStore {
         self.validate()?;
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        // Write atomically so a crash never leaves a truncated device list.
-        let temporary = dir.join(format!("{STORE_FILE}.tmp"));
-        std::fs::write(&temporary, json).map_err(|e| e.to_string())?;
-        std::fs::rename(&temporary, dir.join(STORE_FILE)).map_err(|e| e.to_string())
+        // Write atomically and durably so a crash or power cut never leaves a
+        // truncated device list, readable only by the user (camera passwords).
+        let temporary = dir.join(format!("{STORE_FILE}.{}.tmp", std::process::id()));
+        let written = (|| {
+            use std::io::Write;
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+            let mut file = options.open(&temporary)?;
+            file.write_all(json.as_bytes())?;
+            file.sync_all()?;
+            drop(file);
+            std::fs::rename(&temporary, dir.join(STORE_FILE))
+        })();
+        if written.is_err() {
+            let _ = std::fs::remove_file(&temporary);
+        }
+        written.map_err(|e| e.to_string())
     }
 }
 
@@ -365,6 +381,7 @@ fn points(node: Option<roxmltree::Node>) -> Result<Vec<[f64; 2]>, String> {
 /// Reads a VisiCut `LaserDevice` XML file. Only LTT iLaser 4000 devices with the
 /// machine geometry of the Rust driver are accepted.
 pub fn from_visicut_xml(source: &str) -> Result<LaserDevice, String> {
+    crate::svg::check_nesting(source)?;
     let doc = roxmltree::Document::parse(source).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     if !root.has_tag_name("laserDevice") {
@@ -472,6 +489,7 @@ fn import_archive(bytes: &[u8]) -> Result<Vec<LaserDevice>, String> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| e.to_string())?;
     let mut devices = Vec::new();
     let mut skipped = Vec::new();
+    let mut budget = crate::import::ZipBudget::new(50 * 1024 * 1024);
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
         let name = file.name().map_err(|e| e.to_string())?.to_string();
@@ -480,9 +498,10 @@ fn import_archive(bytes: &[u8]) -> Result<Vec<LaserDevice>, String> {
         if !in_devices || !name.ends_with(".xml") || file.size() > 5 * 1024 * 1024 {
             continue;
         }
-        let mut source = String::new();
-        file.read_to_string(&mut source)
-            .map_err(|e| e.to_string())?;
+        let Some(source) = budget.read(&mut file, 5 * 1024 * 1024)? else {
+            continue;
+        };
+        let source = String::from_utf8(source).map_err(|e| e.to_string())?;
         match from_visicut_xml(&source) {
             Ok(device) => devices.push(device),
             Err(_) => skipped.push(name.rsplit('/').next().unwrap_or(&name).to_string()),
@@ -766,10 +785,29 @@ mod tests {
         assert_eq!(store.merge(vec![LaserDevice::fau()]), 1);
         assert_eq!(store.devices[1].name, "LTT iLaser 4000 (2)");
         store.selected = 1;
+        store.devices[1].camera_password = "geheim".into();
         store.save(&dir).unwrap();
         assert_eq!(DeviceStore::load(&dir).unwrap(), store);
+        // Camera passwords: readable only by the user.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.join(STORE_FILE))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        assert!(
+            std::fs::read_dir(&dir).unwrap().all(|e| !e
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp"))
+        );
         let export = dir.join("export.json");
-        export_and_reimport(&export, &store.devices);
+        // Exports leave the camera passwords out.
+        export_and_reimport(&export, &store.without_passwords().devices);
         store.devices[1].name = store.devices[0].name.clone();
         assert!(store.save(&dir).unwrap_err().contains("doppelt"));
         std::fs::remove_dir_all(dir).unwrap();

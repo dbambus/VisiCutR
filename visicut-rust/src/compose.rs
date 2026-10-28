@@ -381,7 +381,10 @@ pub fn add_objects(
 }
 
 /// Turns and mirrors the motif about its centre (no shear). The new size is
-/// the bounding box of the turned motif; object numbers stay the same.
+/// the bounding box of the turned motif: for quarter turns and mirroring
+/// the turned frame (empty margins stay), for other angles the turned
+/// content including strokes, so that turning back and forth does not grow
+/// the frame each time. Object numbers stay the same.
 pub fn transform(
     project: &Project,
     rotate_deg: f64,
@@ -432,7 +435,35 @@ pub fn transform(
         num(-cy),
         embed(project, None, None)?
     );
-    with_document(project, &body, [cx - bw / 2.0, cy - bh / 2.0, bw, bh])
+    let frame = [cx - bw / 2.0, cy - bh / 2.0, bw, bh];
+    let turned = with_document(project, &body, frame)?;
+    if sin == 0.0 || cos == 0.0 {
+        return Ok(turned);
+    }
+    match content_mm(&turned.svg, frame) {
+        Some(content) => with_document(project, &body, content),
+        None => Ok(turned),
+    }
+}
+
+/// Bounding box including strokes of a document from [`with_document`]
+/// covering `frame`, in bed millimetres.
+fn content_mm(svg: &str, frame: [f64; 4]) -> Option<[f64; 4]> {
+    let tree = usvg::Tree::from_str(svg, &svg::options()).ok()?;
+    let size = tree.size();
+    let b = ink_bounds(tree.root())?;
+    let (fx, fy) = (
+        frame[2] / f64::from(size.width()),
+        frame[3] / f64::from(size.height()),
+    );
+    let content = [
+        frame[0] + f64::from(b.left()) * fx,
+        frame[1] + f64::from(b.top()) * fy,
+        f64::from(b.width()) * fx,
+        f64::from(b.height()) * fy,
+    ];
+    (content.iter().all(|v| v.is_finite()) && content[2] > 0.0 && content[3] > 0.0)
+        .then_some(content)
 }
 
 /// Removes objects from the motif; the remaining objects keep their order
@@ -1431,6 +1462,49 @@ fn content_points(group: &usvg::Group, points: &mut Vec<[f64; 2]>) {
             }
         }
     }
+}
+
+/// Exact bounds of what is drawn, in canvas pixels: usvg's stroke bounding
+/// box leaves out mitred corners of turned strokes (a 300 mm frame turned
+/// by 30° came out 2 mm too small), so strokes are outlined here.
+fn ink_bounds(group: &usvg::Group) -> Option<tiny_skia::Rect> {
+    let mut bounds: Option<tiny_skia::Rect> = None;
+    let mut add = |rect: Option<tiny_skia::Rect>| {
+        bounds = match (bounds, rect) {
+            (Some(a), Some(b)) => tiny_skia::Rect::from_ltrb(
+                a.left().min(b.left()),
+                a.top().min(b.top()),
+                a.right().max(b.right()),
+                a.bottom().max(b.bottom()),
+            ),
+            (a, b) => a.or(b),
+        };
+    };
+    for node in group.children() {
+        match node {
+            usvg::Node::Group(g) => add(ink_bounds(g)),
+            usvg::Node::Text(text) => add(ink_bounds(text.flattened())),
+            usvg::Node::Path(path) => {
+                let transform = path.abs_transform();
+                let placed = |outline: tiny_skia::Path| {
+                    outline
+                        .transform(transform)
+                        .and_then(|p| p.compute_tight_bounds())
+                };
+                if path.fill().is_some() {
+                    add(placed(path.data().clone()));
+                }
+                if let Some(stroke) = path.stroke() {
+                    add(path
+                        .data()
+                        .stroke(&stroke.to_tiny_skia(), 1.0)
+                        .and_then(placed));
+                }
+            }
+            other => add(Some(other.abs_bounding_box())),
+        }
+    }
+    bounds
 }
 
 fn content_bounds(group: &usvg::Group) -> Option<tiny_skia::Rect> {
@@ -2635,11 +2709,44 @@ mod tests {
         assert!((back.width_mm - 100.0).abs() < 1e-3);
         ltt::prepare(&back).unwrap();
         let diagonal = transform(&project, 45.0, false, false).unwrap();
-        assert!((diagonal.width_mm as f64 - 160.0 / 2f64.sqrt()).abs() < 1e-2);
+        // At most the turned frame; the content decides.
+        assert!(diagonal.width_mm as f64 <= 160.0 / 2f64.sqrt() + 1e-2);
+        assert!(diagonal.width_mm > 50.0);
         assert_eq!(
             transform(&project, 360.0, false, false).unwrap().svg,
             project.svg
         );
+    }
+
+    #[test]
+    fn turning_back_and_forth_keeps_the_size() {
+        // A 300 mm square filling its frame: +30° then −30° grew the frame
+        // to 560 mm and after a few turns it no longer fitted the bed.
+        let project = Project {
+            svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="300mm" height="300mm" viewBox="0 0 300 300"><rect x="1" y="1" width="298" height="298" fill="none" stroke="red" stroke-width="2"/></svg>"#.into(),
+            x_mm: 150.0,
+            y_mm: 150.0,
+            width_mm: 300.0,
+            height_mm: 300.0,
+            ..Default::default()
+        };
+        let turned = transform(&project, 30.0, false, false).unwrap();
+        let side = 300.0 * (30f64.to_radians().cos() + 30f64.to_radians().sin());
+        assert!(
+            (turned.width_mm as f64 - side).abs() < 0.1,
+            "{}",
+            turned.width_mm
+        );
+        let mut back = transform(&turned, -30.0, false, false).unwrap();
+        assert!((back.width_mm - 300.0).abs() < 0.1, "{}", back.width_mm);
+        assert!((back.x_mm - 150.0).abs() < 0.5 && (back.y_mm - 150.0).abs() < 0.5);
+        for _ in 0..6 {
+            back = transform(&back, 30.0, false, false).unwrap();
+            back = transform(&back, -30.0, false, false).unwrap();
+        }
+        // Rounding may add a few hundredths of a millimetre per turn.
+        assert!((back.width_mm - 300.0).abs() < 0.5, "{}", back.width_mm);
+        assert!(back.x_mm >= 0.0 && back.x_mm + back.width_mm <= back.bed_width_mm);
     }
 
     #[test]

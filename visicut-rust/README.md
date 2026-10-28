@@ -131,8 +131,11 @@ legt das Skript Menüeintrag, MIME-Typen (`application/x-visicutr-project`,
    Ablegen zurück. Text, Formen, Kopien und Nesting wirken auf das gewählte
    Teil.
    Verknüpfte Bilddateien (PNG, JPEG, GIF, WebP, SVG) werden dabei relativ zur
-   SVG geladen und in das Projekt eingebettet; Webadressen werden nicht
-   abgerufen, fehlende Bilder werden als Hinweis gemeldet.
+   SVG geladen und in das Projekt eingebettet; Webadressen und
+   Netzwerkpfade (`\\server\…`, `file://server/…`) werden nicht abgerufen,
+   fehlende Bilder werden als Hinweis gemeldet. Ein Bild außerhalb des
+   Ordners der SVG wird mit Hinweis samt Pfad eingebettet, damit eine fremde
+   SVG nicht unbemerkt andere Dateien ins Projekt holt.
    Rasterbilder (PNG, JPEG, BMP, GIF) erhalten ihre Größe aus der
    Auflösung in der Datei (auf ganze DPI gerundet, 2835 px/m sind 72 DPI),
    sonst 72 DPI wie in VisiCut; G-Code (`.nc`,
@@ -322,7 +325,12 @@ dem Projekt gespeichert. Parametrische Teile in VisiCut-Projekten (PLF)
 werden beim Öffnen eigene Teile an ihrer Stelle; Lage, Drehung und Maßstab
 aus der PLF-Datei bleiben beim Ändern der Parameter erhalten. LaserScript-Dateien (`.ls`) laufen in einer
 abgeschotteten JavaScript-Umgebung ohne Datei- und Netzzugriff mit
-Zeitlimit (5 s); `prompt`-Abfragen erhalten ihren Vorgabewert.
+Zeitlimit (5 s); `prompt`-Abfragen erhalten ihren Vorgabewert. Diese
+Skripte, die Ausdrücke parametrischer SVG und das Umwandeln von PDF-Seiten
+laufen in einem eigenen Hilfsprozess (`visicutr --import-worker`), der nach
+dem Zeitlimit (Skripte 5 s, PDF 60 s) beendet wird und unter Linux
+höchstens 2 GB Speicher belegen darf: Eine präparierte Datei kann so
+VisiCutR nicht zum Absturz bringen.
 
 ## Inkscape und Befehlszeile
 
@@ -487,8 +495,9 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
   im lokalen Netz (UDP-Rundsendung „VisiCamDiscover“ an Port 8888, drei
   Sekunden); eine wird direkt übernommen, mehrere stehen zur Wahl. Benutzer und
   Passwort gehen als HTTP-Basic-Anmeldung mit, nur wenn beides gesetzt ist.
-  Unter macOS liegt das Passwort im Schlüsselbund, unter Windows und Linux in
-  der Geräteliste; Exporte lassen es immer weg. **Aktualisierung (ms)** (VisiCut
+  Das Passwort liegt in der Geräteliste (`devices.json`), die unter macOS und
+  Linux nur der eigene Benutzer lesen darf (Rechte 0600), unter Windows im
+  privaten Profilordner; Exporte lassen es immer weg. **Aktualisierung (ms)** (VisiCut
   „Zeiten (ms) Kamera“) holt bei eingeblendetem Bild nach jeder Pause (mindestens
   50 ms) ein neues, 0 lädt nur beim Einblenden und mit ⇧⌘K; nach Fehlern
   mit wachsendem Abstand ab 10 s. VisiCut-Geräte mit Zeiten 0 (dort 50 ms)
@@ -514,7 +523,13 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
   `visicutr-cameraserver -- gphoto2 --capture-image-and-download --stdout` oder
   `visicutr-cameraserver --output snap.jpg -- imagesnap -q snap.jpg`
   (`--port`, `--rotate 90`). Er liegt in `VisiCutR.app/Contents/MacOS`
-  bzw. neben der Windows-/Linux-Programmdatei.
+  bzw. neben der Windows-/Linux-Programmdatei. Er lauscht im ganzen Netz;
+  mit `--user NAME` und einem Kennwort (`--password` oder die
+  Umgebungsvariable `VISICUTR_CAMERA_PASSWORD`) verlangt er eine Anmeldung,
+  die VisiCutR mit Kamera-Benutzer und -Kennwort des Geräts sendet. Jede
+  Verbindung hat Fristen (Anfrage 10 s, Antwort 30 s), der Aufnahmebefehl
+  wird nach 30 s beendet, Fehlerdetails stehen nur in der Konsole des
+  Servers.
 
 Windows und Linux bieten dieselben Funktionen in der egui-Oberfläche mit
 Menüleiste Datei, Bearbeiten, Darstellung und Job.

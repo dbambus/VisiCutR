@@ -6,6 +6,9 @@
 //! run gets a wall-clock limit (checked while the script executes), a loop
 //! iteration limit per function call and a recursion limit. Callers bound the
 //! size of what a script may produce.
+//!
+//! Boa has no memory limit and cannot be stopped inside built-in functions,
+//! so the application runs scripts in a child process (`import::worker`).
 use crate::{i18n::tr, tr};
 use boa_engine::{Context, JsError, JsValue, Script, Source};
 use std::future::Future;

@@ -129,7 +129,9 @@ pub fn preset<'a>(
 /// A new step with the material profile, else the motif's parameters.
 /// Marking and engraving without a profile start at 0 % power unless the
 /// motif uses the same operation, so a cutting power is never taken over by
-/// accident (macOS `defaultStep`, there only for marking).
+/// accident (macOS `defaultStep`, there only for marking). Passes come from
+/// the profile too; the motif's passes only count for its own operation, so
+/// three cutting passes never turn into three engravings.
 pub fn default_step(library: &Library, project: &Project, operation: Operation) -> JobStep {
     let mut step = JobStep::new(operation);
     let safe = operation != Operation::Cut && project.operation != operation;
@@ -139,10 +141,13 @@ pub fn default_step(library: &Library, project: &Project, operation: Operation) 
         None if safe => (0.0, 100.0),
         None => (project.power_percent, project.speed_percent),
     };
-    step.passes = project.passes;
-    // Ein Profil mit mehreren Durchgängen oder Sätzen bringt sie mit.
-    if let Some(p) = profile.filter(|p| p.is_multi()) {
-        step.passes = p.passes;
+    step.passes = match profile {
+        Some(p) => p.passes,
+        None if project.operation == operation => project.passes,
+        None => 1,
+    };
+    // Ein Profil mit mehreren Sätzen bringt sie mit.
+    if let Some(p) = profile {
         step.additional = p.additional.clone();
     }
     if operation.is_raster() && project.operation.is_raster() {
@@ -2010,6 +2015,33 @@ impl JobUi {
         self.editor = Some(Editor { draft, selected });
     }
 
+    /// Ob die Materialbibliothek ungesicherte Änderungen hat.
+    pub fn library_unsaved(&self) -> bool {
+        self.editor
+            .as_ref()
+            .is_some_and(|e| e.draft != self.library.materials)
+    }
+
+    /// Sichert den Entwurf der Materialbibliothek (wie „Sichern“).
+    pub fn save_library(&mut self) -> Result<(), String> {
+        let Some(editor) = &self.editor else {
+            return Ok(());
+        };
+        let library = Library {
+            materials: editor.draft.clone(),
+            ..self.library.clone()
+        };
+        library.save(&device::config_dir())?;
+        self.library = library;
+        self.custom = true;
+        Ok(())
+    }
+
+    /// Verwirft den Entwurf der Materialbibliothek.
+    pub fn discard_library(&mut self) {
+        self.editor = None;
+    }
+
     /// Verwirft den Entwurf der Bibliothek, wenn er nichts Ungesichertes enthält.
     pub fn close_library_if_clean(&mut self) {
         if self
@@ -2147,7 +2179,8 @@ mod tests {
         let p = project();
         let cut = default_step(&library, &p, Operation::Cut);
         assert_eq!((cut.power_percent, cut.speed_percent), (80.0, 20.0));
-        assert_eq!(cut.passes, 2);
+        // Passes of the profile, not the two of the engraved motif.
+        assert_eq!(cut.passes, 1);
         // The 0 % mark profile is not applicable.
         let mark = default_step(&library, &p, Operation::Mark);
         assert_eq!((mark.power_percent, mark.speed_percent), (0.0, 100.0));
@@ -2158,13 +2191,18 @@ mod tests {
             (0.0, 100.0)
         );
         assert_eq!(engrave3d.raster, p.raster);
+        assert_eq!(engrave3d.passes, 1);
         // … wohl aber die des gleichen Verfahrens.
         let mut deep = p.clone();
         deep.operation = Operation::Engrave3d;
         let engrave3d = default_step(&library, &deep, Operation::Engrave3d);
         assert_eq!(
-            (engrave3d.power_percent, engrave3d.speed_percent),
-            (55.0, 66.0)
+            (
+                engrave3d.power_percent,
+                engrave3d.speed_percent,
+                engrave3d.passes
+            ),
+            (55.0, 66.0, 2)
         );
         let mut engraving = p.clone();
         engraving.operation = Operation::Cut;

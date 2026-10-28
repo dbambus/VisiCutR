@@ -49,6 +49,10 @@ fn dword(out: &mut Vec<u8>, value: u32) {
 
 // Rotary engraving: steps per full turn, an approximation in LibLaserCut.
 const ROTARY_STEPS_PER_REVOLUTION: f64 = 6400.0;
+/// Highest raw Y of the XY bed (Java `yMax`, truncated like its int cast).
+const MAX_RAW_Y: i32 = (BED_HEIGHT * MACHINE_DPI / 25.4) as i32;
+/// Java limits the rotary axis to 100 revolutions.
+const MAX_ROTARY_STEPS: i32 = 100 * ROTARY_STEPS_PER_REVOLUTION as i32;
 
 /// Device Y axis of a job. XY jobs count from the bottom edge of the bed;
 /// rotary jobs use the cylinder rotation, counted from the top, unmirrored.
@@ -87,7 +91,7 @@ impl Axis {
         let y = y as f64 / scale;
         match self.rotary_radius_mm {
             Some(r) => Self::rotary(r, y * 25.4 / RASTER_DPI),
-            None => (BED_HEIGHT * MACHINE_DPI / 25.4) as i32 - (y * 8.0).round() as i32,
+            None => MAX_RAW_Y - (y * 8.0).round() as i32,
         }
     }
     /// Relative move by `dy` (prescaled) 500-DPI rows.
@@ -104,8 +108,22 @@ impl Axis {
     fn absolute_raster(self, y: i32, pitch: i32) -> i32 {
         match self.rotary_radius_mm {
             Some(r) => Self::rotary(r, y as f64 * 25.4 / (MACHINE_DPI / pitch as f64)),
-            None => (BED_HEIGHT * MACHINE_DPI / 25.4) as i32 - y * pitch,
+            None => MAX_RAW_Y - y * pitch,
         }
+    }
+    /// [`Self::absolute_raster`] as sent, or `None` for a row outside the
+    /// axis: like Java `yPxToDeviceCoordinate`, which asserts `y >= 0` and
+    /// `yRaw <= yMax`.
+    fn raster_row(self, y: i32, pitch: i32) -> Option<u32> {
+        let rows = y.checked_mul(pitch)?;
+        if y < 0 || (self.rotary_radius_mm.is_none() && rows > MAX_RAW_Y) {
+            return None;
+        }
+        let raw = self.absolute_raster(y, pitch);
+        if self.rotary_radius_mm.is_some() && raw > MAX_ROTARY_STEPS {
+            return None;
+        }
+        u32::try_from(raw).ok()
     }
     #[cfg(test)]
     fn relative(self, dy: i32) -> i32 {
@@ -114,21 +132,34 @@ impl Axis {
     /// Unmirrored bounding-box coordinate in mm.
     fn bounding(self, mm: f64) -> u32 {
         match self.rotary_radius_mm {
-            Some(r) => Self::rotary(r, mm) as u32,
-            None => raw(mm),
+            Some(r) => Self::rotary(r, mm.max(0.0)).clamp(0, MAX_ROTARY_STEPS) as u32,
+            None => raw(mm.clamp(0.0, BED_HEIGHT)),
         }
     }
 }
 
 #[cfg(test)]
 fn pair(out: &mut Vec<u8>, axis: Axis, x: i32, y: i32) {
-    raster_pair(out, axis, x, y, 8);
+    raster_pair(out, axis, x, y, 8).unwrap();
 }
 
-/// Start of a raster line given in pixels of `pitch` machine steps.
-fn raster_pair(out: &mut Vec<u8>, axis: Axis, x: i32, y: i32, pitch: i32) {
-    dword(out, (x * pitch) as u32);
-    dword(out, axis.absolute_raster(y, pitch) as u32);
+/// Start of a raster line given in pixels of `pitch` machine steps; rows
+/// outside the bed are refused instead of wrapping around.
+fn raster_pair(out: &mut Vec<u8>, axis: Axis, x: i32, y: i32, pitch: i32) -> Result<(), String> {
+    let x = x
+        .checked_mul(pitch)
+        .and_then(|x| u32::try_from(x).ok())
+        .filter(|x| *x <= raw(BED_WIDTH));
+    match (x, axis.raster_row(y, pitch)) {
+        (Some(x), Some(y)) => {
+            dword(out, x);
+            dword(out, y);
+            Ok(())
+        }
+        _ => {
+            Err(tr("Gravur zu nahe am Bettrand; bitte Motiv weiter nach innen verschieben").into())
+        }
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -662,9 +693,18 @@ fn append_part(
     (preview, frame): (&mut tiny_skia::Pixmap, Frame),
     timeline: &mut Timeline,
 ) -> Result<(PreparedStep, Bounds), String> {
-    if part.sets.iter().any(|s| s.power_percent < 0.1) {
+    if part.sets.iter().any(|s| s.power_percent <= 0.0) {
         return Err(tr!(
             "{operation}: Leistung ist 0 %; im Schritt eine Leistung eintragen (mindestens 0,1 %)",
+            operation = operation_name(part.operation)
+        ));
+    }
+    // The cutter takes power in 0.1 % steps; like Java (at least 1 step)
+    // smaller values such as the FAU profiles' 0.01 % for marking paper
+    // are sent as 0.1 %.
+    if part.sets.iter().any(|s| s.power_percent < 0.1) {
+        warnings.push(tr!(
+            "{operation}: Leistung unter 0,1 % wird wie in VisiCut mit 0,1 % gesendet",
             operation = operation_name(part.operation)
         ));
     }
@@ -1117,8 +1157,11 @@ fn header(project: &Project, overscan: f32, name: &str, bounds: Bounds, pitch: i
         let [ymin, ymax] = [bounds.min[1], bounds.max[1]];
         dword(&mut out, raw(xmin));
         dword(&mut out, axis.bounding(ymin));
-        dword(&mut out, raw(xmax) - raw(xmin));
-        dword(&mut out, axis.bounding(ymax) - axis.bounding(ymin));
+        dword(&mut out, raw(xmax).saturating_sub(raw(xmin)));
+        dword(
+            &mut out,
+            axis.bounding(ymax).saturating_sub(axis.bounding(ymin)),
+        );
     }
     out.extend([0x1b, 0x6e, 0, 0, 0x5d, 0xcf, 0, 0, 0x69, 0x56]);
     out.extend([0x1b, 0x4f, 0]); // no autorun
@@ -1369,7 +1412,7 @@ fn raster_code(
             start_x + if right { 0 } else { pixels },
             origin_y + y as i32,
             area.pitch,
-        );
+        )?;
         encoded.extend(compressed);
         count += 1;
         if options.bidirectional {
@@ -2295,6 +2338,49 @@ mod tests {
         assert!(prepared.description.contains("Gravurzeilen"));
     }
     #[test]
+    fn engraving_rows_outside_the_bed_in_y_are_refused() {
+        // The stroke reaches 1 mm beyond the placement box, which itself
+        // fits the bed; Java asserts 0 <= y <= yMax for every raster row.
+        let stroked = |y_mm: f32, rotary_axis: bool| {
+            Project {
+            operation: Operation::Engrave,
+            x_mm: 100.0,
+            y_mm,
+            width_mm: 20.0,
+            height_mm: 10.0,
+            rotary_axis,
+            rotary_diameter_mm: 100.0,
+            svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm" viewBox="0 0 20 10"><rect width="20" height="10" fill="black" stroke="black" stroke-width="2"/></svg>"#.into(),
+            ..sample()
+        }
+        };
+        for (y_mm, rotary) in [(0.0, false), (590.0, false), (0.0, true)] {
+            let error = prepare(&stroked(y_mm, rotary)).err();
+            assert!(
+                error.as_deref().is_some_and(|e| e.contains("Bettrand")),
+                "y = {y_mm} mm, rotary {rotary}: {error:?}"
+            );
+        }
+        let inside = prepare(&stroked(5.0, false)).unwrap();
+        assert!(inside.jobs[0].bytes.windows(2).any(|b| b == [0x1b, 0x30]));
+
+        let axis = Axis::xy();
+        assert_eq!(axis.raster_row(0, 8), Some(MAX_RAW_Y as u32));
+        assert_eq!(
+            axis.raster_row(MAX_RAW_Y / 8, 8),
+            Some(MAX_RAW_Y as u32 % 8)
+        );
+        assert_eq!(axis.raster_row(MAX_RAW_Y / 8 + 1, 8), None);
+        assert_eq!(axis.raster_row(-1, 8), None);
+        assert_eq!(axis.raster_row(i32::MAX, 8), None);
+        let mut out = Vec::new();
+        assert!(raster_pair(&mut out, axis, -1, 10, 8).is_err());
+        assert!(out.is_empty());
+        // Header bounds stay on the axis instead of wrapping around.
+        assert_eq!(axis.bounding(-1.0), 0);
+        assert_eq!(axis.bounding(601.0), raw(BED_HEIGHT));
+    }
+    #[test]
     fn rotary_axis_uses_rotation_steps_centre_reference_and_radius() {
         fn has(bytes: &[u8], pattern: &[u8]) -> bool {
             bytes.windows(pattern.len()).any(|b| b == pattern)
@@ -2524,6 +2610,20 @@ mod tests {
         p.steps[1].power_percent = 0.0;
         let error = prepare(&p).err().unwrap();
         assert!(error.starts_with("Gravieren: Leistung ist 0 %"), "{error}");
+        // The FAU mark profiles use 0.01 %: sent as the smallest step, 0.1 %.
+        p.steps[1].power_percent = 0.01;
+        let prepared = prepare(&p).unwrap();
+        assert!(
+            prepared.warnings.iter().any(|w| w.contains("0,1 %")),
+            "{:?}",
+            prepared.warnings
+        );
+        assert!(
+            prepared.jobs[0]
+                .bytes
+                .windows(4)
+                .any(|b| b == [0x1b, 0x4a, 0, 1])
+        );
     }
 
     #[test]

@@ -81,7 +81,7 @@ impl Value {
 }
 
 /// Type of a parameter (`type` attribute of `<ref>`); decides the input field.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Kind {
     Number,
     Integer,
@@ -89,7 +89,7 @@ pub enum Kind {
     Text,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Parameter {
     pub name: String,
     /// `label_<language>` or `label`, otherwise the name (like VisiCut).
@@ -104,6 +104,7 @@ pub struct Parameter {
     pub max: Option<f64>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Rendered {
     pub svg: String,
     pub parameters: Vec<Parameter>,
@@ -118,12 +119,33 @@ pub fn render(
     saved: Vec<(String, Value)>,
     limit: Duration,
 ) -> Result<Rendered, String> {
+    use crate::import::worker::{Job, Output};
+    match (Job::Parametric {
+        source,
+        psvg,
+        saved,
+    })
+    .run(limit)?
+    {
+        Output::Rendered(rendered) => Ok(rendered),
+        _ => Err(tr("Skriptausführung ist unerwartet abgebrochen").into()),
+    }
+}
+
+/// [`render`] on a thread of this process.
+pub(crate) fn render_here(
+    source: String,
+    psvg: bool,
+    saved: Vec<(String, Value)>,
+    limit: Duration,
+) -> Result<Rendered, String> {
     let source = xml::declare_thymeleaf(&source);
     script::run_isolated(limit, move |engine| {
         let options = roxmltree::ParsingOptions {
             allow_dtd: true,
             ..Default::default()
         };
+        crate::svg::check_nesting(&source)?;
         let document = roxmltree::Document::parse_with_options(&source, options)
             .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
         engine.eval(BOOTSTRAP)?;
@@ -935,6 +957,22 @@ mod tests {
 
     fn render_ok(source: &str, psvg: bool) -> Rendered {
         render(source.into(), psvg, Vec::new(), script::TIME_LIMIT).unwrap()
+    }
+
+    #[test]
+    fn deep_nesting_is_refused_instead_of_overflowing_the_stack() {
+        let nested = |depth: usize| {
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm">{}<rect width="1" height="1"/>{}</svg>"#,
+                "<g>".repeat(depth),
+                "</g>".repeat(depth)
+            )
+        };
+        assert!(render_ok(&nested(200), true).svg.contains("<rect"));
+        let error = render(nested(100_000), true, Vec::new(), script::TIME_LIMIT)
+            .err()
+            .expect("refused");
+        assert!(error.contains("verschachtelt"), "{error}");
     }
 
     #[test]

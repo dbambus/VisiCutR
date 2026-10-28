@@ -24,8 +24,10 @@ mod script;
 mod write;
 mod xml;
 
+pub(super) use laserscript::{Drawing, run_here as laserscript_here};
 pub use mappings::import_templates;
 pub use parametric::{Kind as ParameterKind, Parameter, Value as ParameterValue};
+pub(super) use parametric::{Rendered, render_here as parametric_here};
 pub use write::{plf_bytes, write_plf};
 
 use super::{Imported, MAX_FILE_BYTES};
@@ -391,6 +393,7 @@ fn sanitize(name: &str) -> String {
 /// `<void index="i"><double>v</double></void>` (omitted values are 0).
 fn parse_transform(bytes: &[u8]) -> Result<Matrix, String> {
     let text = String::from_utf8_lossy(bytes);
+    crate::svg::check_nesting(&text)?;
     let document = roxmltree::Document::parse(&text).map_err(|e| e.to_string())?;
     let mut matrix = [0.0; 6];
     let mut found = false;
@@ -596,6 +599,7 @@ impl Composer {
     /// Prefixes all ids of a part (and references to them) when one of them
     /// is already used by an earlier part, e.g. when a part was duplicated.
     fn unique_ids(&mut self, source: &str, number: usize) -> Result<String, String> {
+        crate::svg::check_nesting(source)?;
         let document = roxmltree::Document::parse(source)
             .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
         let ids: HashSet<String> = document

@@ -4,7 +4,9 @@
 //! SVG references by file path are resolved once, when the SVG file is
 //! imported, relative to the SVG file's directory (like VisiCut's Java
 //! importer). Only the affected attribute values are replaced; the rest of the
-//! document stays byte-identical. Network URLs are never fetched.
+//! document stays byte-identical. Network URLs and network paths (UNC) are
+//! never opened, and images from outside the SVG's folder are reported, so
+//! a downloaded SVG cannot quietly carry other local files into a project.
 use crate::{i18n::tr, tr};
 use base64::Engine;
 use std::collections::HashMap;
@@ -19,7 +21,7 @@ const SVG_NS: &str = "http://www.w3.org/2000/svg";
 const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
 const SODIPODI_NS: &str = "http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd";
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Imported {
     pub svg: String,
     /// German, user-facing notes about images that were not embedded.
@@ -37,6 +39,7 @@ pub struct Imported {
 }
 
 /// A part of an import that keeps its own drawing (see [`Imported::extra_parts`]).
+#[derive(Clone)]
 pub struct ExtraPart {
     pub name: String,
     pub svg: String,
@@ -53,6 +56,7 @@ pub fn read_svg_file(path: &Path) -> Result<Imported, String> {
         return Err(tr("Datei ist größer als 25 MB").into());
     }
     let source = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    crate::svg::check_nesting(&source)?;
     Ok(embed_external_images(
         &source,
         path.parent().unwrap_or(Path::new(".")),
@@ -64,6 +68,7 @@ pub fn read_svg_file(path: &Path) -> Result<Imported, String> {
 /// everything lies inside. Scale and position of the drawing are unchanged.
 pub fn fit_to_content(source: &str) -> Option<String> {
     use resvg::usvg;
+    crate::svg::check_nesting(source).ok()?;
     let tree = usvg::Tree::from_str(source, &crate::svg::options()).ok()?;
     let bbox = tree.root().abs_stroke_bounding_box();
     let canvas = tree.size();
@@ -162,7 +167,10 @@ pub fn embed_external_images(source: &str, base_dir: &Path) -> Imported {
         allow_dtd: true,
         ..Default::default()
     };
-    let Ok(document) = roxmltree::Document::parse_with_options(source, options) else {
+    let parsed = crate::svg::check_nesting(source).and_then(|()| {
+        roxmltree::Document::parse_with_options(source, options).map_err(|e| e.to_string())
+    });
+    let Ok(document) = parsed else {
         return Imported {
             svg: source.to_owned(),
             warnings,
@@ -170,6 +178,8 @@ pub fn embed_external_images(source: &str, base_dir: &Path) -> Imported {
         };
     };
     let mut cache: HashMap<PathBuf, Result<String, String>> = HashMap::new();
+    let folder = std::fs::canonicalize(base_dir).ok();
+    let mut reported = std::collections::HashSet::new();
     let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
     let mut length = source.len();
     let images = document.descendants().filter(|node| {
@@ -208,6 +218,7 @@ pub fn embed_external_images(source: &str, base_dir: &Path) -> Imported {
             let mut candidates = candidates
                 .into_iter()
                 .chain(absref.map(PathBuf::from))
+                .filter(|path| !is_network_path(path))
                 .map(|path| base_dir.join(path));
             let Some(path) = candidates.find(|path| path.is_file()) else {
                 warnings.push(tr!(
@@ -244,6 +255,16 @@ pub fn embed_external_images(source: &str, base_dir: &Path) -> Imported {
             }
             length = grown;
             edits.push((range, uri));
+            let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+            let inside = folder.as_ref().is_some_and(|f| canonical.starts_with(f));
+            if !inside && reported.insert(canonical.clone()) {
+                warnings.push(tr!(
+                    "Bild „{name}“ liegt nicht im Ordner der Zeichnung und wurde \
+                     eingebettet: {path}. Vor dem Weitergeben des Projekts prüfen.",
+                    name = shown,
+                    path = canonical.display()
+                ));
+            }
         }
     }
     edits.sort_by_key(|(range, _)| range.start);
@@ -287,9 +308,11 @@ fn classify(href: &str) -> Href {
         });
     match scheme.map(str::to_ascii_lowercase).as_deref() {
         Some("data") => Href::Skip,
+        Some("file") if file_url_host(href).is_some() => Href::Remote,
         Some("file") => file_url_path(href).map_or(Href::Unsupported, |p| Href::Paths(vec![p])),
         Some("http" | "https" | "ftp") => Href::Remote,
         Some(_) => Href::Unsupported,
+        None if is_network_path(Path::new(href)) => Href::Remote,
         None => {
             // A relative reference is a URI, but tools often write plain paths.
             let mut paths = vec![PathBuf::from(href)];
@@ -303,26 +326,52 @@ fn classify(href: &str) -> Href {
     }
 }
 
+/// The host of `file://host/…` unless it is empty or `localhost`.
+fn file_url_host(url: &str) -> Option<&str> {
+    let rest = url[5..].split(['?', '#']).next().unwrap_or_default();
+    let authority_and_path = rest.strip_prefix("//")?;
+    let host = &authority_and_path[..authority_and_path
+        .find('/')
+        .unwrap_or(authority_and_path.len())];
+    (!host.is_empty() && !host.eq_ignore_ascii_case("localhost")).then_some(host)
+}
+
+/// A path on another computer (`\\server\share`, `//server/share`, `\\?\UNC\…`).
+/// Windows connects to it over SMB and sends the user's credentials, so such
+/// paths are never opened; the check holds on every platform.
+fn is_network_path(path: &Path) -> bool {
+    let text = path.to_string_lossy();
+    let mut start = text.chars();
+    if matches!(
+        (start.next(), start.next()),
+        (Some('\\' | '/'), Some('\\' | '/'))
+    ) {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        if let Some(Component::Prefix(prefix)) = path.components().next() {
+            return matches!(
+                prefix.kind(),
+                Prefix::UNC(..)
+                    | Prefix::VerbatimUNC(..)
+                    | Prefix::DeviceNS(..)
+                    | Prefix::Verbatim(..)
+            );
+        }
+    }
+    false
+}
+
 fn file_url_path(url: &str) -> Option<PathBuf> {
     let rest = url[5..].split(['?', '#']).next().unwrap_or_default();
     let path = match rest.strip_prefix("//") {
+        // Hosts other than localhost are rejected by `classify`.
         Some(authority_and_path) => {
-            let split = authority_and_path
+            &authority_and_path[authority_and_path
                 .find('/')
-                .unwrap_or(authority_and_path.len());
-            let (host, path) = authority_and_path.split_at(split);
-            if !host.is_empty() && !host.eq_ignore_ascii_case("localhost") {
-                if cfg!(windows) {
-                    // file://server/share/x.png is a UNC path on Windows.
-                    let decoded = percent_decode(path)?;
-                    return Some(PathBuf::from(format!(
-                        r"\\{host}{}",
-                        decoded.to_string_lossy().replace('/', "\\")
-                    )));
-                }
-                return None;
-            }
-            path
+                .unwrap_or(authority_and_path.len())..]
         }
         None => rest,
     };
@@ -373,7 +422,10 @@ fn data_uri(path: &Path) -> Result<String, String> {
         return Err(tr("Die Datei ist größer als 10 MB").into());
     }
     let data = std::fs::read(path).map_err(|e| e.to_string())?;
-    let mime = mime_type(&data).ok_or(tr(
+    let svgz = path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("svgz"));
+    let mime = mime_type(&data, svgz).ok_or(tr(
         "Format wird nicht unterstützt (nur PNG, JPEG, GIF, WebP oder SVG)",
     ))?;
     Ok(format!(
@@ -383,7 +435,9 @@ fn data_uri(path: &Path) -> Result<String, String> {
 }
 
 /// Formats resvg can draw, detected from content rather than the file name.
-fn mime_type(data: &[u8]) -> Option<&'static str> {
+/// gzip data counts as compressed SVG only in a `.svgz` file, so that other
+/// archives are not embedded.
+fn mime_type(data: &[u8], svgz: bool) -> Option<&'static str> {
     if data.starts_with(b"\x89PNG\r\n\x1a\n") {
         Some("image/png")
     } else if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
@@ -392,7 +446,7 @@ fn mime_type(data: &[u8]) -> Option<&'static str> {
         Some("image/gif")
     } else if data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP" {
         Some("image/webp")
-    } else if data.starts_with(&[0x1F, 0x8B]) {
+    } else if svgz && data.starts_with(&[0x1F, 0x8B]) {
         // Compressed SVG (svgz); usvg decompresses nested SVG data.
         Some("image/svg+xml")
     } else {
@@ -513,8 +567,75 @@ mod tests {
         std::fs::write(dir.0.join("red.png"), red_png()).unwrap();
         let source = svg(r#"href="../red.png""#);
         let result = embed_external_images(&source, &dir.0.join("svg"));
-        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
         assert!(result.svg.contains(&png_uri()));
+        // Outside the drawing's folder: embedded, but not silently.
+        assert_eq!(result.warnings.len(), 1, "{:?}", result.warnings);
+        assert!(result.warnings[0].contains("nicht im Ordner der Zeichnung"));
+        assert!(result.warnings[0].contains("red.png"));
+        // The same file twice is reported once.
+        let twice = source.replace(
+            "<rect",
+            r#"<image width="1" height="1" href="../red.png"/><rect"#,
+        );
+        assert_eq!(
+            embed_external_images(&twice, &dir.0.join("svg"))
+                .warnings
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn network_paths_are_never_opened() {
+        let dir = TempDir::new("network");
+        for href in [
+            r"\\attacker.example\share\red.png",
+            "//attacker.example/share/red.png",
+            r"\\?\UNC\attacker.example\share\red.png",
+            "%5C%5Cattacker.example%5Cshare%5Cred.png",
+            "file://attacker.example/share/red.png",
+            "file:////attacker.example/share/red.png",
+        ] {
+            let source = svg(&format!(r#"href="{href}""#));
+            let result = embed_external_images(&source, &dir.0);
+            assert_eq!(result.svg, source, "{href}");
+            assert_eq!(result.warnings.len(), 1, "{href}: {:?}", result.warnings);
+        }
+        assert!(is_network_path(Path::new(r"\\server\share")));
+        assert!(is_network_path(Path::new("//server/share")));
+        assert!(!is_network_path(Path::new("/home/user/red.png")));
+        assert!(!is_network_path(Path::new("img/red.png")));
+        // A sodipodi:absref on another computer is not tried either.
+        let source = svg(r#"href="missing.png" sodipodi:absref="//attacker.example/s/red.png""#)
+            .replace(
+                "<svg ",
+                r#"<svg xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" "#,
+            );
+        let result = embed_external_images(&source, &dir.0);
+        assert!(result.warnings[0].contains("nicht gefunden"));
+    }
+
+    #[test]
+    fn deeply_nested_files_are_refused_before_parsing() {
+        let dir = TempDir::new("deep");
+        let path = dir.0.join("deep.svg");
+        let depth = 100_000;
+        let deep = format!("<svg>{}{}</svg>", "<g>".repeat(depth), "</g>".repeat(depth));
+        std::fs::write(&path, &deep).unwrap();
+        let error = read_svg_file(&path).err().expect("refused");
+        assert!(error.contains("verschachtelt"), "{error}");
+        assert_eq!(embed_external_images(&deep, &dir.0).svg, deep);
+        assert!(fit_to_content(&deep).is_none());
+    }
+
+    #[test]
+    fn other_archives_are_not_embedded_as_compressed_svg() {
+        let dir = TempDir::new("gzip");
+        std::fs::write(dir.0.join("backup.tar.gz"), [0x1F, 0x8B, 8, 0, 0, 0]).unwrap();
+        let source = svg(r#"href="backup.tar.gz""#);
+        let result = embed_external_images(&source, &dir.0);
+        assert_eq!(result.svg, source);
+        assert!(result.warnings[0].contains("Format"));
     }
 
     #[test]
@@ -525,7 +646,7 @@ mod tests {
         let url = file_url(&image);
         assert!(url.contains("%20"));
         let source = svg(&format!(r#"xlink:href="{url}""#));
-        let result = embed_external_images(&source, Path::new("/nonexistent"));
+        let result = embed_external_images(&source, &dir.0);
         assert!(result.warnings.is_empty(), "{:?}", result.warnings);
         assert_eq!(result.svg, source.replace(&url, &png_uri()));
     }
@@ -599,15 +720,23 @@ mod tests {
 
     #[test]
     fn recognises_resvg_formats() {
-        assert_eq!(mime_type(&red_png()), Some("image/png"));
-        assert_eq!(mime_type(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("image/jpeg"));
-        assert_eq!(mime_type(b"GIF89a...."), Some("image/gif"));
-        assert_eq!(mime_type(b"RIFF\0\0\0\0WEBPVP8 "), Some("image/webp"));
+        assert_eq!(mime_type(&red_png(), false), Some("image/png"));
         assert_eq!(
-            mime_type(b"\xEF\xBB\xBF<?xml version=\"1.0\"?>\n<svg/>"),
+            mime_type(&[0xFF, 0xD8, 0xFF, 0xE0], false),
+            Some("image/jpeg")
+        );
+        assert_eq!(mime_type(b"GIF89a....", false), Some("image/gif"));
+        assert_eq!(
+            mime_type(b"RIFF\0\0\0\0WEBPVP8 ", false),
+            Some("image/webp")
+        );
+        assert_eq!(
+            mime_type(b"\xEF\xBB\xBF<?xml version=\"1.0\"?>\n<svg/>", false),
             Some("image/svg+xml")
         );
-        assert_eq!(mime_type(b"hello"), None);
+        assert_eq!(mime_type(b"hello", false), None);
+        assert_eq!(mime_type(&[0x1F, 0x8B, 8, 0], false), None);
+        assert_eq!(mime_type(&[0x1F, 0x8B, 8, 0], true), Some("image/svg+xml"));
     }
 
     #[test]

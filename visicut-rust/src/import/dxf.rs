@@ -18,6 +18,7 @@ use super::Imported;
 use crate::{i18n::tr, tr};
 use convert::Prim;
 use geom::{Affine, BBox, Seg};
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -255,15 +256,27 @@ fn write_svg(prims: &[Prim], layer_order: &[String]) -> Result<(String, [f64; 2]
         f: bbox.max[1],
     };
 
-    let mut layers: Vec<&str> = Vec::new();
-    for name in layer_order {
-        if prims.iter().any(|p| p.layer() == name) {
-            layers.push(name);
-        }
-    }
+    // Primitives per layer in drawing order; layers as in the LAYER table,
+    // then in order of appearance. Grouped once: files with many layers
+    // would otherwise take layers × primitives comparisons.
+    let mut by_layer: HashMap<&str, Vec<&Prim>> = HashMap::new();
+    let mut appearance: Vec<&str> = Vec::new();
     for prim in prims {
-        if !layers.contains(&prim.layer()) {
-            layers.push(prim.layer());
+        let members = by_layer.entry(prim.layer()).or_default();
+        if members.is_empty() {
+            appearance.push(prim.layer());
+        }
+        members.push(prim);
+    }
+    let mut layers: Vec<&str> = Vec::new();
+    let mut listed = HashSet::new();
+    for name in layer_order
+        .iter()
+        .map(String::as_str)
+        .chain(appearance.iter().copied())
+    {
+        if by_layer.contains_key(name) && listed.insert(name) {
+            layers.push(name);
         }
     }
 
@@ -284,7 +297,7 @@ fn write_svg(prims: &[Prim], layer_order: &[String]) -> Result<(String, [f64; 2]
             index + 1,
             escape(layer)
         );
-        for prim in prims.iter().filter(|p| p.layer() == *layer) {
+        for prim in by_layer[layer].iter().copied() {
             match prim {
                 Prim::Path {
                     stroke,

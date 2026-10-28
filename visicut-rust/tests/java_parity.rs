@@ -35,7 +35,10 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String
     // Rust reads `rust_file` (default: the Java file); anything but SVG goes
     // through the app's importers (DXF, EPS, PDF, raster, G-code, PLF).
     let rust_file = dir.join(case.get("rust_file").unwrap_or_else(|| get("svg")));
-    let imported = if rust_file.extension().is_some_and(|e| e == "svg") {
+    // Parametric SVG (`.parametric.svg`) goes through its importer like in the app.
+    let plain_svg = rust_file.extension().is_some_and(|e| e == "svg")
+        && !rust_file.to_string_lossy().ends_with(".parametric.svg");
+    let imported = if plain_svg {
         visicut_core::svg_import::Imported {
             svg: fs::read_to_string(&rust_file).unwrap(),
             ..Default::default()

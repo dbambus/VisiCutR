@@ -360,7 +360,8 @@ fn prepare(project: &Project, case: &HashMap<String, String>) -> Result<ltt::Pre
 
 /// The case itself (suffix "") and each of its `variants`, a comma-separated
 /// list of `key=value` overrides such as `order=FILE, rotary_diameter_mm=100`.
-/// A variant has the suffix `@key-value`, its references
+/// A variant has the suffix `@key-value` (other characters than letters,
+/// digits, `-`, `_` and `.` become `_`), its references
 /// `expected@key-value.ltt`/`.error` and its own `deviation@key-value`.
 /// Variants run in release builds only (`cargo test --release`, also in CI):
 /// unoptimised, the 570 of them add three minutes.
@@ -371,7 +372,17 @@ fn variants(case: &HashMap<String, String>) -> Vec<(String, HashMap<String, Stri
         _ => "",
     };
     for (key, value) in list.split(',').filter_map(|v| v.trim().split_once('=')) {
-        let suffix = format!("@{key}-{value}");
+        // File-name safe on every system (no `:` on Windows).
+        let suffix: String = format!("@{key}-{value}")
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || "@-_.".contains(c) {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
         let mut variant = case.clone();
         variant.remove("variants");
         variant.remove("deviation");

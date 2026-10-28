@@ -42,7 +42,7 @@ Temp-Ordner und liest keine Benutzereinstellungen.
 | `place=bbox` | linke obere Ecke der Geometrie (ohne Konturbreiten) statt des Dokumentursprungs auf `x_mm`/`y_mm` legen, wie beim Platzieren in der Oberfläche; nötig für DXF, EPS und PDF |
 | `order` | VisiCut-Reihenfolge `FILE`, `NEAREST`, `INNER_FIRST` (Standard, „Klassisch“) oder `SMALLEST_FIRST` |
 | `rotary_diameter_mm` | Rotationsachse mit diesem Walzendurchmesser |
-| `variants` | weitere Läufe desselben Falls mit überschriebenen Schlüsseln, `order=FILE, rotary_diameter_mm=100`; Referenzen `expected@order-FILE.ltt`, Abweichungen `deviation@order-FILE=` |
+| `variants` | weitere Läufe desselben Falls mit überschriebenen Schlüsseln, `order=FILE, rotary_diameter_mm=100`; Referenzen `expected@order-FILE.ltt`, Abweichungen `deviation@order-FILE=`; andere Zeichen als Buchstaben, Ziffern, `-`, `_` und `.` werden im Namen zu `_` (`additional=30:80:1` → `@additional-30_80_1`) |
 | `mappings` | Zuordnungen in Reihenfolge, `[Verfahren:] Filter -> Leistung:Tempo[:Durchgänge]; …` (Verfahren `cut`, `mark`, `engrave`, `engrave3d`, sonst `operation`); Filter `*` (alles Übrige), `all` (alles) oder mit `&` verbundene `[!]Attribut=Wert` bzw. `[!]Attribut<=Wert` mit VisiCuts Attributnamen (`Color`, `Stroke Color`, `Fill Color`, `Stroke Width`, `Type`, `Id`, `Group`) |
 | `outline=true` | „Nur Umriss“ (VisiCuts `useOutline`) |
 | `svg=…plf` | VisiCut-Projekt: Lage, Teile und Zuordnungen aus der Datei (`x_mm`/`y_mm` = 0); geschrieben mit `make-plf.sh` (Java `MakePlf.java`), nicht von `generate.sh` |

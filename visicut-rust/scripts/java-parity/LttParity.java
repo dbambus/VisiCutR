@@ -103,7 +103,8 @@ public class LttParity
       }
       Properties p = (Properties) c.clone();
       p.setProperty(kv[0].trim(), kv[1].trim());
-      all.put("@" + kv[0].trim() + "-" + kv[1].trim(), p);
+      // File-name safe on every system (no ':' on Windows), as in java_parity.rs.
+      all.put(("@" + kv[0].trim() + "-" + kv[1].trim()).replaceAll("[^A-Za-z0-9@._-]", "_"), p);
     }
     return all;
   }

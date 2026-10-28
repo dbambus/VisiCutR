@@ -289,20 +289,25 @@ pub fn font_families() -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for face in db.faces() {
-        let new: Vec<&String> = face
+        // Nur der englische Name: die übersetzten (russisch, japanisch …)
+        // sind doppelt und erscheinen in der Oberfläche als Kästchen.
+        let Some((name, _)) = face
             .families
             .iter()
-            .map(|(name, _)| name)
-            .filter(|name| is_listed_font(name) && !seen.contains(*name))
-            .collect();
-        // Jede Familie einmal prüfen: bis eine ihrer Schriften Buchstaben zeichnet.
-        if new.is_empty() || db.with_face_data(face.id, draws_letters) != Some(true) {
+            .find(|(_, lang)| *lang == usvg::fontdb::Language::English_UnitedStates)
+            .or(face.families.first())
+        else {
+            continue;
+        };
+        if !is_listed_font(name) || seen.contains(name) {
             continue;
         }
-        for name in new {
-            seen.insert(name.clone());
-            names.push(name.clone());
+        // Jede Familie einmal prüfen: bis eine ihrer Schriften Buchstaben zeichnet.
+        if db.with_face_data(face.id, draws_letters) != Some(true) {
+            continue;
         }
+        seen.insert(name.clone());
+        names.push(name.clone());
     }
     names.sort_by_key(|n| n.to_lowercase());
     names.dedup();

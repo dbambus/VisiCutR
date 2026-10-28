@@ -69,7 +69,6 @@
   "Datei öffnen, hierher ziehen oder das Beispiel öffnen": "Apri un file, trascinalo qui o apri l'esempio",
   "Der Text ergibt keine Umrisse (Schrift ohne passende Zeichen?)": "Il testo non produce contorni (font senza i caratteri necessari?)",
   "Die Schrift hat keine passenden Zeichen": "Il font non ha i caratteri necessari",
-  "Der Text wird in Umrisse umgewandelt und ist danach nicht mehr editierbar.": "Il testo viene convertito in contorni e poi non è più modificabile.",
   "Doppelte Linien": "Linee doppie",
   "Doppelte Linien entfernen": "Rimuovi linee doppie",
   "Download unerwartet abgebrochen": "Download interrotto inaspettatamente",
@@ -1012,5 +1011,8 @@
   "Für CorelDRAW 2017 oder neuer mit VBA: im Makro-Editor (Alt+F11) im Projekt GlobalMacros mit Datei → Datei importieren … einfügen. Danach stehen AddToVisiCutR (als Teil hinzufügen) und OpenInVisiCutR (Projekt ersetzen) unter Extras → Makros und lassen sich unter Extras → Optionen → Anpassung als Symbol ablegen.": "Per CorelDRAW 2017 o successivo con VBA: nell’editor delle macro (Alt+F11) aggiungerlo al progetto GlobalMacros con File → Importa file …. Poi AddToVisiCutR (aggiungi come parte) e OpenInVisiCutR (sostituisci il progetto) si trovano in Strumenti → Macro e si possono inserire come pulsante in Strumenti → Opzioni → Personalizzazione.",
   "Skript und Makro finden VisiCutR über den Pfad, den VisiCutR bei jedem Start im Einstellungsordner ablegt. Nach dem Verschieben VisiCutR einmal starten.": "Script e macro trovano VisiCutR tramite il percorso che VisiCutR salva nella cartella delle impostazioni a ogni avvio. Dopo aver spostato VisiCutR, avviarlo una volta.",
   "Gespeichert unter {path}": "Salvato in {path}",
-  "Nicht gespeichert: {error}": "Non salvato: {error}"
+  "Nicht gespeichert: {error}": "Non salvato: {error}",
+  "Das gewählte Teil ist kein Text": "La parte selezionata non è un testo",
+  "Text bearbeiten": "Modifica testo",
+  "Text bearbeiten …": "Modifica testo …"
 }

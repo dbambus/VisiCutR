@@ -19,6 +19,13 @@ Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflo
   Emoji- und Symbolschriften wie Wingdings sowie Schriften in der alten
   Windows-Symbolkodierung (etwa die AutoCAD-Schriften). Mit ihnen erschien
   der Text bisher in einer Ersatzschrift oder gar nicht.
+- **Text bleibt bearbeitbar:** Ein Rechtsklick auf einen Text auf der
+  Arbeitsfläche öffnet „Text bearbeiten …“ mit Text, Schrift und
+  Einstellungen; „Übernehmen“ erzeugt die Umrisse an derselben Stelle neu.
+  Der Text wird im Projekt mitgespeichert. Wechselt die Bearbeitung (etwa
+  von Gravieren auf Schneiden), gelten die Laserwerte aus dem Materialprofil.
+  Gedreht, gespiegelt oder im Motiv vervielfältigt ist ein Text wieder eine
+  feste Grafik.
 - **Text, Formen und Schilder im sichtbaren Ausschnitt:** Die Felder X und Y
   in den Werkzeugfenstern entfallen. Neue Elemente erscheinen in der Mitte
   des gerade sichtbaren (gezoomten) Teils der Arbeitsfläche; liegt dort

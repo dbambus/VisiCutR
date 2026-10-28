@@ -1282,6 +1282,7 @@ impl VisiCutR {
         self.project.part_name = name.clone();
         self.project.part_source_file = None;
         self.project.part_parametric = None;
+        self.project.part_text = None;
         self.project.name = name;
         self.project.width_mm = preview.width_mm;
         self.project.height_mm = preview.height_mm;
@@ -3752,6 +3753,17 @@ impl VisiCutR {
                     if response.clicked() {
                         select = Some(index);
                     }
+                    // Rechtsklick wählt das Teil und öffnet gleich sein Menü
+                    // (dasselbe wie beim gewählten Teil, siehe „motif“).
+                    if response.secondary_clicked() {
+                        select = Some(index);
+                        let menu = ui.id().with("motif").with("popup");
+                        let at = response.interact_pointer_pos();
+                        // Wie egui's eigenes `context_menu` (Position für den
+                        // Anker `PointerFixed`); einen anderen Weg gibt es nicht.
+                        #[allow(deprecated)]
+                        ui.memory_mut(|m| m.open_popup_at(menu, at));
+                    }
                 }
                 if let Some(index) = select {
                     self.select_part(index);
@@ -3846,7 +3858,15 @@ impl VisiCutR {
                     )
                     .on_hover_cursor(egui::CursorIcon::Grab);
                 let editable = !self.busy();
+                let text = self.project.part_text.clone();
+                let mut edit_text = false;
                 response.context_menu(|ui| {
+                    if text.is_some() {
+                        edit_text = ui
+                            .add_enabled(editable, egui::Button::new(tr("Text bearbeiten …")))
+                            .clicked();
+                        ui.separator();
+                    }
                     for group in [
                         &[
                             Command::Duplicate,
@@ -3873,6 +3893,9 @@ impl VisiCutR {
                         ui.separator();
                     }
                 });
+                if edit_text && let Some(text) = &text {
+                    self.compose.edit_text(text);
+                }
                 // Liegt unter dem gewählten Teil ein anderes, wählt ein Klick
                 // dieses; sonst wäre es nicht mehr erreichbar.
                 if response.clicked()
@@ -4706,7 +4729,20 @@ impl eframe::App for VisiCutR {
             self.delete_objects(ctx, &[object]);
         }
         match self.compose.windows(ctx, &self.project, self.visible_mm) {
-            Some(Ok((project, notes))) => self.apply_composed(ctx, project, notes),
+            Some(Ok((mut project, notes))) => {
+                // Bearbeiteter Text mit anderer Bearbeitung: Laserwerte aus dem
+                // Profil, ohne Profil Markieren und Gravieren mit 0 %.
+                if let (Some(old), Some(new)) = (&self.project.part_text, &project.part_text)
+                    && project.parts.len() == self.project.parts.len()
+                    && project.active_part == self.project.active_part
+                    && old.operation != new.operation
+                {
+                    let operation = new.operation;
+                    jobs_ui::select_operation(&mut project, operation);
+                    jobs_ui::apply_presets(self.jobs.active(), &mut project);
+                }
+                self.apply_composed(ctx, project, notes)
+            }
             Some(Err(e)) => self.report(e),
             None => {}
         }

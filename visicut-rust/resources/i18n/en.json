@@ -69,7 +69,6 @@
   "Datei öffnen, hierher ziehen oder das Beispiel öffnen": "Open a file, drag it here or open the example",
   "Der Text ergibt keine Umrisse (Schrift ohne passende Zeichen?)": "The text produces no outlines (font without matching glyphs?)",
   "Die Schrift hat keine passenden Zeichen": "The font has no matching glyphs",
-  "Der Text wird in Umrisse umgewandelt und ist danach nicht mehr editierbar.": "The text is converted to outlines and can no longer be edited afterwards.",
   "Doppelte Linien": "Duplicate lines",
   "Doppelte Linien entfernen": "Remove duplicate lines",
   "Download unerwartet abgebrochen": "Download aborted unexpectedly",
@@ -1012,5 +1011,8 @@
   "Für CorelDRAW 2017 oder neuer mit VBA: im Makro-Editor (Alt+F11) im Projekt GlobalMacros mit Datei → Datei importieren … einfügen. Danach stehen AddToVisiCutR (als Teil hinzufügen) und OpenInVisiCutR (Projekt ersetzen) unter Extras → Makros und lassen sich unter Extras → Optionen → Anpassung als Symbol ablegen.": "For CorelDRAW 2017 or later with VBA: in the macro editor (Alt+F11) add it to the GlobalMacros project with File → Import File …. Then AddToVisiCutR (add as a part) and OpenInVisiCutR (replace the project) are listed under Tools → Macros and can be placed as a button under Tools → Options → Customization.",
   "Skript und Makro finden VisiCutR über den Pfad, den VisiCutR bei jedem Start im Einstellungsordner ablegt. Nach dem Verschieben VisiCutR einmal starten.": "Script and macro find VisiCutR through the path VisiCutR stores in its settings folder on every start. After moving VisiCutR, start it once.",
   "Gespeichert unter {path}": "Saved to {path}",
-  "Nicht gespeichert: {error}": "Not saved: {error}"
+  "Nicht gespeichert: {error}": "Not saved: {error}",
+  "Das gewählte Teil ist kein Text": "The selected part is not a text",
+  "Text bearbeiten": "Edit text",
+  "Text bearbeiten …": "Edit text …"
 }

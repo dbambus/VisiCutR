@@ -1,7 +1,7 @@
 //! Text, shapes, signs, copies and nesting for the egui interface.
 use eframe::egui;
 use visicut_core::{
-    compose::{self, Align, NestRotation, NestSettings, NewObject, Shape, Sign},
+    compose::{self, Align, NestRotation, NestSettings, NewObject, Shape, Sign, TextSource},
     i18n::tr,
     project::{Operation, Project},
     tr,
@@ -47,17 +47,6 @@ enum ShapeKind {
     Star,
 }
 
-struct TextForm {
-    text: String,
-    font: String,
-    size_mm: f64,
-    bold: bool,
-    italic: bool,
-    align: Align,
-    line_spacing: f64,
-    operation: Operation,
-}
-
 struct ShapeForm {
     kind: ShapeKind,
     width_mm: f64,
@@ -74,7 +63,9 @@ pub type Composed = Result<(Project, Vec<String>), String>;
 
 pub struct ComposeUi {
     open: Option<Tool>,
-    text: TextForm,
+    /// Das Textfenster bearbeitet den Text des gewählten Teils.
+    editing: bool,
+    text: TextSource,
     shape: ShapeForm,
     sign: Sign,
     columns: u32,
@@ -90,7 +81,8 @@ impl Default for ComposeUi {
     fn default() -> Self {
         Self {
             open: None,
-            text: TextForm {
+            editing: false,
+            text: TextSource {
                 text: tr("Text").into(),
                 font: "sans-serif".into(),
                 size_mm: 10.0,
@@ -223,6 +215,25 @@ fn font_choice(
     });
 }
 
+/// Zeile „Stil“: die Kästchen links in der Feldspalte, in Flucht mit den
+/// Feldern darüber und darunter.
+fn style_choice(ui: &mut egui::Ui, bold: &mut bool, italic: Option<&mut bool>) {
+    crate::form::row(ui, tr("Stil"), |ui| {
+        let size = egui::vec2(FIELD, ui.spacing().interact_size.y);
+        ui.allocate_ui_with_layout(
+            size,
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.checkbox(bold, bold_label(ui));
+                if let Some(italic) = italic {
+                    ui.add_space(8.0);
+                    ui.checkbox(italic, italic_label());
+                }
+            },
+        );
+    });
+}
+
 /// „Fett“ in fetter Schrift, damit das Kästchen zeigt, was es bewirkt.
 fn bold_label(ui: &egui::Ui) -> egui::RichText {
     let size = egui::TextStyle::Button.resolve(ui.style()).size;
@@ -311,7 +322,15 @@ impl ComposeUi {
         if self.fonts.is_empty() {
             self.fonts = compose::font_families();
         }
+        self.editing = false;
         self.open = Some(tool);
+    }
+
+    /// Öffnet das Textfenster mit Text und Einstellungen des gewählten Teils.
+    pub fn edit_text(&mut self, source: &TextSource) {
+        self.open(Tool::Text);
+        self.text = source.clone();
+        self.editing = true;
     }
 
     /// Zeigt das offene Werkzeug; liefert das neue Projekt nach „Einfügen“.
@@ -324,10 +343,15 @@ impl ComposeUi {
         view: [f32; 4],
     ) -> Option<Composed> {
         let tool = self.open?;
+        let title = if self.editing {
+            tr("Text bearbeiten")
+        } else {
+            tool.title()
+        };
         let mut open = true;
         let mut apply = false;
         let mut cancel = false;
-        crate::form::tool_window(ctx, "compose_tool", tool.title(), 420.0, &mut open, |ui| {
+        crate::form::tool_window(ctx, "compose_tool", title, 420.0, &mut open, |ui| {
             // Wie Hinweis und Sende-Bestätigung: Rahmen in der Akzentfarbe,
             // Titel mit Symbol, Knöpfe rechts unten.
             egui::Frame::new()
@@ -339,8 +363,7 @@ impl ComposeUi {
                     ui.set_width(CONTENT_WIDTH);
                     ui.vertical_centered(|ui| {
                         ui.horizontal(|ui| {
-                            let title =
-                                egui::RichText::new(tool.title()).font(crate::form::bold(20.0));
+                            let title = egui::RichText::new(title).font(crate::form::bold(20.0));
                             let galley = ui.painter().layout_no_wrap(
                                 title.text().to_owned(),
                                 crate::form::bold(20.0),
@@ -370,6 +393,7 @@ impl ComposeUi {
                     ui.add_space(12.0);
                     let label = match tool {
                         Tool::Array | Tool::Nest => tr("Anwenden"),
+                        Tool::Text if self.editing => tr("Übernehmen"),
                         _ => tr("Einfügen"),
                     };
                     // Nur eine Zeile hoch, sonst wächst das Fenster mit.
@@ -418,23 +442,10 @@ impl ComposeUi {
             compose::add_objects_as_part(project, &objects, name, view).map(|p| (p, Vec::new()))
         };
         match tool {
-            Tool::Text => {
-                let t = &self.text;
-                add(vec![NewObject {
-                    shape: Shape::Text {
-                        text: t.text.clone(),
-                        font: t.font.clone(),
-                        size_mm: t.size_mm,
-                        bold: t.bold,
-                        italic: t.italic,
-                        align: t.align,
-                        line_spacing: t.line_spacing,
-                    },
-                    operation: t.operation,
-                    x_mm: 0.0,
-                    y_mm: 0.0,
-                }])
+            Tool::Text if self.editing => {
+                compose::set_text(project, &self.text).map(|p| (p, Vec::new()))
             }
+            Tool::Text => compose::add_text(project, &self.text, view).map(|p| (p, Vec::new())),
             Tool::Shape => {
                 let s = &self.shape;
                 let shape = match s.kind {
@@ -498,10 +509,7 @@ impl ComposeUi {
             (&t.text, t.bold, t.italic),
         );
         mm(ui, tr("Schriftgröße"), &mut t.size_mm, 0.5..=1000.0);
-        crate::form::row(ui, tr("Stil"), |ui| {
-            ui.checkbox(&mut t.italic, italic_label());
-            ui.checkbox(&mut t.bold, bold_label(ui));
-        });
+        style_choice(ui, &mut t.bold, Some(&mut t.italic));
         crate::form::row(ui, tr("Ausrichtung"), |ui| {
             let title = |a: Align| match a {
                 Align::Left => tr("Links"),
@@ -519,10 +527,6 @@ impl ComposeUi {
         });
         number(ui, tr("Zeilenabstand"), &mut t.line_spacing, 0.5..=5.0, "×");
         operation_choice(ui, "text_operation", &mut t.operation);
-        crate::form::caption(
-            ui,
-            tr("Der Text wird in Umrisse umgewandelt und ist danach nicht mehr editierbar."),
-        );
     }
 
     fn shape_form(&mut self, ui: &mut egui::Ui) {
@@ -596,9 +600,7 @@ impl ComposeUi {
             (&s.text, s.bold, false),
         );
         mm(ui, tr("Schriftgröße"), &mut s.size_mm, 0.5..=500.0);
-        crate::form::row(ui, tr("Stil"), |ui| {
-            ui.checkbox(&mut s.bold, bold_label(ui));
-        });
+        style_choice(ui, &mut s.bold, None);
         crate::form::row(ui, tr("Text"), |ui| {
             crate::form::Dropdown::from_id_salt("sign_text")
                 .width(FIELD)

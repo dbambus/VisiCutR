@@ -67,6 +67,79 @@ pub enum Shape {
     },
 }
 
+/// Text and settings of a text part. The part keeps them, so a right-click
+/// on it edits the text: [`set_text`] makes the outlines again.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TextSource {
+    pub text: String,
+    pub font: String,
+    /// Font size (em height) in mm.
+    pub size_mm: f64,
+    pub bold: bool,
+    pub italic: bool,
+    pub align: Align,
+    /// Line distance in multiples of the font size.
+    pub line_spacing: f64,
+    pub operation: Operation,
+}
+
+impl TextSource {
+    fn object(&self) -> NewObject {
+        NewObject {
+            shape: Shape::Text {
+                text: self.text.clone(),
+                font: self.font.clone(),
+                size_mm: self.size_mm,
+                bold: self.bold,
+                italic: self.italic,
+                align: self.align,
+                line_spacing: self.line_spacing,
+            },
+            operation: self.operation,
+            x_mm: 0.0,
+            y_mm: 0.0,
+        }
+    }
+}
+
+/// Adds `source` as a text part of its own (see [`add_objects_as_part`]);
+/// the part keeps the text for editing.
+pub fn add_text(project: &Project, source: &TextSource, view: [f32; 4]) -> Result<Project, String> {
+    let mut result = add_objects_as_part(project, &[source.object()], tr("Text"), view)?;
+    result.part_text = Some(source.clone());
+    Ok(result)
+}
+
+/// Makes the outlines of the active text part again from `source`. Position
+/// and scale stay. With another operation the part loses its steps; the
+/// caller then sets the operation's laser values (as for a new part).
+pub fn set_text(project: &Project, source: &TextSource) -> Result<Project, String> {
+    let old = project
+        .part_text
+        .as_ref()
+        .ok_or_else(|| tr("Das gewählte Teil ist kein Text").to_string())?;
+    let empty = Project {
+        svg: String::new(),
+        steps: Vec::new(),
+        parts: Vec::new(),
+        active_part: 0,
+        ..project.clone()
+    };
+    let (created, _) = add_objects(&empty, &[source.object()])?;
+    let mut part = project.active();
+    replace_drawing(&mut part, created.svg)?;
+    if source.operation != old.operation {
+        part.steps.clear();
+    }
+    part.text = Some(source.clone());
+    let mut result = project.clone();
+    let mut all = project.all_parts();
+    let index = project.active_part.min(all.len() - 1);
+    all[index] = part;
+    result.set_all_parts(all, index);
+    Ok(result)
+}
+
 /// A new element at a bed position (top left of its bounding box). The
 /// operation sets the colour: engrave black fill, cut red and mark blue
 /// outlines, as in VisiCut's default mappings.
@@ -388,6 +461,7 @@ pub fn add_objects_as_part(
         part_name: name.to_string(),
         part_source_file: None,
         part_parametric: None,
+        part_text: None,
         ..project.clone()
     };
     let (created, _) = add_objects(&empty, objects)?;
@@ -606,7 +680,10 @@ pub fn remove_objects(project: &Project, remove: &[usize]) -> Result<Project, St
     if remove.iter().any(|i| *i >= nodes.len()) {
         return Err(tr("SVG-Objekt nicht vorhanden").into());
     }
-    let mut result = project.clone();
+    let mut result = Project {
+        part_text: None,
+        ..project.clone()
+    };
     if nodes.iter().enumerate().all(|(i, _)| remove.contains(&i)) {
         result.svg.clear();
         result.steps.clear();
@@ -974,6 +1051,7 @@ pub fn add_part(
         ignore_filters: Vec::new(),
         source_file: None,
         parametric: None,
+        text: None,
     });
     Ok((result, notes))
 }
@@ -1184,6 +1262,7 @@ pub fn add_extra_parts(
             ignore_filters: Vec::new(),
             source_file: None,
             parametric: extra.parametric,
+            text: None,
             ..project.active()
         };
         project.add_part(part);
@@ -1963,6 +2042,8 @@ fn with_document(project: &Project, body: &str, bounds: [f64; 4]) -> Result<Proj
         y_mm: y as f32,
         width_mm: w as f32,
         height_mm: h as f32,
+        // Gedreht, kopiert oder ergänzt passt der Text nicht mehr zur Zeichnung.
+        part_text: None,
         ..project.clone()
     };
     if result.name.is_empty() {
@@ -2718,6 +2799,60 @@ mod tests {
                 || a.y_mm >= b.y_mm + b.height_mm + gap,
             "{a:?} {b:?}"
         );
+    }
+
+    #[test]
+    fn text_parts_stay_editable() {
+        let bed = [0.0, 0.0, 1000.0, 600.0];
+        let source = TextSource {
+            text: "Hallo".into(),
+            font: "sans-serif".into(),
+            size_mm: 10.0,
+            bold: false,
+            italic: false,
+            align: Align::Left,
+            line_spacing: 1.2,
+            operation: Operation::Engrave,
+        };
+        let first = add_text(&Project::default(), &source, bed).unwrap();
+        assert_eq!(first.part_text.as_ref(), Some(&source));
+        // Ein zweites Teil (Form) erbt den Text nicht; das erste behält ihn.
+        let rectangle = NewObject {
+            shape: Shape::Rectangle {
+                width_mm: 20.0,
+                height_mm: 10.0,
+                corner_mm: 0.0,
+            },
+            operation: Operation::Cut,
+            x_mm: 0.0,
+            y_mm: 0.0,
+        };
+        let both = add_objects_as_part(&first, &[rectangle], "Form", bed).unwrap();
+        assert_eq!(both.part_text, None);
+        assert_eq!(both.parts[0].text.as_ref(), Some(&source));
+        // Bearbeiten: neue Umrisse an derselben Stelle, länger mit mehr Text.
+        let longer = TextSource {
+            text: "Hallo Welt".into(),
+            ..source.clone()
+        };
+        let edited = set_text(&first, &longer).unwrap();
+        assert_eq!(edited.part_count(), 1);
+        assert_eq!((edited.x_mm, edited.y_mm), (first.x_mm, first.y_mm));
+        assert!(
+            edited.width_mm > first.width_mm + 10.0,
+            "{}",
+            edited.width_mm
+        );
+        assert_eq!(edited.part_text.as_ref(), Some(&longer));
+        assert_ne!(edited.svg, first.svg);
+        // Im Projekt gespeichert und wieder geöffnet bleibt der Text erhalten.
+        let saved = serde_json::to_string(&both).unwrap();
+        let opened: Project = serde_json::from_str(&saved).unwrap();
+        assert_eq!(opened.parts[0].text.as_ref(), Some(&source));
+        // Gedreht passt der Text nicht mehr zur Zeichnung: nicht mehr bearbeitbar.
+        let turned = transform(&first, 90.0, false, false).unwrap();
+        assert_eq!(turned.part_text, None);
+        assert!(set_text(&turned, &longer).is_err());
     }
 
     #[test]

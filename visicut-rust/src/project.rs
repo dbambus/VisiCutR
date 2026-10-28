@@ -61,6 +61,9 @@ pub struct Project {
     /// Template and values when the active part is a parametric SVG.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part_parametric: Option<Parametric>,
+    /// Text and settings when the active part is an editable text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_text: Option<crate::compose::TextSource>,
     /// Position of the active part in the list of all parts.
     #[serde(default)]
     pub active_part: usize,
@@ -97,6 +100,9 @@ pub struct Part {
     /// Template and values of a parametric SVG (VisiCut's ParametricPlfPart).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parametric: Option<Parametric>,
+    /// Text and settings of an editable text part.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<crate::compose::TextSource>,
 }
 
 /// A parametric SVG template with the current parameter values; the part's
@@ -379,6 +385,8 @@ struct ProjectFile {
     #[serde(default)]
     part_parametric: Option<Parametric>,
     #[serde(default)]
+    part_text: Option<crate::compose::TextSource>,
+    #[serde(default)]
     active_part: usize,
     #[serde(default)]
     parts: Vec<Part>,
@@ -433,6 +441,7 @@ impl TryFrom<ProjectFile> for Project {
             part_name: file.part_name,
             part_source_file: file.part_source_file,
             part_parametric: file.part_parametric,
+            part_text: file.part_text,
             active_part: file.active_part.min(file.parts.len()),
             parts: file.parts,
         })
@@ -517,6 +526,7 @@ impl Default for Project {
             part_name: String::new(),
             part_source_file: None,
             part_parametric: None,
+            part_text: None,
             active_part: 0,
             parts: Vec::new(),
         }
@@ -598,6 +608,7 @@ impl Project {
             ignore_filters: self.ignore_filters.clone(),
             source_file: self.part_source_file.clone(),
             parametric: self.part_parametric.clone(),
+            text: self.part_text.clone(),
         }
     }
 
@@ -617,6 +628,7 @@ impl Project {
         self.ignore_filters = part.ignore_filters;
         self.part_source_file = part.source_file;
         self.part_parametric = part.parametric;
+        self.part_text = part.text;
     }
 
     /// All parts in list order (empty without artwork).
@@ -639,6 +651,7 @@ impl Project {
                 ignore_filters: Vec::new(),
                 source_file: None,
                 parametric: None,
+                text: None,
                 ..self.active()
             };
             self.set_active(empty);
@@ -719,6 +732,7 @@ impl Project {
             part_name: String::new(),
             part_source_file: None,
             part_parametric: None,
+            part_text: None,
             active_part: 0,
             parts: Vec::new(),
         };

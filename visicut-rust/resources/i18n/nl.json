@@ -69,7 +69,6 @@
   "Datei öffnen, hierher ziehen oder das Beispiel öffnen": "Bestand openen, hierheen slepen of het voorbeeldbestand openen",
   "Der Text ergibt keine Umrisse (Schrift ohne passende Zeichen?)": "De tekst levert geen contouren op (lettertype zonder passende tekens?)",
   "Die Schrift hat keine passenden Zeichen": "Het lettertype heeft geen passende tekens",
-  "Der Text wird in Umrisse umgewandelt und ist danach nicht mehr editierbar.": "De tekst wordt omgezet in contouren en is daarna niet meer bewerkbaar.",
   "Doppelte Linien": "Dubbele lijnen",
   "Doppelte Linien entfernen": "Dubbele lijnen verwijderen",
   "Download unerwartet abgebrochen": "Download onverwacht afgebroken",
@@ -1012,5 +1011,8 @@
   "Für CorelDRAW 2017 oder neuer mit VBA: im Makro-Editor (Alt+F11) im Projekt GlobalMacros mit Datei → Datei importieren … einfügen. Danach stehen AddToVisiCutR (als Teil hinzufügen) und OpenInVisiCutR (Projekt ersetzen) unter Extras → Makros und lassen sich unter Extras → Optionen → Anpassung als Symbol ablegen.": "Voor CorelDRAW 2017 of nieuwer met VBA: in de macro-editor (Alt+F11) aan het project GlobalMacros toevoegen via Bestand → Bestand importeren …. Daarna staan AddToVisiCutR (als onderdeel toevoegen) en OpenInVisiCutR (project vervangen) onder Extra → Macro’s en kunnen ze onder Extra → Opties → Aanpassing als knop worden geplaatst.",
   "Skript und Makro finden VisiCutR über den Pfad, den VisiCutR bei jedem Start im Einstellungsordner ablegt. Nach dem Verschieben VisiCutR einmal starten.": "Script en macro vinden VisiCutR via het pad dat VisiCutR bij elke start in zijn instellingenmap opslaat. Start VisiCutR na het verplaatsen één keer.",
   "Gespeichert unter {path}": "Opgeslagen in {path}",
-  "Nicht gespeichert: {error}": "Niet opgeslagen: {error}"
+  "Nicht gespeichert: {error}": "Niet opgeslagen: {error}",
+  "Das gewählte Teil ist kein Text": "Het gekozen onderdeel is geen tekst",
+  "Text bearbeiten": "Tekst bewerken",
+  "Text bearbeiten …": "Tekst bewerken …"
 }

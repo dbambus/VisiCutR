@@ -27,6 +27,28 @@ pub fn read(path: &Path) -> Result<Imported, String> {
     from_bytes(&bytes)
 }
 
+/// SVG user units of [`read`] → the coordinates of Java VisiCut's DXF
+/// import (kabeja), to which the transform of a PLF part refers: drawing
+/// units with Y flipped, origin at the DXF origin. [`read`] puts the origin at
+/// the top left of the drawing and converts `$INSUNITS` to millimetres.
+pub(super) fn java_frame(path: &Path) -> Result<[f64; 6], String> {
+    let doc = reader::parse(&std::fs::read(path).map_err(|e| e.to_string())?)?;
+    let unit = doc
+        .header_f("$INSUNITS", 70)
+        .and_then(|u| unit_mm(u as i64))
+        .unwrap_or(1.0);
+    let converted = convert::convert(&doc, unit)?;
+    let bbox = drawing_bbox(&converted.prims, &text_extents(&converted.prims))?;
+    Ok([
+        1.0 / unit,
+        0.0,
+        0.0,
+        1.0 / unit,
+        bbox.min[0] / unit,
+        -bbox.max[1] / unit,
+    ])
+}
+
 fn from_bytes(bytes: &[u8]) -> Result<Imported, String> {
     let doc = reader::parse(bytes)?;
     let mut warnings = Vec::new();
@@ -219,10 +241,10 @@ fn estimated_extent(prim: &Prim) -> Option<[f64; 4]> {
     Some([left, first_baseline - size * 0.75, left + width, bottom])
 }
 
-fn write_svg(prims: &[Prim], layer_order: &[String]) -> Result<(String, [f64; 2]), String> {
-    let extents = text_extents(prims);
+/// Extent of the drawing in millimetres, texts included.
+fn drawing_bbox(prims: &[Prim], extents: &[Option<[f64; 4]>]) -> Result<BBox, String> {
     let mut bbox = BBox::default();
-    for (prim, extent) in prims.iter().zip(&extents) {
+    for (prim, extent) in prims.iter().zip(extents) {
         match prim {
             Prim::Path { segs, .. } => bbox.add_segments(segs),
             Prim::Text { m, .. } => {
@@ -237,6 +259,12 @@ fn write_svg(prims: &[Prim], layer_order: &[String]) -> Result<(String, [f64; 2]
     if bbox.is_empty() || !bbox.min.iter().chain(&bbox.max).all(|v| v.is_finite()) {
         return Err(tr("DXF-Datei enthält keine darstellbaren Objekte").into());
     }
+    Ok(bbox)
+}
+
+fn write_svg(prims: &[Prim], layer_order: &[String]) -> Result<(String, [f64; 2]), String> {
+    let extents = text_extents(prims);
+    let bbox = drawing_bbox(prims, &extents)?;
     let width = (bbox.max[0] - bbox.min[0]).max(0.01);
     let height = (bbox.max[1] - bbox.min[1]).max(0.01);
     if width > 1e7 || height > 1e7 {

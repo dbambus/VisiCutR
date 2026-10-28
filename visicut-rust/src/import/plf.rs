@@ -492,8 +492,13 @@ impl Frame {
             },
             // PostScript points of the cropped page.
             "eps" | "ps" => multiply(scale(72.0 / 25.4, 72.0 / 25.4), self.physical()),
-            // Absolute millimetres (DXF: 1 unit = 1 mm in VisiCut).
-            "nc" | "gcode" | "dxf" => scale(self.width_mm / w, self.height_mm / h),
+            // Absolute millimetres.
+            "nc" | "gcode" => scale(self.width_mm / w, self.height_mm / h),
+            // kabeja's drawing units, Y flipped about the DXF origin.
+            "dxf" => match super::dxf::java_frame(file) {
+                Ok(frame) => multiply(frame, scale(self.width_mm / w, self.height_mm / h)),
+                Err(_) => scale(self.width_mm / w, self.height_mm / h),
+            },
             _ => self.physical(),
         }
     }

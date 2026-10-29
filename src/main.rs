@@ -2656,15 +2656,12 @@ impl VisiCutR {
                                 }
                             }
                         });
-                    let device = self.devices.device();
+                    // Hostname und Port stehen in den Einstellungen, hier nur das Bett.
                     form::caption(
                         ui,
                         format!(
-                            "{}:{}\n{} × {} mm",
-                            device.hostname,
-                            device.port,
-                            self.project.bed_width_mm,
-                            self.project.bed_height_mm
+                            "{} × {} mm",
+                            self.project.bed_width_mm, self.project.bed_height_mm
                         ),
                     );
                 });

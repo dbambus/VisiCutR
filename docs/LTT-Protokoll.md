@@ -421,13 +421,17 @@ Protokollfakten. Sie gelten für den iLaser 3000 und sind für den iLaser 4000
   1260 mm/s², Höchstgeschwindigkeit 400 mm/s, Gravur-Überlauf 3,5–35 mm
   (wie LibLaserCut), eigene Gravurverschiebung je Geschwindigkeit.
 
-Vor einer Nutzung am iLaser 4000 muss ein beaufsichtigter Test zeigen, ob
-das Gerät `ZA` versteht; besser ist der Treiber des 4000.
+Die Firmware des iLaser 4000 versteht `ZA`, `ESC A`, `ESC f` und `ESC I`,
+aber nicht `ESC K` (siehe „Zusatzbefehle“ im nächsten Abschnitt). Richtung
+und Grenzen der Z-Achse muss vor einer Nutzung ein beaufsichtigter Test
+zeigen.
 
 ## Gerätesoftware des iLaser 4000 (Firmware-Analyse)
 
 Grundlage: ein Abbild der Steuerungs-CF-Karte eines iLaser 4000 (Stand
-24.06.2019), der Windows-Treiber „iLASER-4000“ 6.5 (Mai/Juni 2019) und
+24.06.2019, Steuerprogramm „V4S 8.20b“ vom 30.03.2017), das neuere
+Steuerprogramm „V4S 8.23b“ (29.03.2019), der Windows-Treiber „iLASER-4000“
+6.5 (Mai/Juni 2019, auch im Treiberpaket vom 26.01.2023 enthalten) und
 Beschleunigungsmessungen am Gerät. Nichts davon liegt im Repository;
 festgehalten sind nur Fakten für spätere Versionen. Ein Herstellerhandbuch
 zum Format wurde zum Verständnis gelesen, aber nicht übernommen.
@@ -459,6 +463,38 @@ für `0`, `1`, `A`–`F`, `H`–`J`, `L`–`T`, `V`, `W`, `Y`, `a`, `f`, `l`, `n
 - Fahrten mit ausgeschaltetem Laser nutzen einen festen Freifahrt-Wert der
   Konfiguration, nicht `ESC S`. Wie schnell genau, ist nicht ermittelt; die
   Zeitschätzung rechnet Leerfahrten weiter wie Java.
+
+**Zusatzbefehle (`ILS3A2.EXE` 8.20b und 8.23b gleich).** Befehle, die die
+Herstellertreiber über LibLaserCut hinaus kennen. VisiCutR sendet keinen
+davon.
+
+- `ESC I <Länge> <Daten>`: Infoblock, den die Firmware ungelesen
+  überspringt. Die Länge ist 1 Byte, nach `ESC v` mit Hauptversion ≠ 0
+  2 Byte (Big Endian). `ESC v <a> <b> <c>` meldet die Formatversion
+  (Anzeige „Format=abc“). Der 4000-Treiber sendet entweder `ESC v 01 01 02`
+  oder `ESC I 01 7E`.
+- `ESC f <Maske>`: je Stift ein Bit, das höchstwertige für den ersten Stift
+  (`ESC N` 0). `ESC V` löscht die Maske; der 4000-Treiber sendet `ESC f`
+  direkt nach `ESC V`, nur wenn eine Treiberoption gesetzt ist (vermutlich
+  `PulseMode`, in allen Konfigurationen 0). Für markierte Stifte gibt die
+  Firmware im Vektormodus keinen Leistungswert aus. Stattdessen pulst sie
+  den Laser über einen Zeitgeberbaustein: `ESC P` zählt dann als Frequenz
+  (Wert / 10), die Pulsbreite folgt aus Leistung (`ESC J`) und Frequenz.
+  Einheiten nicht ermittelt.
+- `ESC K`: steht in keiner Sprungtabelle (8.20b und 8.23b); die Firmware
+  meldet „Error: bad command“. Nur der Treiber des 3000 sendet ihn, der des
+  4000 nicht.
+- `ESC A <Byte>`: schreibt das Byte als „Aux GPO“ in ein Ausgangsregister
+  der Steuerkarte, je Bit ein Ausgang. Welcher Ausgang die Druckluft
+  schaltet, ist weiter unbekannt.
+- `ZA <int32>` fährt die Z-Achse auf eine absolute Lage, `ZR <int32>`
+  relativ, `ZO` auf 0; andere `Z…` gelten als falscher Befehl. Der Wert
+  zählt in Schritten von `zpitch` = 0,001002 mm (etwa 998 Schritte je mm).
+  Nach dem Autofokus setzt die Firmware die Z-Lage auf 0: `ZA` ist also ein
+  Versatz zum Fokuspunkt, `ZA 0` und `ZO` fahren in den Fokus zurück. Das
+  passt zum Treiber (`ZaxisOffset` je Satz, am Ende `ZA 0`). Richtung des
+  Vorzeichens und Grenzen sind nicht ermittelt. Die 4000-Treiber `_S` und
+  `_S_F` haben `ZaxisMode=0` und `AirBlow=0`, senden beides also nicht.
 
 **Konfiguration `I4000ADV.CFG` (iLaser 4000).** `xypitch` 0,003175 mm
 (8000 Schritte/Zoll, der Treiber sendet 4000-DPI-Werte), Verfahrweg

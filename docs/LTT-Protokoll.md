@@ -434,7 +434,10 @@ Steuerprogramm „V4S 8.23b“ (29.03.2019), der Windows-Treiber „iLASER-4000�
 6.5 (Mai/Juni 2019, auch im Treiberpaket vom 26.01.2023 enthalten) und
 Beschleunigungsmessungen am Gerät. Nichts davon liegt im Repository;
 festgehalten sind nur Fakten für spätere Versionen. Ein Herstellerhandbuch
-zum Format wurde zum Verständnis gelesen, aber nicht übernommen.
+zum Format wurde zum Verständnis gelesen, aber nicht übernommen. 8.23b
+ändert gegenüber 8.20b nach den Meldungstexten die Türüberwachung
+(„Abnormal door open“), Laserfehler- und Verfahrbereichsmeldungen
+(„Out of table range“); Befehle und Auflösung bleiben gleich.
 
 **Aufbau.** Die Steuerung ist ein PC mit FreeDOS. `AUTOEXEC.BAT` startet
 Netzwerk, Update-Prüfung und je nach Hardware-Jumpern (Port `0x339`, Bits
@@ -463,6 +466,14 @@ für `0`, `1`, `A`–`F`, `H`–`J`, `L`–`T`, `V`, `W`, `Y`, `a`, `f`, `l`, `n
 - Fahrten mit ausgeschaltetem Laser nutzen einen festen Freifahrt-Wert der
   Konfiguration, nicht `ESC S`. Wie schnell genau, ist nicht ermittelt; die
   Zeitschätzung rechnet Leerfahrten weiter wie Java.
+- `ESC P <int16>`: Werte unter 128 sind der Pulsabstand in 1/4000 Zoll
+  (Java und VisiCutR senden 4, also 1000 PPI). Ab 128 gilt der Wert als
+  PPI, der Abstand ist dann 4000 / PPI gerundet. Der kleinste Abstand ist 1,
+  also höchstens 4000 PPI (`maxppi=4000`). Der Wert gilt je Stift
+  (`ESC N`).
+- Vektorkoordinaten (`PA`/`PR`) zählen immer in 1/4000 Zoll; eine weitere
+  Auflösungseinstellung gibt es in der Firmware nicht. `ESC D` stellt nur
+  den Pixelabstand der Rasterzeilen ein.
 
 **Zusatzbefehle (`ILS3A2.EXE` 8.20b und 8.23b gleich).** Befehle, die die
 Herstellertreiber über LibLaserCut hinaus kennen. VisiCutR sendet keinen
@@ -475,8 +486,9 @@ davon.
   oder `ESC I 01 7E`.
 - `ESC f <Maske>`: je Stift ein Bit, das höchstwertige für den ersten Stift
   (`ESC N` 0). `ESC V` löscht die Maske; der 4000-Treiber sendet `ESC f`
-  direkt nach `ESC V`, nur wenn eine Treiberoption gesetzt ist (vermutlich
-  `PulseMode`, in allen Konfigurationen 0). Für markierte Stifte gibt die
+  direkt nach `ESC V`, nur wenn eine Treiberoption gesetzt ist. Das passt
+  zu den `_F`-Varianten des Treibers („fest einstellbare Pulsfrequenz beim
+  Schneiden“, siehe Treibervarianten). Für markierte Stifte gibt die
   Firmware im Vektormodus keinen Leistungswert aus. Stattdessen pulst sie
   den Laser über einen Zeitgeberbaustein: `ESC P` zählt dann als Frequenz
   (Wert / 10), die Pulsbreite folgt aus Leistung (`ESC J`) und Frequenz.
@@ -526,6 +538,30 @@ Herstellertreiber nutzt verbundene Kurven standardmäßig nicht),
 gleich oder größer), Kurvenwinkel-Tabelle mit 15 Stufen bis 180°.
 Die Zeilenversatz-Tabelle unterscheidet sich von der des FAU-Geräts
 (−2 … −23); deshalb ist sie je Gerät einstellbar und kalibrierbar.
+
+**Treibervarianten 6.5.** Laut Novograv (Januar 2023) gibt es vier:
+`_S` graviert und schneidet mit 1000 DPI Systemauflösung
+(`ResoList`/`PPIList` 166 … 1000); `_C` schneidet nur, dafür mit 4000 DPI
+(`ResoList`/`PPIList` 667 … 4000); `_S_F` und `_C_F` arbeiten wie diese,
+aber mit fest einstellbarer Pulsfrequenz beim Schneiden (`ESC f`). Die
+Firmware unterscheidet die Varianten nicht: Sie erhält nur feinere
+Koordinaten und andere `ESC P`-Werte. VisiCutR rundet Vektoren wie Java auf
+500 DPI und schneidet mit 1000 PPI. Feinere Vektoren bis 4000 DPI und bis
+zu 4000 PPI wären ohne Änderung der Firmware möglich, sind aber nicht
+erprobt.
+
+**Stempel im Treiber 6.5.** Der Dialog hat „Stempel“ mit einem Feld
+„Offset“ (`StampOffset`, Standard 0), dazu „Invertieren“ (`Invert`,
+`InvertByVector`, `InvertExpand=50`) und „Spiegeln“ (`Mirror`). Der Treiber
+nimmt den Offset modulo 15, also 0 … 14 Pixel. Beim Rastern trägt er die
+Gravurfläche in so vielen Schritten mit einem 3 × 3-Fenster ab (Puffer von
+16 Zeilen, je nach Richtung von oben oder unten). So erhält jedes Pixel
+seinen Abstand zur nächsten stehenbleibenden Fläche, und Pixel nahe der
+Kante werden schwächer graviert als innen: Es entsteht eine schräge Schulter
+statt einer senkrechten Kante. Wie die Stufen zum Gerät kommen
+(vermutlich über die 14 Werte der `PowerScale`), ist nicht untersucht.
+`InvertExpand` erweitert die invertierte Fläche um einen Rand (Einheit nicht
+ermittelt), `InvertByVector` wählt ein zweites Invertierverfahren.
 
 **Zeitschätzung.** Seit 0.7 enthält sie die Verweilzeit am Konturstart
 (`pierce_delay_ms`, Standard 50 ms wie `pddelay`) und rechnet Gravieren mit

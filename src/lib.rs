@@ -8,7 +8,11 @@ pub mod import;
 pub mod inkscape;
 pub mod instance;
 pub mod lab;
-pub mod lens_calibration;
+// Objektivkalibrierung mit Schachbrett (calibration.npz, für visicutr-lenscal)
+// ist abgeschaltet: Auf der FAU-Laserkamera erhöhte sie nur den Fehler
+// (≈ 0,3 mm → ≈ 1,1 mm); die Kreuze der Kamerakalibrierung bestimmen die
+// Verzeichnung genauer.
+// pub mod lens_calibration;
 pub mod ltt;
 pub mod mapping;
 pub mod materials;

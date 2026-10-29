@@ -1,3 +1,8 @@
+//! ABGESCHALTET (nicht in `Cargo.toml` aufgeführt): Auf der FAU-Laserkamera
+//! erhöhte die Objektivkalibrierung aus `calibration.npz` nur den Fehler
+//! (≈ 0,3 mm → ≈ 1,1 mm); die Kreuze der Kamerakalibrierung bestimmen die
+//! Verzeichnung genauer.
+//!
 //! Objektivkalibrierung mit Schachbrett wie fau-fablab/undistort-webcam, aber
 //! ohne Docker und OpenCV: Fotos von der Kamera-URL aufnehmen oder laden,
 //! Schachbrett erkennen, kalibrieren und `calibration.npz` speichern.

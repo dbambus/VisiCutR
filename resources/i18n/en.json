@@ -1052,5 +1052,7 @@
   "{count} Fotos gespeichert": "{count} photos saved",
   "{found} von {count} Fotos mit Schachbrett": "{found} of {count} photos with chessboard",
   "{name} fehlt in der Kalibrierdatei": "{name} is missing from the calibration file",
-  "{name}: kein Schachbrett erkannt": "{name}: no chessboard detected"
+  "{name}: kein Schachbrett erkannt": "{name}: no chessboard detected",
+  "{count} Punkte, Genauigkeit ≈ {mm} mm": "{count} points, accuracy ≈ {mm} mm",
+  "Größter Abstand eines Kalibrierkreuzes von der Stelle, an die die Kalibrierung es rechnet; zwischen den Kreuzen kann der Fehler größer sein.": "Largest distance of a calibration cross from where the calibration places it; between the crosses the error can be larger."
 }

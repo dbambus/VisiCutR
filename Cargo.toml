@@ -3,6 +3,8 @@ name = "visicutr"
 version = "0.25.0"
 edition = "2024"
 rust-version = "1.88"
+# Programme sind unten einzeln aufgeführt (visicutr-lenscal ist abgeschaltet).
+autobins = false
 license = "LGPL-3.0-or-later"
 repository = "https://github.com/dbambus/VisiCutR"
 description = "VisiCutR laser job preparation for Windows, Linux, and macOS"
@@ -10,6 +12,22 @@ description = "VisiCutR laser job preparation for Windows, Linux, and macOS"
 [lib]
 name = "visicut_core"
 crate-type = ["rlib"]
+
+[[bin]]
+name = "visicutr"
+path = "src/main.rs"
+
+[[bin]]
+name = "visicutr-cameraserver"
+path = "src/bin/visicutr-cameraserver.rs"
+
+# visicutr-lenscal (Objektivkalibrierung mit Schachbrett, calibration.npz) ist
+# abgeschaltet: Auf der FAU-Laserkamera erhöhte sie nur den Fehler (≈ 0,3 mm →
+# ≈ 1,1 mm); die Kreuze der Kamerakalibrierung bestimmen die Verzeichnung
+# genauer. Siehe auch src/lib.rs (lens_calibration).
+# [[bin]]
+# name = "visicutr-lenscal"
+# path = "src/bin/visicutr-lenscal.rs"
 
 [features]
 screenshot = ["eframe/__screenshot"]

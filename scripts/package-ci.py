@@ -43,7 +43,11 @@ def main():
         if not binary.is_file():
             parser.error("Build the portable application with cargo build --release first")
         shutil.copy2(binary, stage / f"visicutr{suffix}")
-        for tool in ["visicutr-cameraserver", "visicutr-lenscal"]:
+        # visicutr-lenscal ist abgeschaltet: Die Objektivkalibrierung mit
+        # Schachbrett erhöhte auf der FAU-Laserkamera nur den Fehler (siehe
+        # Cargo.toml).
+        # for tool in ["visicutr-cameraserver", "visicutr-lenscal"]:
+        for tool in ["visicutr-cameraserver"]:
             helper = project / "target/release" / f"{tool}{suffix}"
             if not helper.is_file():
                 parser.error("Build all binaries with cargo build --release --bins first")
@@ -104,7 +108,8 @@ def main():
             "inkscape-extension/ holds the Inkscape extension \"Add to VisiCutR\";\n"
             "VisiCutR installs it under Settings > Software add-ins.\n"
             f"visicutr-cameraserver{suffix} serves photos from a capture command.\n"
-            f"visicutr-lenscal{suffix} calibrates the camera lens with a chessboard.\n"
+            # visicutr-lenscal ist abgeschaltet (siehe Cargo.toml).
+            # f"visicutr-lenscal{suffix} calibrates the camera lens with a chessboard.\n"
             "Linux requires a graphical X11/Wayland session, OpenGL/EGL, libxkbcommon,\n"
             "and a desktop portal for file dialogs. Built on Ubuntu 24.04 (glibc 2.39).\n"
             "See README.md and docs/ for features, docs/LTT-Protokoll.md for hardware status.\n"

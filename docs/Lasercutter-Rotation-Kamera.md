@@ -81,5 +81,19 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
   Verbindung hat Fristen (Anfrage 10 s, Antwort 30 s), der Aufnahmebefehl
   wird nach 30 s beendet, Fehlerdetails stehen nur in der Konsole des
   Servers.
+- **Objektivkalibrierung mit Schachbrett**: `visicutr-lenscal` ersetzt
+  [undistort-webcam](https://github.com/fau-fablab/undistort-webcam) ohne
+  Docker und OpenCV. Es liegt neben `visicutr-cameraserver`. Die Kamera-URL
+  kommt aus den Geräten von VisiCutR oder wird eingetragen; „Foto
+  aufnehmen“ holt ein Bild, „Fotos laden …“ (oder Dateien beim Start als
+  Argumente) nimmt vorhandene. Das Schachbrett (10 × 7 Felder, 9 × 6 innere
+  Ecken, `chessboard.jpg` aus undistort-webcam) wird in jedem Foto erkannt;
+  blaue Punkte zeigen, welche Bildbereiche die anderen Fotos abdecken. 10
+  bis 20 Fotos, das Brett auch in den Bildecken und geneigt: flach liegende
+  Bretter legen die Brennweite kaum fest. „Kalibrieren“ rechnet wie
+  OpenCV `calibrateCamera` (fx, fy, cx, cy, k1, k2, p1, p2, k3) und zeigt
+  den Restfehler je Foto; „calibration.npz speichern …“ schreibt die Datei
+  im Format von undistort-webcam. Auf dessen Testfotos weicht die
+  Entzerrung im Schachbrettbereich im Mittel 0,04 px von OpenCV ab.
 
 [← Übersicht](README.md)

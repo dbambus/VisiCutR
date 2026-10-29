@@ -3,6 +3,28 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## 1.0.0 – 29.10.2026
+
+Genauere und schnellere Kamerakalibrierung und ein aufgeräumter
+Gerätebereich.
+
+- **Kalibrierkreuze:** Neue Kalibrierungen legen das Raster aus 5 × 3
+  Kreuzen bis 20 mm an den Rand des Betts, sodass fast die ganze
+  Laserfläche zwischen Kreuzen liegt. Ältere Kalibrierungen mit 50 mm Rand
+  behalten ihre Punkte; „5 × 3 Kreuze“ unter Anordnung setzt das neue
+  Raster.
+- **Genauigkeit:** Neben „Kalibrierung“ steht ab 5 Punkten der größte
+  Restfehler der Kalibrierkreuze in mm.
+- **Schnelleres Kamerabild:** Entzerrung und Passmarkensuche laufen auf
+  allen Kernen; ein 6-MP-Bild braucht etwa 40 ms statt 260 ms, bei
+  unveränderten Ergebnissen.
+- **Gerätebereich:** Unter dem Gerätenamen steht nur noch die Bettgröße;
+  Hostname und Port stehen in den Einstellungen.
+- **Objektivkalibrierung mit Schachbrett:** `visicutr-lenscal` ist
+  entwickelt, aber abgeschaltet und nicht in den Paketen: Auf der
+  FAU-Laserkamera erhöhte die Kalibrierung aus `calibration.npz` den Fehler
+  (≈ 0,3 mm → ≈ 1,1 mm); die Kreuze bestimmen die Verzeichnung genauer.
+
 ## 0.25.0 – 29.10.2026
 
 Stempel-Schulter für Gravuren, ein aufgeräumtes Repository und neue

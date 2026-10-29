@@ -1,8 +1,0 @@
-<?xml version="1.0"?>
- <mime-info xmlns='http://www.freedesktop.org/standards/shared-mime-info'>
-   <mime-type type="application/x-ls">  
-   <comment>A VisiCut LaserScript File</comment>
-   <comment xml:lang="de">Eine LaserScript-Datei für VisiCut</comment>
-   <glob pattern="*.ls"/>
-  </mime-type>
- </mime-info>

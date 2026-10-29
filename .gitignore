@@ -1,45 +1,10 @@
-/build/
-/nbproject/private/
-/dist/
-/distribute/cache/
-/distribute/VisiCut*.zip
-/distribute/*.deb
-/distribute/*.exe
-/distribute/*.pkg.tar.xz
-/distribute/linux/*.pkg.tar.xz
-/distribute/linux/pkg
-/distribute/linux/src
-/distribute/linux/PKGBUILD-tmp
-/distribute/visicut/
-/distribute/VisiCut.app/
-/settings/
-/src/main/resources/de/thomas_oster/visicut/gui/resources/splash.png
-/src/main/resources/de/thomas_oster/visicut/gui/resources/splash@*.png
-/src/main/resources/de/thomas_oster/visicut/gui/resources/VisicutAppVersion.properties
-/*-pak
-# Temporary files:
-/distribute/wintmp/
-*~
-*.orig
-
-# Maven stuff:
-/lib/nbproject/private/
-/lib/build/
+# Cargo build output and local packages (scripts/bundle-macos.sh, package-ci.py)
 /target/
+/dist/
 
-# AppImage builds
-.appimagecraft-build*/
-*.AppImage
-squashfs-root/
-
-# VisiCutR desktop applications
-/visicut-rust/target/
-/visicut-rust/dist/
+# macOS
 .DS_Store
 
-# zipped bundles
-*.zip
-*.tar*
-
-# NSIS installer
-*.exe
+# Editors
+*~
+*.orig

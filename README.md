@@ -1,80 +1,48 @@
 # VisiCutR
 
-Rust implementation of VisiCut maintained by [dbambus](https://github.com/dbambus),
-forked from [t-oster/VisiCut](https://github.com/t-oster/VisiCut).
-Prepare SVG laser jobs, save `.vcr` projects, and export or send LTT jobs for
-the FAU FabLab LTT iLaser 4000.
+Prepare laser jobs from SVG, PDF, DXF, EPS, images, G-code, VisiCut projects
+(PLF) and LaserScript, save `.vcr` projects, and export or send LTT jobs for
+the FAU FabLab LTT iLaser 4000. VisiCutR is a Rust reimplementation of
+[VisiCut](https://github.com/t-oster/VisiCut) by [dbambus](https://github.com/dbambus),
+with the same egui interface on Windows, Linux and macOS. No Java is required.
 
 ## Downloads
 
 Get the packages from [GitHub Releases](https://github.com/dbambus/VisiCutR/releases).
-Versions with a suffix such as `1.0.0-rc.2` are published as prereleases.
+Versions with a suffix such as `1.0.0-rc.2` are prereleases.
 
-| Platform | Package | Interface |
-| --- | --- | --- |
-| Windows x64 | `VisiCutR-<version>-x86_64-pc-windows-msvc.zip` | Portable egui application |
-| Linux x64 | `VisiCutR-<version>-x86_64-unknown-linux-gnu.tar.gz` | Portable egui application; Ubuntu 24.04 or compatible |
-| macOS Apple Silicon | `VisiCutR-<version>-aarch64-apple-darwin.zip` | `VisiCutR.app` with the egui application; macOS 14+ |
+| Platform | Package |
+| --- | --- |
+| Windows x64 | `VisiCutR-<version>-x86_64-pc-windows-msvc.zip` |
+| Linux x64 (Ubuntu 24.04 or compatible) | `VisiCutR-<version>-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS Apple Silicon (macOS 14+) | `VisiCutR-<version>-aarch64-apple-darwin.zip` |
 
-No Java is required. All three platforms use the same egui interface with
-the same functions; Intel Macs are not supported. The macOS application is
-signed ad hoc unless the Developer ID secrets below are configured, in which
-case it is also notarized.
-See the [implementation documentation](visicut-rust/README.md) for build
-instructions, platform requirements and features, and the
-[protocol notes](visicut-rust/PROTOCOL.md) for hardware validation status.
+## Documentation
 
-## Build and release
+The documentation (in German) is in [`docs/`](docs/README.md): installation,
+working with the application, Inkscape, Illustrator and CorelDRAW, the LTT
+protocol, the byte comparison with Java VisiCut and development.
+[CHANGELOG.md](CHANGELOG.md) lists the changes of every release.
 
-The Rust implementation is in [`visicut-rust`](visicut-rust). Its Cargo package
-and executable are called `visicutr`; the application is named **VisiCutR**.
-Rust 1.90.0 is selected by the included toolchain file.
+## Build
+
+Rust 1.90 is selected by `rust-toolchain.toml`.
 
 ```sh
-cd visicut-rust
 cargo test --locked --all-targets
-cargo build --locked --release --bin visicutr
-# Native macOS app:
-bash scripts/bundle-macos.sh
+cargo run --release --bin visicutr
+bash scripts/bundle-macos.sh   # macOS app in dist/VisiCutR.app
 ```
 
-[GitHub Actions](https://github.com/dbambus/VisiCutR/actions/workflows/rust-desktop.yml)
-uses GitHub-hosted Windows, Linux and Apple Silicon Mac runners. Pull
-requests, changes on `master`/`main`, and manual runs build downloadable
-artifacts.
+A push to `master` builds all three platforms and publishes a release when
+the version in `Cargo.toml` has none yet; see [docs/Entwicklung.md](docs/Entwicklung.md).
 
-**Releases.** A push to `master` publishes a full GitHub release `v<version>`
-(not a pre-release, marked as latest) when the version in
-`visicut-rust/Cargo.toml` has no release yet; its description is the matching
-section of [`visicut-rust/CHANGELOG.md`](visicut-rust/CHANGELOG.md). Later
-pushes with the same version only build artifacts. To release, raise the
-version in `Cargo.toml`/`Cargo.lock`, add a `## <version> – <date>` section to
-the changelog and merge to `master`. Pushing a `v*` tag publishes or updates
-the release of that tag (tag and Cargo version must match; tags with a suffix
-such as `-rc.1` become pre-releases). Release archives include licenses and
-documentation; `SHA256SUMS.txt` is attached.
+## Java VisiCut
 
-**macOS signing.** Without secrets the app is signed ad hoc. With these
-repository secrets it is signed with a Developer ID (hardened runtime) and,
-if the Apple ID values are present too, notarized and stapled:
+This repository is a fork of [t-oster/VisiCut](https://github.com/t-oster/VisiCut).
+The Java source tree is no longer on `master`; the tag `java-reference` holds
+the state the byte comparison was made with, and `scripts/java-parity/`
+builds it on demand ([docs/Java-Vergleich.md](docs/Java-Vergleich.md)).
 
-| Secret | Content |
-| --- | --- |
-| `MACOS_CERTIFICATE` | Developer ID Application certificate with private key as `.p12`, base64-encoded (`base64 -i cert.p12`) |
-| `MACOS_CERTIFICATE_PASSWORD` | Password of the `.p12` file |
-| `MACOS_SIGN_IDENTITY` | e.g. `Developer ID Application: Name (TEAMID)` |
-| `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` | Apple ID, team ID and an app-specific password for `notarytool` |
-
-Locally, `MACOS_SIGN_IDENTITY=… bash scripts/bundle-macos.sh` signs with a
-certificate from the login keychain.
-
-## Original VisiCut
-
-The original Java source tree and its LGPL notices are retained in this fork.
-Its distribution workflow can be started manually. The upstream external
-build server and legacy release upload only run for `t-oster/VisiCut`.
-
-- [Original project](https://www.visicut.org)
-- [Java development guide](https://github.com/t-oster/VisiCut/wiki/Development:-Getting-started)
-- [LibLaserCut](https://github.com/t-oster/LibLaserCut)
-- License: [LGPL v3 or later](COPYING.LESSER), with the accompanying [GPL v3](COPYING).
+License: [LGPL v3 or later](COPYING.LESSER), with the accompanying [GPL v3](COPYING);
+see [LICENSE](LICENSE).

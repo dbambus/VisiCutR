@@ -240,6 +240,8 @@ Wiederholung nach Fehlern.
   dokumentiert. Der Rust-Treiber sendet daher ebenfalls nichts. Stattdessen
   zeigt die App nach dem Senden den Gerätehinweis (`jobSentText` aus den
   VisiCut-Einstellungen, beim FAU-Gerät „Autofokus machen, Druckluft an“).
+  Für die Druckluft ist der Ausgang (Pin) am Gerät unbekannt; sie wird nicht
+  weiter verfolgt (siehe Hinweise aus dem Herstellertreiber).
 - SVG und `.vcr` werden unterstützt. Version 0.2 ergänzt eine native
   AppKit-/SwiftUI-Oberfläche und eine Auswahl der FAU-LTT-Materialprofile.
   VisiCut-PLF-Dateien werden mit Geometrie und den Zuordnungen der SVG-Teile
@@ -406,7 +408,9 @@ Protokollfakten. Sie gelten für den iLaser 3000 und sind für den iLaser 4000
 - Druckluft `ESC A <Byte>`: nur wenn der Treiber-Schalter `AirBlow` = 1 ist;
   das Byte kommt aus `AirBlowFlag` und gilt je Stift/Parametersatz. Es folgt
   auf `ESC J` (Leistung), `ESC S` (Geschwindigkeit) und `ESC P` (PPI) des
-  Satzes. Vor `ESC BYE` sendet der Treiber `ESC A 00`.
+  Satzes. Vor `ESC BYE` sendet der Treiber `ESC A 00`. Welcher Ausgang
+  (Pin) am iLaser 4000 die Druckluft schaltet, ist unbekannt; die Druckluft
+  über `ESC A` wird deshalb nicht weiter verfolgt.
 - Z-Achse `ZA <int32>`: nur bei `ZaxisMode` = 1, an derselben Stelle vor
   `ESC A`. Wert = `ZaxisOffset / 100 / (ZaxisPitch × 10⁻⁸)`, also ein Offset
   je Satz in Motorschritten; vor `ESC BYE` folgt `ZA 0`.
@@ -418,7 +422,7 @@ Protokollfakten. Sie gelten für den iLaser 3000 und sind für den iLaser 4000
   (wie LibLaserCut), eigene Gravurverschiebung je Geschwindigkeit.
 
 Vor einer Nutzung am iLaser 4000 muss ein beaufsichtigter Test zeigen, ob
-das Gerät `ESC A` bzw. `ZA` versteht; besser ist der Treiber des 4000.
+das Gerät `ZA` versteht; besser ist der Treiber des 4000.
 
 ## Gerätesoftware des iLaser 4000 (Firmware-Analyse)
 

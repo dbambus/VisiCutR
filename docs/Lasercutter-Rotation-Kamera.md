@@ -36,6 +36,8 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
   Werkstückdurchmesser einschalten (siehe [LTT-Protokoll](LTT-Protokoll.md)).
 - **Autofokus, Druckluft, Absaugung** steuert der LTT-Treiber nicht – auch
   nicht im Java-Original. Der Gerätehinweis erinnert nach dem Senden daran.
+  Für die Druckluft ist der Ausgang (Pin) am Gerät unbekannt; sie wird nicht
+  weiter verfolgt.
 - **Kamera** (⌘K): Das Foto der Kamera-URL wird über die Homographie der
   Kalibrierung entzerrt und unter das Arbeitsbett gelegt (⇧⌘K aktualisiert).
   Das FAU-Kamerabild ist nur im FAU-Netz erreichbar.

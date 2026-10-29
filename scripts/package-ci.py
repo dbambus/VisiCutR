@@ -54,6 +54,8 @@ def main():
         (stage / "docs").mkdir()
         for page in sorted((project / "docs").glob("*.md")):
             shutil.copy2(page, stage / "docs" / page.name)
+        # Screenshots of the README.
+        shutil.copytree(project / "docs/images", stage / "docs/images")
         # Inkscape-Erweiterung zum Installieren von Hand; VisiCutR installiert
         # sie auch selbst (Einstellungen > Allgemein).
         shutil.copytree(project / "resources/inkscape", stage / "inkscape-extension",

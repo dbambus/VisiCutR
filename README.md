@@ -6,6 +6,12 @@ the FAU FabLab LTT iLaser 4000. VisiCutR is a Rust reimplementation of
 [VisiCut](https://github.com/t-oster/VisiCut) by [dbambus](https://github.com/dbambus),
 with the same egui interface on Windows, Linux and macOS. No Java is required.
 
+![Preparing a sign: engraving, marking and cutting assigned by colour rules, material and thickness from the FAU library](docs/images/prepare.png)
+
+| Job preview with time estimate | Material library |
+| --- | --- |
+| ![Preview of the three LTT jobs with estimated time, steps and timeline](docs/images/preview.png) | ![Material library with the FAU profiles per thickness and operation](docs/images/materials.png) |
+
 ## Downloads
 
 Get the packages from [GitHub Releases](https://github.com/dbambus/VisiCutR/releases).

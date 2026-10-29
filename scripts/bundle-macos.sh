@@ -33,6 +33,7 @@ cp README.md "$app/Contents/Resources/README.md"
 # Die Anleitung (Wiki-Seiten ohne die Prüfberichte).
 mkdir -p "$app/Contents/Resources/docs"
 cp docs/*.md "$app/Contents/Resources/docs/"
+cp -R docs/images "$app/Contents/Resources/docs/images"
 cp resources/materials.json "$app/Contents/Resources/materials.json"
 # Inkscape-Erweiterung zum Installieren von Hand (VisiCutR installiert sie auch selbst).
 cp -R resources/inkscape "$app/Contents/Resources/inkscape-extension"

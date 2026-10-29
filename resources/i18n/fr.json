@@ -1052,5 +1052,7 @@
   "{count} Fotos gespeichert": "{count} photos enregistrées",
   "{found} von {count} Fotos mit Schachbrett": "{found} photos sur {count} avec damier",
   "{name} fehlt in der Kalibrierdatei": "{name} manque dans le fichier de calibration",
-  "{name}: kein Schachbrett erkannt": "{name} : aucun damier détecté"
+  "{name}: kein Schachbrett erkannt": "{name} : aucun damier détecté",
+  "{count} Punkte, Genauigkeit ≈ {mm} mm": "{count} points, précision ≈ {mm} mm",
+  "Größter Abstand eines Kalibrierkreuzes von der Stelle, an die die Kalibrierung es rechnet; zwischen den Kreuzen kann der Fehler größer sein.": "Plus grand écart d'une croix de calibration par rapport à l'endroit où la calibration la place ; entre les croix, l'erreur peut être plus grande."
 }

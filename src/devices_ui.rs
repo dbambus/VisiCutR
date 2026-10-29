@@ -714,10 +714,13 @@ impl DeviceUi {
                                     device
                                         .camera_calibration
                                         .as_ref()
-                                        .map_or(tr("keine").into(), |c| {
-                                            tr!("{count} Punkte", count = c.reference_points.len())
-                                        }),
-                                );
+                                        .map_or(tr("keine").into(), accuracy_text),
+                                )
+                                .on_hover_text(tr(
+                                    "Größter Abstand eines Kalibrierkreuzes von der Stelle, an \
+                                     die die Kalibrierung es rechnet; zwischen den Kreuzen \
+                                     kann der Fehler größer sein.",
+                                ));
                                 calibrate = ui
                                     .add_enabled(
                                         !device.camera_url.is_empty(),
@@ -1146,7 +1149,9 @@ impl LensChoice {
 /// Anordnung der Kalibrierkreuze.
 #[derive(Clone, Copy, PartialEq)]
 enum Grid {
-    /// 5 × 3 Kreuze bis 50 mm an den Rand des Betts (auch für die Linse).
+    /// 5 × 3 Kreuze bis 20 mm an den Rand des Betts (auch für die Linse):
+    /// fast die ganze Laserfläche liegt zwischen Kreuzen, kaum etwas wird
+    /// extrapoliert.
     Fine,
     /// 3 × 2 Kreuze wie bisher (200/500/800 × 120/480 mm).
     Coarse,
@@ -1174,7 +1179,7 @@ impl Grid {
 
     fn points(self) -> Vec<[f64; 2]> {
         let (xs, ys): (&[f64], &[f64]) = match self {
-            Self::Fine => (&[50.0, 275.0, 500.0, 725.0, 950.0], &[50.0, 300.0, 550.0]),
+            Self::Fine => (&[20.0, 260.0, 500.0, 740.0, 980.0], &[20.0, 300.0, 580.0]),
             Self::Coarse => (&[200.0, 500.0, 800.0], &[120.0, 480.0]),
         };
         ys.iter()
@@ -1234,18 +1239,40 @@ fn set_grid(c: &mut Calibration, grid: Grid) {
     }
 }
 
+/// Restfehler einer Kalibrierung: im Mittel (RMS) und höchstens in Pixeln,
+/// dazu Pixel je mm auf dem Bett.
+fn residual_error(points: &CameraCalibration) -> Option<(f64, f64, f64)> {
+    let residuals = camera::residuals(points).ok()?;
+    let mapping = camera::mapping(points).ok()?;
+    let (a, b) = (
+        mapping.to_pixel([0.0, 0.0]),
+        mapping.to_pixel([1000.0, 600.0]),
+    );
+    let per_mm = ((b[0] - a[0]).abs() / 1000.0).max((b[1] - a[1]).abs() / 600.0);
+    let worst = residuals.iter().cloned().fold(0.0, f64::max);
+    let rms = (residuals.iter().map(|r| r * r).sum::<f64>() / residuals.len() as f64).sqrt();
+    (per_mm > 0.0).then_some((rms, worst, per_mm))
+}
+
+/// Ungefähre Genauigkeit einer gespeicherten Kalibrierung für die
+/// Einstellungen: größter Restfehler in mm. Bis 4 Punkte gehen alle genau
+/// auf, ein Restfehler sagt dann nichts.
+fn accuracy_text(points: &CameraCalibration) -> String {
+    let count = points.reference_points.len();
+    match residual_error(points) {
+        Some((_, worst, per_mm)) if count > 4 => tr!(
+            "{count} Punkte, Genauigkeit ≈ {mm} mm",
+            count = count,
+            mm = format!("{:.1}", worst / per_mm)
+        ),
+        _ => tr!("{count} Punkte", count = count),
+    }
+}
+
 /// Restfehler der Punkte als Text, in Pixeln und ungefähr in mm.
 fn update_quality(c: &mut Calibration) {
     c.quality = fitted(c).and_then(|points| {
-        let residuals = camera::residuals(&points).ok()?;
-        let mapping = camera::mapping(&points).ok()?;
-        let (a, b) = (
-            mapping.to_pixel([0.0, 0.0]),
-            mapping.to_pixel([1000.0, 600.0]),
-        );
-        let per_mm = ((b[0] - a[0]).abs() / 1000.0).max((b[1] - a[1]).abs() / 600.0);
-        let worst = residuals.iter().cloned().fold(0.0, f64::max);
-        let rms = (residuals.iter().map(|r| r * r).sum::<f64>() / residuals.len() as f64).sqrt();
+        let (rms, worst, per_mm) = residual_error(&points)?;
         let mut text = tr!(
             "Restfehler: im Mittel {rms} px, höchstens {max} px (≈ {mm} mm)",
             rms = format!("{rms:.1}"),

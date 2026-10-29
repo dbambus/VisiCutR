@@ -26,8 +26,10 @@ cp target/release/visicutr "$app/Contents/MacOS/visicutr"
 sign "$app/Contents/MacOS/visicutr"
 cp target/release/visicutr-cameraserver "$app/Contents/MacOS/visicutr-cameraserver"
 sign "$app/Contents/MacOS/visicutr-cameraserver"
-cp target/release/visicutr-lenscal "$app/Contents/MacOS/visicutr-lenscal"
-sign "$app/Contents/MacOS/visicutr-lenscal"
+# visicutr-lenscal ist abgeschaltet: Die Objektivkalibrierung mit Schachbrett
+# erhöhte auf der FAU-Laserkamera nur den Fehler (siehe Cargo.toml).
+# cp target/release/visicutr-lenscal "$app/Contents/MacOS/visicutr-lenscal"
+# sign "$app/Contents/MacOS/visicutr-lenscal"
 cp resources/icon/VisiCutR.icns "$app/Contents/Resources/VisiCutR.icns"
 cp COPYING "$app/Contents/Resources/COPYING"
 cp COPYING.LESSER "$app/Contents/Resources/COPYING.LESSER"

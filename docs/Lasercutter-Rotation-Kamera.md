@@ -57,7 +57,11 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
   und auf Restmaterial markieren (je Marker ein 10-mm-Kreuz mit
   Zählstrichen wie in VisiCut). Danach ein Foto aufnehmen, die nummerierten
   Marker auf die Kreuze ziehen und übernehmen. Mindestens vier Punkte, nicht
-  auf einer Linie. Neue Kalibrierungen nutzen ein Raster aus 5 × 3 Kreuzen.
+  auf einer Linie. Neue Kalibrierungen nutzen ein Raster aus 5 × 3 Kreuzen
+  bis 20 mm an den Rand des Betts, damit fast die ganze Laserfläche zwischen
+  Kreuzen liegt. Ältere Kalibrierungen mit 50 mm Rand behalten ihre Punkte;
+  „5 × 3 Kreuze“ unter Anordnung setzt das neue Raster. Liegt ein Kreuz
+  außerhalb des Kamerabilds, wird es mit „−“ entfernt.
   „Kreuze erkennen“ setzt die Punkte auf die Kreuzmitten; mit vorhandener
   Kalibrierung geschieht das nach dem Foto automatisch. Im Foto lässt sich
   zoomen (Zwei-Finger-Zoom, ⌘/Strg + Mausrad) und mit den Pfeiltasten
@@ -65,6 +69,9 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
 - **Objektiv**: Ab 6 Kreuzen bestimmt die Kalibrierung die radiale
   Verzeichnung (k1, ab 10 Kreuzen auch k2). Das Profil „Raspberry Pi Camera
   v2“ (IMX219, 3,04 mm) liefert Bildmitte, Brennweite und Startwert.
+- **Genauigkeit**: Neben „Kalibrierung“ steht ab 5 Punkten der größte
+  Restfehler der Kalibrierkreuze in mm. Zwischen den Kreuzen kann der Fehler
+  größer sein.
 - **Passmarken**: Runde Zielscheiben-Aufkleber (Ring mit Punkt) am Rahmen
   werden beim Kalibrieren erkannt und gespeichert. Spätere Kamerabilder
   werden daran nachgeführt, wenn sich die Kamera z. B. mit dem Deckel bewegt.
@@ -81,6 +88,9 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
   Verbindung hat Fristen (Anfrage 10 s, Antwort 30 s), der Aufnahmebefehl
   wird nach 30 s beendet, Fehlerdetails stehen nur in der Konsole des
   Servers.
+<!-- Abgeschaltet: Auf der FAU-Laserkamera erhöhte die Objektivkalibrierung
+     aus calibration.npz nur den Fehler (≈ 0,3 mm → ≈ 1,1 mm); die Kreuze der
+     Kamerakalibrierung bestimmen die Verzeichnung genauer.
 - **Objektivkalibrierung mit Schachbrett**: `visicutr-lenscal` ersetzt
   [undistort-webcam](https://github.com/fau-fablab/undistort-webcam) ohne
   Docker und OpenCV. Es liegt neben `visicutr-cameraserver`. Die Kamera-URL
@@ -95,5 +105,6 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
   den Restfehler je Foto; „calibration.npz speichern …“ schreibt die Datei
   im Format von undistort-webcam. Auf dessen Testfotos weicht die
   Entzerrung im Schachbrettbereich im Mittel 0,04 px von OpenCV ab.
+-->
 
 [← Übersicht](README.md)

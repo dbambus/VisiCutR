@@ -1,3 +1,8 @@
+//! ABGESCHALTET (nicht in `lib.rs` eingebunden): Auf der FAU-Laserkamera
+//! erhöhte die Objektivkalibrierung aus `calibration.npz` nur den Fehler
+//! (≈ 0,3 mm → ≈ 1,1 mm); die Kreuze der Kamerakalibrierung bestimmen die
+//! Verzeichnung genauer.
+//!
 //! Lens calibration from chessboard photos, as OpenCV `findChessboardCorners`,
 //! `cornerSubPix` and `calibrateCamera` with default flags do it in
 //! fau-fablab/undistort-webcam: pinhole camera (fx, fy, cx, cy, no skew) with

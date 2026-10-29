@@ -1052,5 +1052,7 @@
   "{count} Fotos gespeichert": "{count} foto's opgeslagen",
   "{found} von {count} Fotos mit Schachbrett": "{found} van {count} foto's met schaakbord",
   "{name} fehlt in der Kalibrierdatei": "{name} ontbreekt in het kalibratiebestand",
-  "{name}: kein Schachbrett erkannt": "{name}: geen schaakbord herkend"
+  "{name}: kein Schachbrett erkannt": "{name}: geen schaakbord herkend",
+  "{count} Punkte, Genauigkeit ≈ {mm} mm": "{count} punten, nauwkeurigheid ≈ {mm} mm",
+  "Größter Abstand eines Kalibrierkreuzes von der Stelle, an die die Kalibrierung es rechnet; zwischen den Kreuzen kann der Fehler größer sein.": "Grootste afstand van een kalibratiekruis tot de plek waar de kalibratie het plaatst; tussen de kruisen kan de fout groter zijn."
 }

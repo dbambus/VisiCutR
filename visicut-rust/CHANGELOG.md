@@ -3,6 +3,43 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## 0.24.0 – 29.10.2026
+
+Korrekturen aus dem Byte-Vergleich mit Java-VisiCut: Die Seite darf über
+den Bettrand ragen, VisiCut-Projekte und LaserScripts kommen an wie in
+VisiCut, „Nur Umriss“ behält Löcher.
+
+- **Bettrand:** Nur die Zeichnung muss im Arbeitsbett liegen, nicht die
+  ganze Seite, wie in VisiCut. Eine A4-Seite aus Inkscape mit einer kleinen
+  Zeichnung lässt sich damit bis an den unteren und rechten Bettrand
+  schieben; Ziehen, Pfeiltasten und „Zentrieren“ richten sich nach der
+  Zeichnung, und das Senden lehnt solche Aufträge nicht mehr ab.
+- **VisiCut-Projekte (PLF):** Eine geöffnete PLF liegt am Bettursprung wie in
+  VisiCut; bisher waren alle Teile um die Lage des vorigen Motivs verschoben
+  (in einem neuen Projekt 10 mm nach rechts und unten). DXF-Teile einer PLF
+  liegen jetzt richtig; bisher waren sie um die Höhe der Zeichnung zu tief,
+  bei negativen Koordinaten seitlich verschoben und bei Zeichnungen in Zoll
+  falsch skaliert.
+- **LaserScript:** Leistung und Geschwindigkeit, die ein Skript mit
+  `set("power", …)` und `set("speed", …)` setzt, gelten für die folgenden
+  Linien, die Linien laufen in der Reihenfolge des Skripts und liegen auf
+  ganzen Maschinenpixeln, wie in VisiCut. Die mitgelieferten Leistungs-,
+  Geschwindigkeits- und Fokustestmuster lasern damit wie dort; bisher galten
+  überall die Werte des Schritts. Der Import weist darauf hin; in der
+  Objektliste steht ein Skript als mehrere Objekte „LaserScript“.
+- **Nur Umriss:** Ein Rahmen oder Ring, der als ein Pfad mit Loch gezeichnet
+  ist (Inkscape: `fill-rule:evenodd`), behält im Umriss sein Loch, auch ohne
+  Füllung; bisher wurde nur die Außenkante geschnitten. Die Umrisse beginnen
+  an derselben Ecke und laufen in dieselbe Richtung wie in VisiCut.
+- **LTT-Ausgabe:** Aufträge mit mehreren Schritten senden die Pulsrate
+  (`ESC P`) nur einmal wie VisiCut, nicht zu Beginn jedes Schritts.
+- **Byte-Vergleich mit Java-VisiCut:** 878 Vergleiche statt 249, darunter die
+  Reihenfolgen „Wie in der Datei“, „Nächster Pfad“ und „Kleinste zuerst“, die
+  Rotationseinheit, Zuordnungen nach Farbe, Breite, Typ und Ebene, „Nur
+  Umriss“, gemischte Verfahren, VisiCut-Projekte sowie VisiCuts Beispiele für
+  parametrische SVG und LaserScript; 772 sind byte-gleich, die übrigen sind
+  begründet (`scripts/java-parity/AUDIT-2026-10-28.md`).
+
 ## 0.23.0 – 28.10.2026
 
 Die Schriftauswahl zeigt jede Schrift in ihrer eigenen Schrift und jeden

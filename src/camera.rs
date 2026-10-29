@@ -473,17 +473,53 @@ pub fn correct(
         .max((top[1] - bottom[1]).abs() / bed_height_mm)
         .min(max_width as f64 / bed_width_mm)
         .max(0.1);
-    let width = (bed_width_mm * scale) as u32;
-    let height = (bed_height_mm * scale) as u32;
-    RgbaImage::from_fn(width.max(1), height.max(1), |x, y| {
-        let p = mapping.to_pixel([(x as f64 + 0.5) / scale, (y as f64 + 0.5) / scale]);
-        if p[0] >= 0.0 && p[1] >= 0.0 && p[0] < input.width() as f64 && p[1] < input.height() as f64
-        {
-            *input.get_pixel(p[0] as u32, p[1] as u32)
-        } else {
-            image::Rgba([128, 128, 128, 255])
+    let width = ((bed_width_mm * scale) as u32).max(1);
+    let height = ((bed_height_mm * scale) as u32).max(1);
+    let mut raw = vec![0u8; width as usize * height as usize * 4];
+    parallel_rows(&mut raw, width as usize * 4, |y, row| {
+        for (x, pixel) in row.chunks_exact_mut(4).enumerate() {
+            let p = mapping.to_pixel([(x as f64 + 0.5) / scale, (y as f64 + 0.5) / scale]);
+            let value = if p[0] >= 0.0
+                && p[1] >= 0.0
+                && p[0] < input.width() as f64
+                && p[1] < input.height() as f64
+            {
+                input.get_pixel(p[0] as u32, p[1] as u32).0
+            } else {
+                [128, 128, 128, 255]
+            };
+            pixel.copy_from_slice(&value);
         }
-    })
+    });
+    RgbaImage::from_raw(width, height, raw).expect("buffer has the image size")
+}
+
+/// Calls `f(y, row)` for every row of `data` (rows of `row_len` items),
+/// spread over the CPU cores in bands of consecutive rows.
+pub(crate) fn parallel_rows<T: Send>(
+    data: &mut [T],
+    row_len: usize,
+    f: impl Fn(usize, &mut [T]) + Sync,
+) {
+    let rows = data.len().checked_div(row_len).unwrap_or(0);
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let band = rows.div_ceil(threads.min(rows).max(1)).max(1);
+    if band >= rows {
+        for (y, row) in data.chunks_mut(row_len.max(1)).enumerate() {
+            f(y, row);
+        }
+        return;
+    }
+    let f = &f;
+    std::thread::scope(|scope| {
+        for (i, chunk) in data.chunks_mut(band * row_len).enumerate() {
+            scope.spawn(move || {
+                for (j, row) in chunk.chunks_mut(row_len).enumerate() {
+                    f(i * band + j, row);
+                }
+            });
+        }
+    });
 }
 
 pub fn encode_png(image: &RgbaImage) -> Result<Vec<u8>, String> {
@@ -545,46 +581,110 @@ impl Blob {
     }
 }
 
-/// Labels the 4-connected areas where `mask` equals `value`.
-fn label(mask: &[bool], w: usize, value: bool) -> (Vec<u32>, Vec<Blob>) {
-    let mut labels = vec![u32::MAX; mask.len()];
-    let mut blobs = Vec::new();
-    let mut stack = Vec::new();
-    for start in 0..mask.len() {
-        if mask[start] != value || labels[start] != u32::MAX {
-            continue;
+/// The 4-connected areas of a mask, built from the runs of equal pixels in
+/// each row.
+struct Areas {
+    /// Runs as (first x, end x, value), row after row.
+    runs: Vec<(u32, u32, bool)>,
+    /// Index of the first run of each row (and the total at the end).
+    row_start: Vec<usize>,
+    /// Area of each run, as index into `blobs`.
+    blob_of: Vec<u32>,
+    /// Areas with their value, ordered by their first pixel.
+    blobs: Vec<(bool, Blob)>,
+}
+
+impl Areas {
+    fn new(mask: &[bool], w: usize) -> Self {
+        let h = mask.len() / w;
+        let mut rows: Vec<Vec<(u32, u32, bool)>> = vec![Vec::new(); h];
+        parallel_rows(&mut rows, 1, |y, out| {
+            let line = &mask[y * w..(y + 1) * w];
+            let mut start = 0;
+            for x in 1..=w {
+                if x == w || line[x] != line[start] {
+                    out[0].push((start as u32, x as u32, line[start]));
+                    start = x;
+                }
+            }
+        });
+        let mut row_start = Vec::with_capacity(h + 1);
+        let mut runs = Vec::new();
+        for row in rows {
+            row_start.push(runs.len());
+            runs.extend(row);
         }
-        let id = blobs.len() as u32;
-        let mut b = Blob {
-            area: 0.0,
-            sum: [0.0; 2],
-            min: [usize::MAX; 2],
-            max: [0; 2],
-        };
-        labels[start] = id;
-        stack.push(start);
-        while let Some(i) = stack.pop() {
-            let (x, y) = (i % w, i / w);
-            b.area += 1.0;
-            b.sum = [b.sum[0] + x as f64, b.sum[1] + y as f64];
-            b.min = [b.min[0].min(x), b.min[1].min(y)];
-            b.max = [b.max[0].max(x), b.max[1].max(y)];
-            let neighbours = [
-                (x > 0).then(|| i - 1),
-                (x + 1 < w).then(|| i + 1),
-                (y > 0).then(|| i - w),
-                (i + w < mask.len()).then(|| i + w),
-            ];
-            for j in neighbours.into_iter().flatten() {
-                if mask[j] == value && labels[j] == u32::MAX {
-                    labels[j] = id;
-                    stack.push(j);
+        row_start.push(runs.len());
+        // Vereinigen mit überlappenden gleichen Läufen der Zeile darüber; die
+        // Wurzel ist immer der früheste Lauf.
+        let mut parent: Vec<usize> = (0..runs.len()).collect();
+        fn root(parent: &mut [usize], mut i: usize) -> usize {
+            while parent[i] != i {
+                parent[i] = parent[parent[i]];
+                i = parent[i];
+            }
+            i
+        }
+        for y in 1..h {
+            let (mut a, mut b) = (row_start[y - 1], row_start[y]);
+            while a < row_start[y] && b < row_start[y + 1] {
+                let (above, here) = (runs[a], runs[b]);
+                if above.2 == here.2 && above.0 < here.1 && here.0 < above.1 {
+                    let (ra, rb) = (root(&mut parent, a), root(&mut parent, b));
+                    parent[ra.max(rb)] = ra.min(rb);
+                }
+                if above.1 <= here.1 {
+                    a += 1;
+                } else {
+                    b += 1;
                 }
             }
         }
-        blobs.push(b);
+        let mut blob_of = vec![u32::MAX; runs.len()];
+        let mut blobs: Vec<(bool, Blob)> = Vec::new();
+        for y in 0..h {
+            for i in row_start[y]..row_start[y + 1] {
+                let r = root(&mut parent, i);
+                if blob_of[r] == u32::MAX {
+                    blob_of[r] = blobs.len() as u32;
+                    blobs.push((
+                        runs[r].2,
+                        Blob {
+                            area: 0.0,
+                            sum: [0.0; 2],
+                            min: [usize::MAX; 2],
+                            max: [0; 2],
+                        },
+                    ));
+                }
+                blob_of[i] = blob_of[r];
+                let (x0, x1, _) = runs[i];
+                let (x0, x1) = (x0 as usize, x1 as usize);
+                let n = (x1 - x0) as f64;
+                let b = &mut blobs[blob_of[i] as usize].1;
+                b.area += n;
+                b.sum = [
+                    b.sum[0] + n * (x0 + x1 - 1) as f64 / 2.0,
+                    b.sum[1] + n * y as f64,
+                ];
+                b.min = [b.min[0].min(x0), b.min[1].min(y)];
+                b.max = [b.max[0].max(x1 - 1), b.max[1].max(y)];
+            }
+        }
+        Self {
+            runs,
+            row_start,
+            blob_of,
+            blobs,
+        }
     }
-    (labels, blobs)
+
+    /// The area containing pixel `(x, y)`.
+    fn at(&self, x: usize, y: usize) -> Option<&(bool, Blob)> {
+        let row = &self.runs[*self.row_start.get(y)?..*self.row_start.get(y + 1)?];
+        let i = row.partition_point(|run| run.1 as usize <= x);
+        (i < row.len()).then(|| &self.blobs[self.blob_of[self.row_start[y] + i] as usize])
+    }
 }
 
 /// Finds VisiCam-style fiducials (dark ring with a dark dot in its centre on a
@@ -596,20 +696,29 @@ pub fn find_markers(image: &RgbaImage) -> Vec<[f64; 2]> {
     if w < 32 || h < 32 {
         return Vec::new();
     }
-    let gray: Vec<f32> = image
-        .pixels()
-        .map(|p| 0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32)
-        .collect();
+    let mut gray = vec![0f32; w * h];
+    let raw = image.as_raw();
+    parallel_rows(&mut gray, w, |y, row| {
+        for (x, v) in row.iter_mut().enumerate() {
+            let p = &raw[(y * w + x) * 4..];
+            *v = 0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32;
+        }
+    });
     // Schwelle: Mitte zwischen hellstem und dunkelstem Wert der Umgebung
     // (Blöcke, je 3 × 3 Blöcke um den Pixel); kontrastarme Flächen sind hell.
     let block = (w.max(h) / 125).max(8);
     let (bw, bh) = (w.div_ceil(block), h.div_ceil(block));
-    let (mut low, mut high) = (vec![f32::MAX; bw * bh], vec![f32::MIN; bw * bh]);
-    for (i, v) in gray.iter().enumerate() {
-        let b = (i / w / block) * bw + (i % w) / block;
-        low[b] = low[b].min(*v);
-        high[b] = high[b].max(*v);
-    }
+    let mut range = vec![(f32::MAX, f32::MIN); bw * bh];
+    parallel_rows(&mut range, bw, |by, out| {
+        for y in by * block..((by + 1) * block).min(h) {
+            for (x, v) in gray[y * w..(y + 1) * w].iter().enumerate() {
+                let r = &mut out[x / block];
+                *r = (r.0.min(*v), r.1.max(*v));
+            }
+        }
+    });
+    let low: Vec<f32> = range.iter().map(|r| r.0).collect();
+    let high: Vec<f32> = range.iter().map(|r| r.1).collect();
     let around = |values: &[f32], bx: usize, by: usize, pick: fn(f32, f32) -> f32| {
         let mut r = values[by * bw + bx];
         for y in by.saturating_sub(1)..(by + 2).min(bh) {
@@ -628,16 +737,22 @@ pub fn find_markers(image: &RgbaImage) -> Vec<[f64; 2]> {
             (hi - lo > 25.0).then_some((hi + lo) / 2.0)
         })
         .collect();
-    let dark: Vec<bool> = gray
+    let mut dark = vec![false; w * h];
+    parallel_rows(&mut dark, w, |y, row| {
+        let thresholds = &threshold[(y / block) * bw..];
+        for (x, d) in row.iter_mut().enumerate() {
+            *d = thresholds[x / block].is_some_and(|t| gray[y * w + x] < t);
+        }
+    });
+    let areas = Areas::new(&dark, w);
+    let light_blobs = areas
+        .blobs
         .iter()
-        .enumerate()
-        .map(|(i, v)| threshold[(i / w / block) * bw + (i % w) / block].is_some_and(|t| *v < t))
-        .collect();
-    let (dark_labels, dark_blobs) = label(&dark, w, true);
-    let (_, light_blobs) = label(&dark, w, false);
+        .filter(|(value, _)| !value)
+        .map(|(_, b)| b);
     let largest = w.max(h) as f64;
     let mut markers = Vec::new();
-    for gap in &light_blobs {
+    for gap in light_blobs {
         let ([gw, gh], d, c) = (gap.size(), gap.diameter(), gap.center());
         let middle = [
             (gap.min[0] + gap.max[0]) as f64 / 2.0,
@@ -654,10 +769,7 @@ pub fn find_markers(image: &RgbaImage) -> Vec<[f64; 2]> {
             continue;
         }
         // In der Mitte der dunkle Punkt …
-        let Some(dot) = dark_labels
-            .get(c[1].round() as usize * w + c[0].round() as usize)
-            .and_then(|id| dark_blobs.get(*id as usize))
-        else {
+        let Some((true, dot)) = areas.at(c[0].round() as usize, c[1].round() as usize) else {
             continue;
         };
         let o = dot.center();

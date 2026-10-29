@@ -94,6 +94,7 @@ pub fn project(base: &Project, power_percent: f32) -> Project {
         bidirectional: true,
         bottom_up: false,
         dpi: 500,
+        shoulder_mm: 0.0,
     };
     let mut steps = Vec::new();
     for (speed, (marker, blocks)) in SPEEDS.iter().zip(ids) {

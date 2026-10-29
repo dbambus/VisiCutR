@@ -563,6 +563,17 @@ statt einer senkrechten Kante. Wie die Stufen zum Gerät kommen
 `InvertExpand` erweitert die invertierte Fläche um einen Rand (Einheit nicht
 ermittelt), `InvertByVector` wählt ein zweites Invertierverfahren.
 
+VisiCutR bildet die Schulter als Rasteroption „Stempel-Schulter“ in mm nach
+(`RasterSettings::shoulder_mm`, 0 … 3 mm, `raster::shoulder`). Als graviert
+gilt ein Pixel mit Grauwert unter 128; der Abstand zur nächsten
+stehenbleibenden Fläche wird als Chamfer-Abstand (1, √2) bestimmt, damit
+runde Formen rund bleiben. Die Leistung eines Pixels im Abstand d wird mit
+d / (Breite in Pixeln + 1) multipliziert; ab der vollen Breite gilt die
+ganze Leistung. Der Bildrand zählt als graviert. Bei 3D-Gravur ergibt das
+eine Leistungsrampe, bei Halbton-Rasterung eine Rampe der Punktdichte. Mit
+0 mm (Standard, auch in älteren Projekten) bleiben die Bytes unverändert.
+Am Gerät ist die Schulter noch nicht erprobt.
+
 **Zeitschätzung.** Seit 0.7 enthält sie die Verweilzeit am Konturstart
 (`pierce_delay_ms`, Standard 50 ms wie `pddelay`) und rechnet Gravieren mit
 dem 6-Fachen der Schneidgeschwindigkeit (Java: 6,4).

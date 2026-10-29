@@ -6,7 +6,7 @@ use visicut_core::{
     mapping::{self, Attribute, Filter, Predefined, Templates, ValueCounts},
     materials::{Library, Material, MaterialProfile},
     project::{CutOrder, JobStep, Operation, ParameterSet, Project},
-    raster::{Dithering, RASTER_DPIS, RasterSettings},
+    raster::{Dithering, MAX_SHOULDER_MM, RASTER_DPIS, RasterSettings},
     selection,
 };
 use visicut_core::{i18n::tr, tr};
@@ -786,6 +786,17 @@ fn raster_options(
         .checkbox(&mut settings.invert, tr("Farben invertieren"))
         .on_hover_text(tr("Tauscht Hell und Dunkel: Helle Flächen werden graviert, dunkle bleiben frei – etwa für Negativbilder oder dunkle Materialien."))
         .changed();
+    crate::form::row(ui, tr("Stempel-Schulter"), |ui| {
+        changed |= crate::form::unit_value(
+            ui,
+            &mut settings.shoulder_mm,
+            0.0..=MAX_SHOULDER_MM,
+            "mm",
+            110.0,
+        )
+        .on_hover_text(tr("Für Stempel: Neben stehenbleibenden Flächen steigt die Leistung über diese Breite langsam an, so bekommen Buchstaben schräge, stabile Flanken statt senkrechter Kanten (wie „Stempel/Offset“ im LTT-Treiber). Wirkt mit 3D-Gravur oder Halbton-Rasterung, nicht mit „Schwellwert 50 %“. 0 = aus."))
+        .changed();
+    });
     changed |= ui
         .checkbox(&mut settings.bidirectional, tr("Bidirektional"))
         .on_hover_text(tr("Graviert jede Zeile abwechselnd hin und zurück statt immer in dieselbe Richtung – fast doppelt so schnell; Kanten können leicht versetzt sein (Versatz am Gerät kalibrieren)."))

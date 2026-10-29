@@ -122,6 +122,13 @@
    Floyd-Steinberg, Halbton, Geordnet, Mittelwert, Raster, Zufall, Schwellwert),
    Helligkeit, Invertierung, bidirektional oder einseitig und von oben oder
    unten. **3D-Gravur** steuert die Leistung je Pixel nach der Helligkeit.
+   **Stempel-Schulter** (0 … 3 mm, Standard 0 = aus) gibt Stempeln schräge,
+   stabile Flanken wie „Stempel/Offset“ im LTT-Treiber. Neben stehenbleibenden
+   Flächen steigt die Leistung über diese Breite gleichmäßig an, statt sofort
+   voll zu gravieren. Für Stempel das Motiv schwarz zeichnen und „Farben
+   invertieren“ und „Spiegeln“ wählen. Die Schulter wirkt mit 3D-Gravur
+   (Leistung je Pixel) oder mit Halbton-Rasterung (Punktdichte), nicht mit
+   „Schwellwert 50 %“.
    Text wird beim Schneiden und Markieren entlang der Glyphenumrisse
    bearbeitet (wie in Java). Schriften kommen vom System; fehlen sie, greifen
    die mit egui gelieferten Schriften Ubuntu Light und Hack (auch für

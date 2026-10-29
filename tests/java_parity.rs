@@ -265,6 +265,8 @@ fn raster(dir: &Path, case: &HashMap<String, String>) -> RasterSettings {
         bottom_up: flag("bottom_up"),
         // Java's LTT driver only offers 500 DPI.
         dpi: 500,
+        // Java has no stamp shoulder.
+        shoulder_mm: 0.0,
     }
 }
 

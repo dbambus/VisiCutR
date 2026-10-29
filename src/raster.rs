@@ -56,7 +56,14 @@ pub struct RasterSettings {
     pub bottom_up: bool,
     /// Engraving resolution, one of [`RASTER_DPIS`]; older files use 500.
     pub dpi: u32,
+    /// Stamp shoulder in mm (0 = off), like "Stempel/Offset" of the LTT
+    /// Windows driver: engraved pixels near unengraved ones get less power,
+    /// so raised parts keep sloped flanks. Not in Java VisiCut.
+    pub shoulder_mm: f32,
 }
+
+/// Widest stamp shoulder; the LTT driver allows 14 pixels (0.7 mm at 500 DPI).
+pub const MAX_SHOULDER_MM: f32 = 3.0;
 
 /// Engraving resolutions of the iLaser 4000 (the Windows driver's list). The
 /// header command `ESC D` sends 4000 / DPI as divisor of the 4000-DPI machine
@@ -73,6 +80,7 @@ impl Default for RasterSettings {
             bidirectional: true,
             bottom_up: false,
             dpi: 500,
+            shoulder_mm: 0.0,
         }
     }
 }
@@ -96,6 +104,9 @@ impl RasterSettings {
                 "Gravurauflösung {dpi} DPI wird nicht unterstützt (166, 200, 250, 333, 500 oder 1000 DPI)",
                 dpi = self.dpi
             ));
+        }
+        if !(0.0..=MAX_SHOULDER_MM).contains(&self.shoulder_mm) {
+            return Err(tr("Stempel-Schulter muss zwischen 0 und 3 mm liegen").into());
         }
         Ok(())
     }
@@ -122,6 +133,81 @@ pub fn greyscale(pixmap: &tiny_skia::Pixmap, settings: &RasterSettings) -> Vec<u
             if settings.invert { 255 - value } else { value }
         })
         .collect()
+}
+
+/// Stamp shoulder: engraved pixels (grey < 128) closer than `pixels` to an
+/// unengraved one get power rising linearly with the distance, so a raised
+/// part gets a sloped flank instead of a vertical one. The LTT driver erodes
+/// in 3 × 3 steps; this uses the chamfer distance (1, √2), which keeps round
+/// shapes round. Outside the image counts as engraved.
+pub fn shoulder(grey: &mut [u8], width: usize, height: usize, pixels: f32) {
+    if pixels <= 0.0 || width == 0 {
+        return;
+    }
+    let mut distance: Vec<f32> = grey
+        .iter()
+        .map(|g| if *g < 128 { f32::INFINITY } else { 0.0 })
+        .collect();
+    let diagonal = std::f32::consts::SQRT_2;
+    for y in 0..height {
+        for x in 0..width {
+            let mut d = distance[y * width + x];
+            if x > 0 {
+                d = d.min(distance[y * width + x - 1] + 1.0);
+            }
+            if y > 0 {
+                let up = (y - 1) * width + x;
+                d = d.min(distance[up] + 1.0);
+                if x > 0 {
+                    d = d.min(distance[up - 1] + diagonal);
+                }
+                if x + 1 < width {
+                    d = d.min(distance[up + 1] + diagonal);
+                }
+            }
+            distance[y * width + x] = d;
+        }
+    }
+    for y in (0..height).rev() {
+        for x in (0..width).rev() {
+            let mut d = distance[y * width + x];
+            if x + 1 < width {
+                d = d.min(distance[y * width + x + 1] + 1.0);
+            }
+            if y + 1 < height {
+                let down = (y + 1) * width + x;
+                d = d.min(distance[down] + 1.0);
+                if x + 1 < width {
+                    d = d.min(distance[down + 1] + diagonal);
+                }
+                if x > 0 {
+                    d = d.min(distance[down - 1] + diagonal);
+                }
+            }
+            distance[y * width + x] = d;
+        }
+    }
+    for (g, d) in grey.iter_mut().zip(distance) {
+        // The pixel next to the edge (distance 1) gets 1 / (pixels + 1).
+        let factor = d / (pixels + 1.0);
+        if factor < 1.0 {
+            let power = (255.0 - f32::from(*g)) * factor;
+            *g = 255 - power.round() as u8;
+        }
+    }
+}
+
+/// Grey values with the step's stamp shoulder applied.
+fn shaped_greyscale(pixmap: &tiny_skia::Pixmap, settings: &RasterSettings) -> Vec<u8> {
+    let mut grey = greyscale(pixmap, settings);
+    let pixels = settings.shoulder_mm * settings.dpi as f32 / 25.4;
+    shoulder(
+        &mut grey,
+        pixmap.width() as usize,
+        pixmap.height() as usize,
+        pixels,
+    );
+    grey
 }
 
 /// Black (engraved) pixels, row-major.
@@ -269,7 +355,7 @@ impl Raster {
     pub fn engrave(pixmap: &tiny_skia::Pixmap, settings: &RasterSettings) -> Self {
         let (width, height) = (pixmap.width() as usize, pixmap.height() as usize);
         let black = dither(
-            &greyscale(pixmap, settings),
+            &shaped_greyscale(pixmap, settings),
             width,
             height,
             settings.dithering,
@@ -296,7 +382,7 @@ impl Raster {
     /// 3D engraving: laser power follows darkness (Raster3dPart).
     pub fn engrave_3d(pixmap: &tiny_skia::Pixmap, settings: &RasterSettings) -> Self {
         let (width, height) = (pixmap.width() as usize, pixmap.height() as usize);
-        let grey = greyscale(pixmap, settings);
+        let grey = shaped_greyscale(pixmap, settings);
         let rows = grey
             .chunks(width)
             .map(|r| r.iter().map(|g| 255 - g).collect())
@@ -424,5 +510,52 @@ mod tests {
         assert_eq!(raster.intensity(1, 0), 55);
         let bw = Raster::engrave(&pixmap, &RasterSettings::legacy());
         assert_eq!(bw.rows, [vec![0x80]]);
+    }
+
+    #[test]
+    fn stamp_shoulder_ramps_power_away_from_raised_parts() {
+        // Black (engraved) row with one white (raised) pixel in the middle.
+        let mut grey = vec![0u8; 11];
+        grey[5] = 255;
+        shoulder(&mut grey, 11, 1, 3.0);
+        // Power 255 · d / 4 next to the raised pixel (grey = 255 − power),
+        // full from distance 4; the image border counts as engraved and stays
+        // at full power.
+        assert_eq!(grey, [0, 0, 64, 127, 191, 255, 191, 127, 64, 0, 0]);
+        let mut untouched = vec![0u8, 255, 0];
+        shoulder(&mut untouched, 3, 1, 0.0);
+        assert_eq!(untouched, [0, 255, 0]);
+        // Diagonal neighbours are √2 away, not 1 as in a 3 × 3 erosion.
+        let mut square = vec![0u8; 9];
+        square[4] = 255;
+        shoulder(&mut square, 3, 3, 3.0);
+        assert_eq!((square[1], square[0]), (191, 165));
+    }
+
+    #[test]
+    fn stamp_shoulder_follows_the_engraving_resolution() {
+        let mut pixmap = tiny_skia::Pixmap::new(9, 1).unwrap();
+        for (i, p) in pixmap.data_mut().chunks_exact_mut(4).enumerate() {
+            let v = if i == 0 { 255 } else { 0 };
+            p.copy_from_slice(&[v, v, v, 255]);
+        }
+        // 0.1524 mm at 500 DPI are 3 pixels.
+        let settings = RasterSettings {
+            shoulder_mm: 0.1524,
+            ..Default::default()
+        };
+        let raster = Raster::engrave_3d(&pixmap, &settings);
+        assert_eq!(raster.rows[0][..6], [0, 64, 128, 191, 255, 255]);
+        assert!(settings.validate().is_ok());
+        let too_wide = RasterSettings {
+            shoulder_mm: MAX_SHOULDER_MM + 0.1,
+            ..settings
+        };
+        assert!(too_wide.validate().is_err());
+        // Older files without the field have no shoulder.
+        let mut value = serde_json::to_value(RasterSettings::default()).unwrap();
+        value.as_object_mut().unwrap().remove("shoulder_mm");
+        let old: RasterSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(old.shoulder_mm, 0.0);
     }
 }

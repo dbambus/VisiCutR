@@ -8,6 +8,7 @@ pub mod import;
 pub mod inkscape;
 pub mod instance;
 pub mod lab;
+pub mod lens_calibration;
 pub mod ltt;
 pub mod mapping;
 pub mod materials;

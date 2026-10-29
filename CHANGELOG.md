@@ -3,6 +3,32 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## 0.25.0 – 29.10.2026
+
+Stempel-Schulter für Gravuren, ein aufgeräumtes Repository und neue
+Erkenntnisse aus Firmware und Treiber des iLaser 4000.
+
+- **Stempel-Schulter:** Neue Rasteroption beim Gravieren und bei der
+  3D-Gravur (0 … 3 mm, Standard aus), wie „Stempel/Offset“ im
+  LTT-Windows-Treiber. Neben stehenbleibenden Flächen steigt die Leistung
+  über diese Breite gleichmäßig an, sodass Buchstaben schräge, stabile
+  Flanken bekommen statt senkrechter Kanten. Bei 3D-Gravur ändert sich die
+  Leistung je Pixel, bei Halbton-Rasterung die Punktdichte; mit
+  „Schwellwert 50 %“ wirkt die Schulter nicht. Bestehende Projekte bleiben
+  unverändert. Am Gerät noch nicht erprobt.
+- **Repository:** Es enthält nur noch VisiCutR, mit der App im Stamm, einer
+  englischen README mit Bildschirmfotos und der Dokumentation unter `docs/`.
+  Die Java-Quellen für den Byte-Vergleich liegen im Tag `java-reference`.
+- **Gerätedokumentation (`docs/LTT-Protokoll.md`):** Die Firmware des
+  iLaser 4000 (8.20b und 8.23b) versteht `ZA`/`ZR`/`ZO` für die Z-Achse
+  (Schritte von 0,001 mm, Nullpunkt nach dem Autofokus), `ESC A`
+  (Ausgangsregister), `ESC f` (Pulsbetrieb je Stift) und `ESC I`
+  (Infoblock), aber nicht `ESC K`. `ESC P` ist unter 128 der Pulsabstand,
+  darüber die PPI (bis 4000). Die Treibervarianten `_S` (1000 DPI) und `_C`
+  (4000 DPI) unterscheiden sich nur im Treiber, nicht in der Firmware.
+  Beschrieben ist auch die Stempelfunktion des Treibers. Die Druckluft wird
+  nicht weiter verfolgt, weil ihr Ausgang am Gerät unbekannt ist.
+
 ## 0.24.0 – 29.10.2026
 
 Korrekturen aus dem Byte-Vergleich mit Java-VisiCut: Die Seite darf über

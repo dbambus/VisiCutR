@@ -3160,11 +3160,13 @@ impl VisiCutR {
                         new_y = Some(y);
                     }
                     ui.end_row();
-                    ui.label("B").on_hover_text(tr("Breite"));
+                    ui.label(egui::RichText::new("B").color(AXIS_X))
+                        .on_hover_text(tr("Breite"));
                     if ui.add_sized([field_w, 20.0], field(&mut w, 0.1)).changed() {
                         new_w = Some(w);
                     }
-                    ui.label("H").on_hover_text(tr("Höhe"));
+                    ui.label(egui::RichText::new("H").color(AXIS_Y))
+                        .on_hover_text(tr("Höhe"));
                     if ui.add_sized([field_w, 20.0], field(&mut h, 0.1)).changed() {
                         new_h = Some(h);
                     }

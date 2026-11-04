@@ -535,6 +535,10 @@ impl Dropdown {
             .width(width)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
             .show(|ui| {
+                // Liste so breit wie das Feld (egui nimmt die Breite nur als
+                // Vorschlag und schrumpft auf den Inhalt).
+                let frame = ui.spacing().menu_margin.sum().x + 2.0;
+                ui.set_min_width(width - frame);
                 egui::ScrollArea::vertical()
                     .max_height(max_height)
                     .show(ui, add)

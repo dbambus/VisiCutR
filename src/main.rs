@@ -3122,10 +3122,7 @@ impl VisiCutR {
         // Wie das Transformieren-Feld in Grafikprogrammen: Bezugspunkt, X/Y,
         // B/H und rechts die Kette, die das Seitenverhältnis hält.
         let (mut new_x, mut new_y, mut new_w, mut new_h) = (None, None, None, None);
-        // Feste Breite wie die Karten darüber: Felder teilen den Rest unter sich auf.
-        let total = ui.available_width();
         ui.horizontal(|ui| {
-            ui.set_max_width(total);
             reference_picker(ui, &mut reference);
             let [fx, fy] = reference;
             let mut x = p.x_mm + p.width_mm * fx;
@@ -3139,35 +3136,33 @@ impl VisiCutR {
                     .max_decimals(2)
                     .suffix(" mm")
             }
-            let spacing = ui.spacing().item_spacing.x;
             let lock = 32.0;
-            let labels = 14.0;
-            let field_w =
-                ((total - 40.0 - lock - 2.0 * labels - 7.0 * spacing) / 2.0).clamp(50.0, 120.0);
+            let field_w = 100.0;
             egui::Grid::new("position_size")
                 .num_columns(4)
                 // Sonst sind die Beschriftungsspalten 40 px breit.
                 .min_col_width(0.0)
                 .spacing([4.0, 4.0])
                 .show(ui, |ui| {
-                    ui.label("X");
+                    // Zeilenweise X, Y, dann B, H: Tab springt von X nach Y.
+                    ui.label(egui::RichText::new("X").color(AXIS_X));
                     if ui
                         .add_sized([field_w, 20.0], field(&mut x, -10000.0))
                         .changed()
                     {
                         new_x = Some(x);
                     }
-                    ui.label("B").on_hover_text(tr("Breite"));
-                    if ui.add_sized([field_w, 20.0], field(&mut w, 0.1)).changed() {
-                        new_w = Some(w);
-                    }
-                    ui.end_row();
-                    ui.label("Y");
+                    ui.label(egui::RichText::new("Y").color(AXIS_Y));
                     if ui
                         .add_sized([field_w, 20.0], field(&mut y, -10000.0))
                         .changed()
                     {
                         new_y = Some(y);
+                    }
+                    ui.end_row();
+                    ui.label("B").on_hover_text(tr("Breite"));
+                    if ui.add_sized([field_w, 20.0], field(&mut w, 0.1)).changed() {
+                        new_w = Some(w);
                     }
                     ui.label("H").on_hover_text(tr("Höhe"));
                     if ui.add_sized([field_w, 20.0], field(&mut h, 0.1)).changed() {
@@ -3234,10 +3229,7 @@ impl VisiCutR {
             .spacing([8.0, 4.0])
             .show(ui, |ui| {
                 ui.label("");
-                for (axis, color) in [
-                    ("X", Color32::from_rgb(220, 50, 47)),
-                    ("Y", Color32::from_rgb(40, 160, 70)),
-                ] {
+                for (axis, color) in [("X", AXIS_X), ("Y", AXIS_Y)] {
                     ui.vertical_centered(|ui| {
                         ui.label(egui::RichText::new(axis).color(color));
                     });
@@ -3717,14 +3709,16 @@ impl VisiCutR {
             object_bar::separator(ui);
             tool(ui, Icon::Undo, Command::Undo);
             tool(ui, Icon::Redo, Command::Redo);
+            // Ringsum gleicher Rand um den Inhalt.
+            let popup_frame = egui::Frame::popup(ui.style()).inner_margin(egui::Margin::same(14));
             let panel = |response: &egui::Response, id: egui::Id| {
                 egui::Popup::from_toggle_button_response(response)
                     .id(id)
+                    .frame(popup_frame)
                     .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                     .gap(6.0)
             };
             panel(&position, position_id).show(|ui| {
-                ui.set_width(330.0);
                 ui.label(egui::RichText::new(tr("Position und Größe")).strong());
                 ui.add_space(4.0);
                 self.position_panel(ui);
@@ -4784,6 +4778,10 @@ fn file_name(path: &Path) -> String {
         .to_string_lossy()
         .into_owned()
 }
+
+/// Farben der Achsenbeschriftung X und Y in den Aufklappfeldern.
+const AXIS_X: Color32 = Color32::from_rgb(220, 50, 47);
+const AXIS_Y: Color32 = Color32::from_rgb(40, 160, 70);
 
 /// Neue Größe des aktiven Teils; der Bezugspunkt `reference` (Anteile von
 /// Breite und Höhe) bleibt stehen.

@@ -3136,7 +3136,6 @@ impl VisiCutR {
                     .max_decimals(2)
                     .suffix(" mm")
             }
-            let lock = 32.0;
             let field_w = 100.0;
             egui::Grid::new("position_size")
                 .num_columns(4)
@@ -3177,11 +3176,12 @@ impl VisiCutR {
             } else {
                 tr("Seitenverhältnis frei")
             };
-            if ui
-                .add_sized([lock, 20.0], egui::Button::selectable(proportional, "🔗"))
-                .on_hover_text(tip)
-                .clicked()
-            {
+            let icon = if proportional {
+                object_bar::Icon::Link
+            } else {
+                object_bar::Icon::Unlink
+            };
+            if object_bar::button(ui, icon, true, proportional, tip).clicked() {
                 proportional = !proportional;
             }
         });

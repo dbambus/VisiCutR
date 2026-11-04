@@ -16,6 +16,10 @@ pub enum Icon {
     /// Skalieren: kleines Quadrat, gestrichelt vergrößert, Pfeil nach rechts oben.
     Scale,
     Rotate,
+    /// Seitenverhältnis beibehalten: zwei verbundene Kettenglieder bzw.
+    /// getrennte mit Bruchstrichen.
+    Link,
+    Unlink,
     FlipHorizontal,
     FlipVertical,
     Array,
@@ -260,6 +264,36 @@ pub fn paint(painter: &egui::Painter, icon: Icon, rect: Rect, color: Color32) {
             }
             path(&[(1.0, -1.0), (5.0, -5.0)], false);
             filled(&[(6.5, -6.5), (1.5, -5.5), (5.5, -1.5)]);
+        }
+        Icon::Link | Icon::Unlink => {
+            // Wie das übliche Kettensymbol: zwei zur Mitte offene Glieder,
+            // verbunden durch einen Steg; schräg nach rechts oben gedreht.
+            let linked = icon == Icon::Link;
+            let (sin, cos) = (-45.0_f32).to_radians().sin_cos();
+            let turn = |(x, y): (f32, f32)| (x * cos - y * sin, x * sin + y * cos);
+            let (r, center, open) = if linked {
+                (3.4, 4.6, 1.6)
+            } else {
+                (3.4, 5.6, 2.8)
+            };
+            for side in [-1.0_f32, 1.0] {
+                let mut points = vec![(side * open, -r)];
+                for i in 0..=16 {
+                    // Von oben über die Außenseite nach unten.
+                    let a = (-90.0 + side * 180.0 * i as f32 / 16.0).to_radians();
+                    points.push((side * center + r * a.cos(), r * a.sin()));
+                }
+                points.push((side * open, r));
+                let points: Vec<(f32, f32)> = points.into_iter().map(turn).collect();
+                path(&points, false);
+            }
+            if linked {
+                path(&[turn((-2.8, 0.0)), turn((2.8, 0.0))], false);
+            } else {
+                // Bruchstriche quer im Spalt.
+                path(&[turn((-0.9, -4.0)), turn((-0.9, -6.0))], false);
+                path(&[turn((0.9, 4.0)), turn((0.9, 6.0))], false);
+            }
         }
         Icon::Rotate => {
             let arc: Vec<(f32, f32)> = (0..=24)

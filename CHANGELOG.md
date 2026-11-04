@@ -3,6 +3,25 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## 1.0.1 – 04.11.2026
+
+Überarbeitete Objektleiste: eigenes Skalieren-Feld und klarere Felder für
+Position und Größe.
+
+- **Skalieren:** Neues Symbol in der Objektleiste mit Aufklappfeld wie in
+  Bambu Studio: Faktor in % (steht danach wieder auf 100 %) und Größe in mm
+  für X und Y. Der Bezugspunkt aus „Position und Größe“ bleibt stehen.
+- **Zentrieren entfernt:** Das Symbol „Motiv auf dem Arbeitsbett
+  zentrieren“ ist nicht mehr in der Objektleiste.
+- **Position und Größe:** X und Y stehen in der oberen Zeile, B und H
+  darunter, sodass Tab von X nach Y springt. X (rot), Y (grün), B (blau)
+  und H (violett) sind farbig beschriftet.
+- **Seitenverhältnis:** Ein gezeichnetes Kettensymbol (verbunden bzw.
+  getrennt) ersetzt das Emoji; unter Skalieren steht dieselbe Kette statt
+  eines Kontrollkästchens.
+- **Aufklappfelder:** Gleicher Rand ringsum, Breite nach Inhalt;
+  Auswahllisten öffnen so breit wie ihr Feld.
+
 ## 1.0.0 – 29.10.2026
 
 Genauere und schnellere Kamerakalibrierung und ein aufgeräumter

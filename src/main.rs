@@ -3205,30 +3205,114 @@ impl VisiCutR {
             p.y_mm = top - p.height_mm * fy;
             dirty = true;
         }
-        let anchor = [p.x_mm + p.width_mm * fx, p.y_mm + p.height_mm * fy];
         let ratio = p.height_mm / p.width_mm;
-        let mut resized = false;
         if let Some(w) = new_w {
-            p.width_mm = w;
-            if proportional {
-                p.height_mm = w * ratio;
-            }
-            resized = true;
+            let h = if proportional { w * ratio } else { p.height_mm };
+            resize_about(p, reference, w, h);
+            dirty = true;
         }
         if let Some(h) = new_h {
-            p.height_mm = h;
-            if proportional {
-                p.width_mm = h / ratio;
-            }
-            resized = true;
-        }
-        if resized {
-            // Der Bezugspunkt bleibt stehen.
-            p.x_mm = anchor[0] - p.width_mm * fx;
-            p.y_mm = anchor[1] - p.height_mm * fy;
+            let w = if proportional { h / ratio } else { p.width_mm };
+            resize_about(p, reference, w, h);
             dirty = true;
         }
         self.reference = reference;
+        self.proportional = proportional;
+        self.dirty |= dirty;
+    }
+
+    /// Aufklappfeld „Skalieren“ der Objektleiste wie in Bambu Studio:
+    /// Faktor in % (steht danach wieder auf 100 %) und Größe in mm für X und
+    /// Y; „Gleichmäßig skalieren“ hält das Seitenverhältnis (dieselbe
+    /// Einstellung wie die Kette unter „Position und Größe“). Der
+    /// Bezugspunkt von dort bleibt stehen.
+    fn scale_panel(&mut self, ui: &mut egui::Ui) {
+        let mut proportional = self.proportional;
+        let reference = self.reference;
+        let p = &mut self.project;
+        let (mut sx, mut sy) = (100.0_f32, 100.0_f32);
+        let (mut w, mut h) = (p.width_mm, p.height_mm);
+        let (mut new_scale, mut new_size) = (None, None);
+        let field_w = 80.0;
+        let height = ui.spacing().interact_size.y;
+        egui::Grid::new("scale_size")
+            .num_columns(4)
+            .min_col_width(0.0)
+            .spacing([8.0, 4.0])
+            .show(ui, |ui| {
+                ui.label("");
+                for (axis, color) in [
+                    ("X", Color32::from_rgb(220, 50, 47)),
+                    ("Y", Color32::from_rgb(40, 160, 70)),
+                ] {
+                    ui.vertical_centered(|ui| {
+                        ui.label(egui::RichText::new(axis).color(color));
+                    });
+                }
+                ui.label("");
+                ui.end_row();
+
+                ui.label(tr("Skalieren"));
+                // Kein Ziehen: der Faktor gilt einmal, wenn er eingetippt ist.
+                fn percent(value: &mut f32) -> egui::DragValue<'_> {
+                    egui::DragValue::new(value)
+                        .speed(0.0)
+                        .range(0.1..=10000.0)
+                        .fixed_decimals(2)
+                }
+                let hover = tr("Faktor eingeben; Enter skaliert");
+                let changed_x = ui
+                    .add_sized([field_w, height], percent(&mut sx))
+                    .on_hover_text(hover)
+                    .changed();
+                let changed_y = ui
+                    .add_sized([field_w, height], percent(&mut sy))
+                    .on_hover_text(hover)
+                    .changed();
+                ui.label("%");
+                ui.end_row();
+                if changed_x || changed_y {
+                    let (fx, fy) = match (proportional, changed_x) {
+                        (true, true) => (sx, sx),
+                        (true, false) => (sy, sy),
+                        (false, _) => (sx, sy),
+                    };
+                    new_scale = Some((fx / 100.0, fy / 100.0));
+                }
+
+                ui.label(tr("Größe"));
+                fn size(value: &mut f32) -> egui::DragValue<'_> {
+                    egui::DragValue::new(value)
+                        .speed(0.1)
+                        .range(0.1..=10000.0)
+                        .fixed_decimals(2)
+                }
+                let changed_w = ui.add_sized([field_w, height], size(&mut w)).changed();
+                let changed_h = ui.add_sized([field_w, height], size(&mut h)).changed();
+                ui.label("mm");
+                ui.end_row();
+                if changed_w || changed_h {
+                    new_size = Some((changed_w, changed_h));
+                }
+            });
+        ui.separator();
+        ui.checkbox(&mut proportional, tr("Gleichmäßig skalieren"));
+        let ratio = p.height_mm / p.width_mm;
+        let mut dirty = false;
+        if let Some((fx, fy)) = new_scale {
+            let (w, h) = (p.width_mm * fx, p.height_mm * fy);
+            resize_about(p, reference, w, h);
+            dirty = true;
+        }
+        if let Some((changed_w, _)) = new_size {
+            let (w, h) = match (proportional, changed_w) {
+                (true, true) => (w, w * ratio),
+                (true, false) => (h / ratio, h),
+                (false, _) => (w, h),
+            };
+            resize_about(p, reference, w, h);
+            dirty = true;
+        }
         self.proportional = proportional;
         self.dirty |= dirty;
     }
@@ -3621,6 +3705,7 @@ impl VisiCutR {
             );
             let (position_id, position) =
                 popup(ui, Icon::Transform, tr("Position und Größe"), &moving);
+            let (scale_id, scale) = popup(ui, Icon::Scale, tr("Skalieren"), tr("Skalieren"));
             let (rotate_id, rotate) = popup(ui, Icon::Rotate, tr("Drehen"), tr("Drehen"));
             let mut tool = |ui: &mut egui::Ui, icon: Icon, command: Command| {
                 let text = hover(ui, command);
@@ -3651,6 +3736,11 @@ impl VisiCutR {
                 ui.label(egui::RichText::new(tr("Position und Größe")).strong());
                 ui.add_space(4.0);
                 self.position_panel(ui);
+            });
+            panel(&scale, scale_id).show(|ui| {
+                ui.label(egui::RichText::new(tr("Skalieren")).strong());
+                ui.add_space(4.0);
+                self.scale_panel(ui);
             });
             panel(&rotate, rotate_id).show(|ui| {
                 ui.label(egui::RichText::new(tr("Drehen")).strong());
@@ -4701,6 +4791,17 @@ fn file_name(path: &Path) -> String {
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned()
+}
+
+/// Neue Größe des aktiven Teils; der Bezugspunkt `reference` (Anteile von
+/// Breite und Höhe) bleibt stehen.
+fn resize_about(p: &mut Project, reference: [f32; 2], width: f32, height: f32) {
+    let [fx, fy] = reference;
+    let anchor = [p.x_mm + p.width_mm * fx, p.y_mm + p.height_mm * fy];
+    p.width_mm = width.max(0.1);
+    p.height_mm = height.max(0.1);
+    p.x_mm = anchor[0] - p.width_mm * fx;
+    p.y_mm = anchor[1] - p.height_mm * fy;
 }
 
 fn reference_picker(ui: &mut egui::Ui, reference: &mut [f32; 2]) {

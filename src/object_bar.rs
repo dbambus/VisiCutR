@@ -13,6 +13,8 @@ pub enum Icon {
     Shape,
     Sign,
     Transform,
+    /// Skalieren: kleines Quadrat, gestrichelt vergrößert, Pfeil nach rechts oben.
+    Scale,
     Rotate,
     FlipHorizontal,
     FlipVertical,
@@ -246,6 +248,19 @@ pub fn paint(painter: &egui::Painter, icon: Icon, rect: Rect, color: Color32) {
             for (x, y) in frame {
                 painter.rect_filled(r(x - 2.0, y - 2.0, x + 2.0, y + 2.0), 0.0, color);
             }
+        }
+        Icon::Scale => {
+            outline(r(-9.0, 1.0, -1.0, 9.0), 0.0);
+            for (a, b) in [
+                ((-9.0, -9.0), (9.0, -9.0)),
+                ((9.0, -9.0), (9.0, 9.0)),
+                ((-1.0, 9.0), (9.0, 9.0)),
+                ((-9.0, -9.0), (-9.0, 1.0)),
+            ] {
+                dashed(a, b);
+            }
+            path(&[(1.0, -1.0), (5.0, -5.0)], false);
+            filled(&[(6.5, -6.5), (1.5, -5.5), (5.5, -1.5)]);
         }
         Icon::Rotate => {
             let arc: Vec<(f32, f32)> = (0..=24)

@@ -52,7 +52,6 @@ enum Command {
     /// Projekt für Java-VisiCut als PLF schreiben.
     ExportPlf,
     Quit,
-    Center,
     Devices,
     ToggleGrid,
     ToggleCamera,
@@ -144,7 +143,6 @@ impl Command {
             Self::Export => tr("LTT-Job exportieren …"),
             Self::ExportPlf => tr("Als VisiCut-Projekt (PLF) exportieren …"),
             Self::Quit => tr("Beenden"),
-            Self::Center => tr("Motiv auf dem Arbeitsbett zentrieren"),
             Self::Devices => tr("Einstellungen …"),
             Self::Device(_) => tr("Lasercutter"),
             Self::ToggleGrid => tr("Raster anzeigen"),
@@ -222,7 +220,6 @@ impl Command {
             | Self::Shortcuts
             | Self::ReportBug
             | Self::About
-            | Self::Center
             | Self::Send
             | Self::Text
             | Self::Shape
@@ -2713,7 +2710,7 @@ impl VisiCutR {
             Command::Paste | Command::PasteInPlace => self.copied.is_some() && !self.busy(),
             Command::Undo => !self.undo.is_empty() && !self.busy(),
             Command::Redo => !self.redo.is_empty() && !self.busy(),
-            Command::Center | Command::ExportPlf => self.texture.is_some() && !self.busy(),
+            Command::ExportPlf => self.texture.is_some() && !self.busy(),
             Command::ToggleCamera => self.devices.has_camera(),
             Command::RefreshCamera => self.devices.camera_shown() && !self.devices.camera_loading(),
             Command::Remnants => self.devices.has_camera() && !self.busy(),
@@ -2752,10 +2749,6 @@ impl VisiCutR {
             Command::Export => self.export(),
             Command::ExportPlf => self.export_plf(),
             Command::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
-            Command::Center => {
-                workspace::center(&mut self.project);
-                self.dirty = true;
-            }
             Command::Devices => self.show_settings(SettingsPage::Devices),
             Command::ToggleGrid => self.show_grid = !self.show_grid,
             Command::ToggleCamera => self.devices.toggle_camera(&self.project),
@@ -3715,7 +3708,6 @@ impl VisiCutR {
             };
             tool(ui, Icon::FlipHorizontal, Command::FlipHorizontal);
             tool(ui, Icon::FlipVertical, Command::FlipVertical);
-            tool(ui, Icon::Center, Command::Center);
             object_bar::separator(ui);
             tool(ui, Icon::Array, Command::Array);
             tool(ui, Icon::Nest, Command::Nest);

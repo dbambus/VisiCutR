@@ -272,7 +272,6 @@
   "Mitte": "Center",
   "Mittelwert": "Average",
   "Motiv aktualisiert · {width} × {height} mm": "Design updated · {width} × {height} mm",
-  "Motiv auf dem Arbeitsbett zentrieren": "Center design on the laser bed",
   "Motiv entfernt · Widerrufen stellt es wieder her": "Design removed · Undo restores it",
   "Motiv ist höher als der Umfang des Werkstücks ({circumference} mm bei {diameter} mm Durchmesser)": "Design is taller than the workpiece circumference ({circumference} mm at {diameter} mm diameter)",
   "Motivbreite muss positiv und höchstens 100000 sein": "Design width must be positive and at most 100000",

@@ -272,7 +272,6 @@
   "Mitte": "Centre",
   "Mittelwert": "Moyenne",
   "Motiv aktualisiert · {width} × {height} mm": "Motif mis à jour · {width} × {height} mm",
-  "Motiv auf dem Arbeitsbett zentrieren": "Centrer le motif sur le plateau",
   "Motiv entfernt · Widerrufen stellt es wieder her": "Motif supprimé · Annuler le restaure",
   "Motiv ist höher als der Umfang des Werkstücks ({circumference} mm bei {diameter} mm Durchmesser)": "Le motif est plus haut que la circonférence de la pièce ({circumference} mm pour {diameter} mm de diamètre)",
   "Motivbreite muss positiv und höchstens 100000 sein": "La largeur du motif doit être positive et au plus 100000",

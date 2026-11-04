@@ -18,7 +18,6 @@ pub enum Icon {
     Rotate,
     FlipHorizontal,
     FlipVertical,
-    Center,
     Array,
     Nest,
     Duplicate,
@@ -287,18 +286,6 @@ pub fn paint(painter: &egui::Painter, icon: Icon, rect: Rect, color: Color32) {
             dashed((-10.0, 0.0), (10.0, 0.0));
             filled(&[(-7.0, -2.5), (7.0, -2.5), (7.0, -10.0)]);
             path(&[(-7.0, 2.5), (7.0, 2.5), (7.0, 10.0)], true);
-        }
-        Icon::Center => {
-            outline(r(-9.5, -9.5, 9.5, 9.5), 1.5 * s);
-            outline(r(-4.0, -4.0, 4.0, 4.0), 0.0);
-            for (a, b) in [
-                ((0.0, -9.5), (0.0, -6.0)),
-                ((0.0, 6.0), (0.0, 9.5)),
-                ((-9.5, 0.0), (-6.0, 0.0)),
-                ((6.0, 0.0), (9.5, 0.0)),
-            ] {
-                path(&[a, b], false);
-            }
         }
         Icon::Array => {
             for row in 0..2 {

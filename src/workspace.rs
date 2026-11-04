@@ -106,13 +106,6 @@ pub fn nudge(project: &mut Project, dx_mm: f32, dy_mm: f32) -> bool {
     place(project, project.x_mm + dx_mm, project.y_mm + dy_mm)
 }
 
-/// Zentriert das Motiv auf dem Bett, wie macOS.
-pub fn center(project: &mut Project) {
-    let ([x_min, x_max], [y_min, y_max]) = limits(project);
-    project.x_mm = (x_min + x_max) / 2.0;
-    project.y_mm = (y_min + y_max) / 2.0;
-}
-
 /// Kleinste Seitenlänge beim Ziehen an einem Anfasser.
 const MIN_SIZE_MM: f32 = 0.1;
 
@@ -424,18 +417,6 @@ mod tests {
         assert!(at(&p, 970.0, 580.0), "{} {}", p.x_mm, p.y_mm);
         assert!(nudge(&mut p, -10_000.0, -10_000.0));
         assert!(at(&p, -10.0, -10.0), "{} {}", p.x_mm, p.y_mm);
-        center(&mut p);
-        assert!(at(&p, 480.0, 285.0), "{} {}", p.x_mm, p.y_mm);
-    }
-
-    #[test]
-    fn center_matches_macos() {
-        let mut p = motif();
-        center(&mut p);
-        assert_eq!((p.x_mm, p.y_mm), (450.0, 270.0));
-        p.height_mm = 700.0;
-        center(&mut p);
-        assert_eq!(p.y_mm, 0.0);
     }
 
     #[test]

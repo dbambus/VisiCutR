@@ -3225,65 +3225,80 @@ impl VisiCutR {
         let (mut new_scale, mut new_size) = (None, None);
         let field_w = 80.0;
         let height = ui.spacing().interact_size.y;
-        egui::Grid::new("scale_size")
-            .num_columns(4)
-            .min_col_width(0.0)
-            .spacing([8.0, 4.0])
-            .show(ui, |ui| {
-                ui.label("");
-                for (axis, color) in [("X", AXIS_X), ("Y", AXIS_Y)] {
-                    ui.vertical_centered(|ui| {
-                        ui.label(egui::RichText::new(axis).color(color));
-                    });
-                }
-                ui.label("");
-                ui.end_row();
+        // Rechts neben den Feldern die Kette wie unter „Position und Größe“.
+        ui.horizontal(|ui| {
+            let grid = egui::Grid::new("scale_size")
+                .num_columns(4)
+                .min_col_width(0.0)
+                .spacing([8.0, 4.0])
+                .show(ui, |ui| {
+                    ui.label("");
+                    for (axis, color) in [("X", AXIS_X), ("Y", AXIS_Y)] {
+                        ui.vertical_centered(|ui| {
+                            ui.label(egui::RichText::new(axis).color(color));
+                        });
+                    }
+                    ui.label("");
+                    ui.end_row();
 
-                ui.label(tr("Skalieren"));
-                // Kein Ziehen: der Faktor gilt einmal, wenn er eingetippt ist.
-                fn percent(value: &mut f32) -> egui::DragValue<'_> {
-                    egui::DragValue::new(value)
-                        .speed(0.0)
-                        .range(0.1..=10000.0)
-                        .fixed_decimals(2)
-                }
-                let hover = tr("Faktor eingeben; Enter skaliert");
-                let changed_x = ui
-                    .add_sized([field_w, height], percent(&mut sx))
-                    .on_hover_text(hover)
-                    .changed();
-                let changed_y = ui
-                    .add_sized([field_w, height], percent(&mut sy))
-                    .on_hover_text(hover)
-                    .changed();
-                ui.label("%");
-                ui.end_row();
-                if changed_x || changed_y {
-                    let (fx, fy) = match (proportional, changed_x) {
-                        (true, true) => (sx, sx),
-                        (true, false) => (sy, sy),
-                        (false, _) => (sx, sy),
-                    };
-                    new_scale = Some((fx / 100.0, fy / 100.0));
-                }
+                    ui.label(tr("Skalieren"));
+                    // Kein Ziehen: der Faktor gilt einmal, wenn er eingetippt ist.
+                    fn percent(value: &mut f32) -> egui::DragValue<'_> {
+                        egui::DragValue::new(value)
+                            .speed(0.0)
+                            .range(0.1..=10000.0)
+                            .fixed_decimals(2)
+                    }
+                    let hover = tr("Faktor eingeben; Enter skaliert");
+                    let changed_x = ui
+                        .add_sized([field_w, height], percent(&mut sx))
+                        .on_hover_text(hover)
+                        .changed();
+                    let changed_y = ui
+                        .add_sized([field_w, height], percent(&mut sy))
+                        .on_hover_text(hover)
+                        .changed();
+                    ui.label("%");
+                    ui.end_row();
+                    if changed_x || changed_y {
+                        let (fx, fy) = match (proportional, changed_x) {
+                            (true, true) => (sx, sx),
+                            (true, false) => (sy, sy),
+                            (false, _) => (sx, sy),
+                        };
+                        new_scale = Some((fx / 100.0, fy / 100.0));
+                    }
 
-                ui.label(tr("Größe"));
-                fn size(value: &mut f32) -> egui::DragValue<'_> {
-                    egui::DragValue::new(value)
-                        .speed(0.1)
-                        .range(0.1..=10000.0)
-                        .fixed_decimals(2)
-                }
-                let changed_w = ui.add_sized([field_w, height], size(&mut w)).changed();
-                let changed_h = ui.add_sized([field_w, height], size(&mut h)).changed();
-                ui.label("mm");
-                ui.end_row();
-                if changed_w || changed_h {
-                    new_size = Some((changed_w, changed_h));
+                    ui.label(tr("Größe"));
+                    fn size(value: &mut f32) -> egui::DragValue<'_> {
+                        egui::DragValue::new(value)
+                            .speed(0.1)
+                            .range(0.1..=10000.0)
+                            .fixed_decimals(2)
+                    }
+                    let changed_w = ui.add_sized([field_w, height], size(&mut w)).changed();
+                    let changed_h = ui.add_sized([field_w, height], size(&mut h)).changed();
+                    ui.label("mm");
+                    ui.end_row();
+                    if changed_w || changed_h {
+                        new_size = Some((changed_w, changed_h));
+                    }
+                });
+            // Mittig neben den beiden Feldzeilen, nicht neben der Kopfzeile.
+            let rows = 2.0 * height + ui.spacing().item_spacing.y;
+            let top = (grid.response.rect.height() - rows / 2.0 - 17.0).max(0.0);
+            ui.vertical(|ui| {
+                ui.add_space(top);
+                let (icon, tip) = if proportional {
+                    (object_bar::Icon::Link, tr("Gleichmäßig skalieren"))
+                } else {
+                    (object_bar::Icon::Unlink, tr("Seitenverhältnis frei"))
+                };
+                if object_bar::button(ui, icon, true, proportional, tip).clicked() {
+                    proportional = !proportional;
                 }
             });
-        ui.separator();
-        ui.checkbox(&mut proportional, tr("Gleichmäßig skalieren"));
+        });
         let ratio = p.height_mm / p.width_mm;
         let mut dirty = false;
         if let Some((fx, fy)) = new_scale {

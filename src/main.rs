@@ -3159,12 +3159,12 @@ impl VisiCutR {
                         new_y = Some(y);
                     }
                     ui.end_row();
-                    ui.label(egui::RichText::new("B").color(AXIS_X))
+                    ui.label(egui::RichText::new("B").color(SIZE_W))
                         .on_hover_text(tr("Breite"));
                     if ui.add_sized([field_w, 20.0], field(&mut w, 0.1)).changed() {
                         new_w = Some(w);
                     }
-                    ui.label(egui::RichText::new("H").color(AXIS_Y))
+                    ui.label(egui::RichText::new("H").color(SIZE_H))
                         .on_hover_text(tr("Höhe"));
                     if ui.add_sized([field_w, 20.0], field(&mut h, 0.1)).changed() {
                         new_h = Some(h);
@@ -4784,6 +4784,10 @@ fn file_name(path: &Path) -> String {
 /// Farben der Achsenbeschriftung X und Y in den Aufklappfeldern.
 const AXIS_X: Color32 = Color32::from_rgb(220, 50, 47);
 const AXIS_Y: Color32 = Color32::from_rgb(40, 160, 70);
+/// Breite und Höhe in eigenen Farben, damit sie nicht mit X und Y
+/// verwechselt werden.
+const SIZE_W: Color32 = Color32::from_rgb(30, 110, 210);
+const SIZE_H: Color32 = Color32::from_rgb(140, 70, 190);
 
 /// Neue Größe des aktiven Teils; der Bezugspunkt `reference` (Anteile von
 /// Breite und Höhe) bleibt stehen.

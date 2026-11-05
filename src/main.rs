@@ -1227,7 +1227,7 @@ impl VisiCutR {
             let preview = svg::render(svg)?;
             Ok(Some(ctx.load_texture(
                 "SVG",
-                preview.image,
+                color_image(preview.pixmap),
                 egui::TextureOptions::LINEAR,
             )))
         };
@@ -1353,7 +1353,11 @@ impl VisiCutR {
         self.project.parts.clear();
         self.project.active_part = 0;
         self.part_textures.clear();
-        self.texture = Some(ctx.load_texture("SVG", preview.image, egui::TextureOptions::LINEAR));
+        self.texture = Some(ctx.load_texture(
+            "SVG",
+            color_image(preview.pixmap),
+            egui::TextureOptions::LINEAR,
+        ));
         self.project_path = None;
         self.cached = None;
         self.dirty = true;
@@ -4789,6 +4793,22 @@ impl VisiCutR {
 
 /// Bezugspunkt wie in Grafikprogrammen: acht Quadrate an Ecken und
 /// Seitenmitten, über den Rahmen verbunden, und ein freies in der Mitte.
+/// Ein mit tiny-skia gerendertes Bild als egui-Bild.
+fn color_image(pixmap: resvg::tiny_skia::Pixmap) -> egui::ColorImage {
+    let size = [pixmap.width() as usize, pixmap.height() as usize];
+    // tiny-skia speichert vormultipliziertes RGBA; egui bekommt es entmultipliziert.
+    let mut pixels = pixmap.take();
+    for pixel in pixels.chunks_exact_mut(4) {
+        let alpha = pixel[3] as u32;
+        if alpha > 0 {
+            for channel in &mut pixel[..3] {
+                *channel = ((*channel as u32 * 255 + alpha / 2) / alpha).min(255) as u8;
+            }
+        }
+    }
+    egui::ColorImage::from_rgba_unmultiplied(size, &pixels)
+}
+
 fn file_name(path: &Path) -> String {
     path.file_name()
         .unwrap_or_default()

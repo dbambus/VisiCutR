@@ -129,10 +129,10 @@ fn embeds_raster_images_as_data_uris() {
     let preview = crate::svg::render(&imported.svg).unwrap();
     assert!(
         preview
-            .image
-            .pixels
+            .pixmap
+            .pixels()
             .iter()
-            .any(|p| p.r() > 200 && p.b() < 50)
+            .any(|p| p.red() > 200 && p.blue() < 50)
     );
 }
 

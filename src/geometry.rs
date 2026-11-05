@@ -290,10 +290,13 @@ pub fn object_outline(project: &Project, index: usize) -> Result<Vec<Contour>, S
     }
     // Sonst der Rahmen der gezeichneten Pixel.
     let rendered = crate::svg::render(&alone.svg)?;
-    let [w, h] = rendered.image.size;
+    let (w, h) = (
+        rendered.pixmap.width() as usize,
+        rendered.pixmap.height() as usize,
+    );
     let mut found: Option<[usize; 4]> = None;
-    for (i, pixel) in rendered.image.pixels.iter().enumerate() {
-        if pixel.a() > 0 {
+    for (i, pixel) in rendered.pixmap.pixels().iter().enumerate() {
+        if pixel.alpha() > 0 {
             let (x, y) = (i % w, i / w);
             found = Some(match found {
                 Some([x0, y0, x1, y1]) => [x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1)],

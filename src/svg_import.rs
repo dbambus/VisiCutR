@@ -751,16 +751,16 @@ mod tests {
         )
         .unwrap();
         let before = crate::svg::render(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert!(before.image.pixels.iter().all(|p| p.a() == 0));
+        assert!(before.pixmap.pixels().iter().all(|p| p.alpha() == 0));
         let imported = read_svg_file(&path).unwrap();
         assert!(imported.warnings.is_empty(), "{:?}", imported.warnings);
         let after = crate::svg::render(&imported.svg).unwrap();
         assert!(
             after
-                .image
-                .pixels
+                .pixmap
+                .pixels()
                 .iter()
-                .any(|p| p.a() > 0 && p.r() > 200 && p.g() < 50)
+                .any(|p| p.alpha() > 0 && p.red() > 200 && p.green() < 50)
         );
     }
 }

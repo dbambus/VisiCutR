@@ -76,7 +76,8 @@ fn nesting_depth(text: &str) -> usize {
 pub struct Preview {
     pub width_mm: f32,
     pub height_mm: f32,
-    pub image: eframe::egui::ColorImage,
+    /// The drawing rendered at preview resolution (premultiplied RGBA).
+    pub pixmap: tiny_skia::Pixmap,
 }
 
 /// System fonts plus the fonts bundled with egui (Ubuntu Light, Hack), loaded once.
@@ -327,24 +328,8 @@ pub fn render(source: &str) -> Result<Preview, String> {
     Ok(Preview {
         width_mm,
         height_mm,
-        image: color_image(pixmap),
+        pixmap,
     })
-}
-
-/// The pixmap as an egui image.
-pub fn color_image(pixmap: tiny_skia::Pixmap) -> eframe::egui::ColorImage {
-    let size = [pixmap.width() as usize, pixmap.height() as usize];
-    // tiny-skia stores premultiplied RGBA; convert before handing pixels to egui.
-    let mut pixels = pixmap.take();
-    for pixel in pixels.chunks_exact_mut(4) {
-        let alpha = pixel[3] as u32;
-        if alpha > 0 {
-            for channel in &mut pixel[..3] {
-                *channel = ((*channel as u32 * 255 + alpha / 2) / alpha).min(255) as u8;
-            }
-        }
-    }
-    eframe::egui::ColorImage::from_rgba_unmultiplied(size, &pixels)
 }
 
 #[cfg(test)]
@@ -374,7 +359,7 @@ mod tests {
         let preview = render(include_str!("../examples/demo.svg")).unwrap();
         assert!((preview.width_mm - 100.0).abs() < 0.01);
         assert!((preview.height_mm - 60.0).abs() < 0.01);
-        assert!(preview.image.pixels.iter().any(|p| p.a() > 0));
+        assert!(preview.pixmap.pixels().iter().any(|p| p.alpha() > 0));
     }
     #[test]
     fn rejects_malformed_svg() {

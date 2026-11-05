@@ -350,7 +350,7 @@ pub fn font_sample(
     bold: bool,
     italic: bool,
     line_px: f64,
-) -> Option<eframe::egui::ColorImage> {
+) -> Option<tiny_skia::Pixmap> {
     let mut lines: Vec<String> = text
         .lines()
         .map(str::trim_end)
@@ -392,7 +392,7 @@ pub fn font_sample(
         tiny_skia::Transform::identity(),
         &mut pixmap.as_mut(),
     );
-    Some(svg::color_image(pixmap))
+    Some(pixmap)
 }
 
 /// The elements of a sign, ready for [`add_objects`].
@@ -3447,10 +3447,15 @@ mod tests {
     #[test]
     fn font_sample_shows_the_text_in_the_font() {
         let one = font_sample("Hallo", "sans-serif", false, false, 30.0).unwrap();
-        assert!(one.pixels.iter().any(|p| p.a() > 0));
-        assert!(one.size[0] > one.size[1], "{:?}", one.size);
+        assert!(one.pixels().iter().any(|p| p.alpha() > 0));
+        assert!(
+            one.width() > one.height(),
+            "{}x{}",
+            one.width(),
+            one.height()
+        );
         let two = font_sample("Hallo\nWelt", "sans-serif", false, false, 30.0).unwrap();
-        assert!(two.size[1] > one.size[1] + 20, "{:?}", two.size);
+        assert!(two.height() > one.height() + 20, "{}", two.height());
         // Leerer Text: Beispielzeichen statt nichts.
         assert!(font_sample("  ", "serif", true, true, 30.0).is_some());
     }

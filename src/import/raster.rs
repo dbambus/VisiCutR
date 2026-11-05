@@ -389,10 +389,10 @@ mod tests {
         let preview = crate::svg::render(&imported.svg).unwrap();
         assert!(
             preview
-                .image
-                .pixels
+                .pixmap
+                .pixels()
                 .iter()
-                .any(|p| p.a() == 255 && p.r() > 200 && p.g() < 50)
+                .any(|p| p.alpha() == 255 && p.red() > 200 && p.green() < 50)
         );
     }
 
@@ -418,10 +418,10 @@ mod tests {
         let preview = crate::svg::render(&imported.svg).unwrap();
         assert!(
             preview
-                .image
-                .pixels
+                .pixmap
+                .pixels()
                 .iter()
-                .any(|p| p.a() == 255 && p.b() > 200)
+                .any(|p| p.alpha() == 255 && p.blue() > 200)
         );
         assert_close(
             (preview.width_mm, preview.height_mm),

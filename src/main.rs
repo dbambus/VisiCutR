@@ -3810,341 +3810,404 @@ impl VisiCutR {
         const MARGIN: f32 = 14.0;
         let bed_mm = Vec2::new(self.project.bed_width_mm, self.project.bed_height_mm);
         let available = ui.available_size() - Vec2::splat(RULER + MARGIN);
-        // Mausrad zoomt die Arbeitsfläche (nicht scrollen), solange der Zeiger darüber steht.
-        if ui.rect_contains_pointer(ui.max_rect()) {
-            let wheel = ui.input(|i| i.raw_scroll_delta.y);
-            if wheel != 0.0 {
-                self.zoom = (self.zoom * (wheel * 0.002).exp())
-                    .clamp(workspace::ZOOM_MIN, workspace::ZOOM_MAX);
-                ui.input_mut(|i| {
-                    i.raw_scroll_delta = Vec2::ZERO;
-                    i.smooth_scroll_delta = Vec2::ZERO;
-                });
-            }
-        }
+        self.wheel_zoom(ui);
         let scale =
             workspace::fit_scale([available.x, available.y], [bed_mm.x, bed_mm.y]) * self.zoom;
         self.view_scale = scale;
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
             let size = bed_mm * scale + Vec2::splat(RULER + MARGIN);
             let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-            if response.clicked()
-                && let Some(id) = ui.memory(|m| m.focused())
-            {
-                ui.memory_mut(|m| m.surrender_focus(id));
-            }
-            // Rechtsklick auf eine freie Stelle: kopiertes Teil einfügen.
-            let can_paste = self.enabled(Command::Paste);
-            response.context_menu(|ui| {
-                for command in [Command::Paste, Command::PasteInPlace] {
-                    let mut button = egui::Button::new(command.title());
-                    if let Some(shortcut) = command.shortcut() {
-                        button = button.shortcut_text(ui.ctx().format_shortcut(&shortcut));
-                    }
-                    if ui.add_enabled(can_paste, button).clicked() {
-                        *clicked = Some(command);
-                    }
-                }
-            });
-            let bed = Rect::from_min_size(rect.min + Vec2::splat(RULER), bed_mm * scale);
+            self.free_area_menu(ui, &response, clicked);
+            let view = BedView {
+                rect: Rect::from_min_size(rect.min + Vec2::splat(RULER), bed_mm * scale),
+                scale,
+            };
             // Neue Text-, Form- und Schild-Teile kommen in den sichtbaren Ausschnitt.
-            let shown = bed.intersect(ui.clip_rect());
+            let shown = view.rect.intersect(ui.clip_rect());
             if shown.is_positive() {
-                let min = (shown.min - bed.min) / scale;
+                let min = view.to_mm(shown.min);
                 let size = shown.size() / scale;
-                self.visible_mm = [min.x, min.y, size.x, size.y];
+                self.visible_mm = [min[0], min[1], size.x, size.y];
             }
-            self.rulers(ui.painter(), bed, scale);
-            let painter = ui.painter().with_clip_rect(bed.intersect(ui.clip_rect()));
-            painter.rect_filled(bed, 0.0, Color32::WHITE);
-            let camera = self.devices.paint_camera(&painter, bed);
-            if self.show_grid && !camera {
-                let step = workspace::grid_step_mm(scale);
-                // Linien an den Linealzahlen kräftiger.
-                let labels = workspace::ruler_step_mm(scale);
-                let line = |mm: f32| {
-                    let major = ((mm / labels).round() * labels - mm).abs() < step * 0.01;
-                    Stroke::new(0.5, Color32::from_gray(if major { 200 } else { 228 }))
-                };
-                for x in workspace::ruler_marks(bed_mm.x, step) {
-                    let px = bed.left() + x * scale;
-                    painter.line_segment(
-                        [Pos2::new(px, bed.top()), Pos2::new(px, bed.bottom())],
-                        line(x),
+            self.rulers(ui.painter(), view);
+            let painter = ui.painter().with_clip_rect(shown);
+            self.paint_bed(&painter, view);
+            match self.texture.as_ref().map(egui::TextureHandle::id) {
+                Some(texture) => self.motif_on_bed(ui, &painter, view, texture, clicked),
+                None => {
+                    let open = ui
+                        .ctx()
+                        .format_shortcut(&Command::Open.shortcut().expect("Öffnen hat ein Kürzel"));
+                    painter.text(
+                        view.rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        tr!(
+                            "Datei öffnen ({shortcut}) oder hierher ziehen",
+                            shortcut = open
+                        ),
+                        egui::FontId::proportional(22.0),
+                        Color32::from_gray(145),
                     );
                 }
-                for y in workspace::ruler_marks(bed_mm.y, step) {
-                    let py = self.ruler_y(bed, scale, y);
-                    painter.line_segment(
-                        [Pos2::new(bed.left(), py), Pos2::new(bed.right(), py)],
-                        line(y),
-                    );
-                }
-            }
-            painter.rect_stroke(
-                bed,
-                0.0,
-                Stroke::new(1.0, Color32::from_gray(145)),
-                egui::StrokeKind::Inside,
-            );
-            self.remnants.paint(&painter, bed, scale);
-            if let Some(texture) = &self.texture {
-                let to_screen = |[x, y, w, h]: [f32; 4]| {
-                    Rect::from_min_size(bed.min + Vec2::new(x, y) * scale, Vec2::new(w, h) * scale)
-                };
-                let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
-                // Bearbeitung in Farbe statt der Originalbilder, schon vor der
-                // Auftragsvorschau.
-                let live = self.live.as_ref().and_then(|(_, t)| t.as_ref());
-                // Die übrigen Teile unter dem gewählten, mit dünnem grauem Rahmen.
-                let others: Vec<(usize, Rect)> = self
-                    .project
-                    .parts
-                    .iter()
-                    .enumerate()
-                    .map(|(k, part)| {
-                        let index = k + usize::from(k >= self.project.active_part);
-                        let rect = to_screen([part.x_mm, part.y_mm, part.width_mm, part.height_mm]);
-                        match self.part_textures.get(k).and_then(Option::as_ref) {
-                            _ if live.is_some() => {}
-                            Some(texture) => {
-                                painter.image(texture.id(), rect, uv, Color32::WHITE);
-                            }
-                            None => {
-                                painter.rect_filled(rect, 0.0, Color32::from_gray(235));
-                            }
-                        }
-                        (index, rect)
-                    })
-                    .collect();
-                let motif = to_screen([
-                    self.project.x_mm,
-                    self.project.y_mm,
-                    self.project.width_mm,
-                    self.project.height_mm,
-                ]);
-                match live {
-                    Some(live) => painter.image(
-                        live.id(),
-                        to_screen(self.project.bounds()),
-                        uv,
-                        Color32::WHITE,
-                    ),
-                    None => painter.image(texture.id(), motif, uv, Color32::WHITE),
-                };
-                // Die Auftragsvorschau umfasst alle Teile.
-                self.preview
-                    .overlay(&painter, to_screen(self.project.bounds()));
-                let mut select = None;
-                for &(index, rect) in &others {
-                    painter.rect_stroke(
-                        rect,
-                        0.0,
-                        Stroke::new(1.0, Color32::from_gray(150)),
-                        egui::StrokeKind::Inside,
-                    );
-                    let (name, _, _) = part_summary(&self.project, index);
-                    let response = ui
-                        .interact(
-                            rect.intersect(bed),
-                            ui.id().with(("part", index)),
-                            Sense::click(),
-                        )
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .on_hover_text(part_title(name, index));
-                    if response.clicked() {
-                        select = Some(index);
-                    }
-                    // Rechtsklick wählt das Teil und öffnet gleich sein Menü
-                    // (dasselbe wie beim gewählten Teil, siehe „motif“).
-                    if response.secondary_clicked() {
-                        select = Some(index);
-                        let menu = ui.id().with("motif").with("popup");
-                        let at = response.interact_pointer_pos();
-                        // Wie egui's eigenes `context_menu` (Position für den
-                        // Anker `PointerFixed`); einen anderen Weg gibt es nicht.
-                        #[allow(deprecated)]
-                        ui.memory_mut(|m| m.open_popup_at(menu, at));
-                    }
-                }
-                if let Some(index) = select {
-                    self.select_part(index);
-                    return;
-                }
-                // Auswahl schwarz gestrichelt: Blau, Rot, Orange und Violett
-                // stehen für Bearbeitungen und dürfen nicht verwechselt werden.
-                let frame = motif.shrink(0.5);
-                painter.extend(egui::Shape::dashed_line(
-                    &[
-                        frame.left_top(),
-                        frame.right_top(),
-                        frame.right_bottom(),
-                        frame.left_bottom(),
-                        frame.left_top(),
-                    ],
-                    Stroke::new(1.0, Color32::from_black_alpha(190)),
-                    5.0,
-                    3.0,
-                ));
-                use std::hash::{Hash, Hasher};
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                self.project.svg.hash(&mut hasher);
-                self.project.width_mm.to_bits().hash(&mut hasher);
-                self.project.height_mm.to_bits().hash(&mut hasher);
-                let key = hasher.finish();
-                // In „Einzeln“: Objekt unter der Maus auf der Arbeitsfläche;
-                // seine Zeile in der Liste gilt als ausgewählt.
-                let objects_mode =
-                    jobs_ui::assignment_mode(&self.project) == jobs_ui::AssignmentMode::Objects;
-                let pointer = ui
-                    .input(|i| i.pointer.hover_pos())
-                    .filter(|p| bed.contains(*p) && ui.rect_contains_pointer(bed));
-                self.jobs.canvas_hover = match pointer {
-                    Some(pos) if objects_mode && self.handle_drag.is_none() => {
-                        if self.all_outlines.as_ref().is_none_or(|(k, _)| *k != key) {
-                            let outlines = visicut_core::geometry::object_outlines(&self.project)
-                                .unwrap_or_default();
-                            self.all_outlines = Some((key, outlines));
-                        }
-                        let mm = [
-                            f64::from((pos.x - bed.min.x) / scale - self.project.x_mm),
-                            f64::from((pos.y - bed.min.y) / scale - self.project.y_mm),
-                        ];
-                        self.all_outlines.as_ref().and_then(|(_, outlines)| {
-                            visicut_core::geometry::object_at(outlines, mm, f64::from(4.0 / scale))
-                        })
-                    }
-                    _ => None,
-                };
-                // Objekt unter der Maus (Liste oder Arbeitsfläche): gelb
-                // (keine Bearbeitungsfarbe).
-                if let Some(index) = self.jobs.hovered_object.take().or(self.jobs.canvas_hover) {
-                    if !self
-                        .hover_outline
-                        .as_ref()
-                        .is_some_and(|(k, i, _)| *k == key && *i == index)
-                    {
-                        let outline = visicut_core::geometry::object_outline(&self.project, index)
-                            .unwrap_or_default();
-                        self.hover_outline = Some((key, index, outline));
-                    }
-                    if let Some((_, _, outline)) = &self.hover_outline {
-                        let origin = [self.project.x_mm as f64, self.project.y_mm as f64];
-                        for contour in outline {
-                            let points: Vec<Pos2> = contour
-                                .iter()
-                                .map(|p| {
-                                    bed.min
-                                        + Vec2::new(
-                                            (origin[0] + p[0]) as f32,
-                                            (origin[1] + p[1]) as f32,
-                                        ) * scale
-                                })
-                                .collect();
-                            painter.add(egui::Shape::line(
-                                points.clone(),
-                                Stroke::new(4.0, Color32::from_rgb(255, 204, 0)),
-                            ));
-                            painter.add(egui::Shape::line(
-                                points,
-                                Stroke::new(1.0, Color32::from_black_alpha(180)),
-                            ));
-                        }
-                    }
-                }
-                let response = ui
-                    .interact(
-                        motif.intersect(bed),
-                        ui.id().with("motif"),
-                        Sense::click_and_drag(),
-                    )
-                    .on_hover_cursor(egui::CursorIcon::Grab);
-                let editable = !self.busy();
-                let text = self.project.part_text.clone();
-                let copied = self.copied.is_some();
-                let mut edit_text = false;
-                response.context_menu(|ui| {
-                    if text.is_some() {
-                        edit_text = ui
-                            .add_enabled(editable, egui::Button::new(tr("Text bearbeiten …")))
-                            .clicked();
-                        ui.separator();
-                    }
-                    for command in [Command::Copy, Command::Paste, Command::PasteInPlace] {
-                        let mut button = egui::Button::new(command.title());
-                        if let Some(shortcut) = command.shortcut() {
-                            button = button.shortcut_text(ui.ctx().format_shortcut(&shortcut));
-                        }
-                        let enabled = editable && (command == Command::Copy || copied);
-                        if ui.add_enabled(enabled, button).clicked() {
-                            *clicked = Some(command);
-                        }
-                    }
-                    ui.separator();
-                    for group in [
-                        &[
-                            Command::Duplicate,
-                            Command::DuplicatePart,
-                            Command::Array,
-                            Command::Nest,
-                        ][..],
-                        &[
-                            Command::RotateLeft,
-                            Command::RotateRight,
-                            Command::FlipHorizontal,
-                            Command::FlipVertical,
-                        ],
-                        &[Command::Delete],
-                    ] {
-                        for command in group {
-                            if ui
-                                .add_enabled(editable, egui::Button::new(command.title()))
-                                .clicked()
-                            {
-                                *clicked = Some(*command);
-                            }
-                        }
-                        ui.separator();
-                    }
-                });
-                if edit_text && let Some(text) = &text {
-                    self.compose.edit_text(text);
-                }
-                // Liegt unter dem gewählten Teil ein anderes, wählt ein Klick
-                // dieses; sonst wäre es nicht mehr erreichbar.
-                if response.clicked()
-                    && let Some(pos) = response.interact_pointer_pos()
-                    && let Some((index, _)) = others.iter().rev().find(|(_, r)| r.contains(pos))
-                {
-                    self.select_part(*index);
-                    return;
-                }
-                if response.dragged() && !self.busy() {
-                    let delta = response.drag_delta() / scale;
-                    let (x, y) = (self.project.x_mm + delta.x, self.project.y_mm + delta.y);
-                    if workspace::place(&mut self.project, x, y) {
-                        self.dirty = true;
-                    }
-                }
-                if !self.busy() {
-                    self.handles(ui, motif, bed, scale, texture.id(), clicked);
-                }
-            } else {
-                let open = ui
-                    .ctx()
-                    .format_shortcut(&Command::Open.shortcut().expect("Öffnen hat ein Kürzel"));
-                painter.text(
-                    bed.center(),
-                    egui::Align2::CENTER_CENTER,
-                    tr!(
-                        "Datei öffnen ({shortcut}) oder hierher ziehen",
-                        shortcut = open
-                    ),
-                    egui::FontId::proportional(22.0),
-                    Color32::from_gray(145),
-                );
             }
         });
+    }
+
+    /// Mausrad zoomt die Arbeitsfläche (nicht scrollen), solange der Zeiger darüber steht.
+    fn wheel_zoom(&mut self, ui: &mut egui::Ui) {
+        if !ui.rect_contains_pointer(ui.max_rect()) {
+            return;
+        }
+        let wheel = ui.input(|i| i.raw_scroll_delta.y);
+        if wheel != 0.0 {
+            self.zoom =
+                (self.zoom * (wheel * 0.002).exp()).clamp(workspace::ZOOM_MIN, workspace::ZOOM_MAX);
+            ui.input_mut(|i| {
+                i.raw_scroll_delta = Vec2::ZERO;
+                i.smooth_scroll_delta = Vec2::ZERO;
+            });
+        }
+    }
+
+    /// Klick auf eine freie Stelle nimmt den Fokus aus Eingabefeldern;
+    /// Rechtsklick fügt ein kopiertes Teil ein.
+    fn free_area_menu(
+        &self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        clicked: &mut Option<Command>,
+    ) {
+        if response.clicked()
+            && let Some(id) = ui.memory(|m| m.focused())
+        {
+            ui.memory_mut(|m| m.surrender_focus(id));
+        }
+        let can_paste = self.enabled(Command::Paste);
+        response.context_menu(|ui| {
+            for command in [Command::Paste, Command::PasteInPlace] {
+                if ui
+                    .add_enabled(can_paste, command_button(ui, command))
+                    .clicked()
+                {
+                    *clicked = Some(command);
+                }
+            }
+        });
+    }
+
+    /// Weißes Bett mit Kamerabild oder Raster, Rahmen und Reststücken.
+    fn paint_bed(&self, painter: &egui::Painter, view: BedView) {
+        let BedView { rect: bed, scale } = view;
+        painter.rect_filled(bed, 0.0, Color32::WHITE);
+        let camera = self.devices.paint_camera(painter, bed);
+        if self.show_grid && !camera {
+            let step = workspace::grid_step_mm(scale);
+            // Linien an den Linealzahlen kräftiger.
+            let labels = workspace::ruler_step_mm(scale);
+            let line = |mm: f32| {
+                let major = ((mm / labels).round() * labels - mm).abs() < step * 0.01;
+                Stroke::new(0.5, Color32::from_gray(if major { 200 } else { 228 }))
+            };
+            for x in workspace::ruler_marks(self.project.bed_width_mm, step) {
+                let px = bed.left() + x * scale;
+                painter.line_segment(
+                    [Pos2::new(px, bed.top()), Pos2::new(px, bed.bottom())],
+                    line(x),
+                );
+            }
+            for y in workspace::ruler_marks(self.project.bed_height_mm, step) {
+                let py = self.ruler_y(view, y);
+                painter.line_segment(
+                    [Pos2::new(bed.left(), py), Pos2::new(bed.right(), py)],
+                    line(y),
+                );
+            }
+        }
+        painter.rect_stroke(
+            bed,
+            0.0,
+            Stroke::new(1.0, Color32::from_gray(145)),
+            egui::StrokeKind::Inside,
+        );
+        self.remnants.paint(painter, bed, scale);
+    }
+
+    /// Motiv und übrige Teile auf dem Bett: zeichnen, wählen, verschieben,
+    /// Kontextmenü und Anfasser.
+    fn motif_on_bed(
+        &mut self,
+        ui: &mut egui::Ui,
+        painter: &egui::Painter,
+        view: BedView,
+        texture: egui::TextureId,
+        clicked: &mut Option<Command>,
+    ) {
+        let others = self.paint_parts(painter, view, texture);
+        // Die Auftragsvorschau umfasst alle Teile.
+        self.preview
+            .overlay(painter, view.to_screen(self.project.bounds()));
+        if let Some(index) = self.other_parts_clicked(ui, painter, view, &others) {
+            self.select_part(index);
+            return;
+        }
+        let p = &self.project;
+        let motif = view.to_screen([p.x_mm, p.y_mm, p.width_mm, p.height_mm]);
+        // Auswahl schwarz gestrichelt: Blau, Rot, Orange und Violett
+        // stehen für Bearbeitungen und dürfen nicht verwechselt werden.
+        let frame = motif.shrink(0.5);
+        painter.extend(egui::Shape::dashed_line(
+            &[
+                frame.left_top(),
+                frame.right_top(),
+                frame.right_bottom(),
+                frame.left_bottom(),
+                frame.left_top(),
+            ],
+            Stroke::new(1.0, Color32::from_black_alpha(190)),
+            5.0,
+            3.0,
+        ));
+        self.hovered_object(ui, painter, view);
+        let response = ui
+            .interact(
+                motif.intersect(view.rect),
+                ui.id().with("motif"),
+                Sense::click_and_drag(),
+            )
+            .on_hover_cursor(egui::CursorIcon::Grab);
+        self.motif_menu(&response, clicked);
+        // Liegt unter dem gewählten Teil ein anderes, wählt ein Klick
+        // dieses; sonst wäre es nicht mehr erreichbar.
+        if response.clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+            && let Some((index, _)) = others.iter().rev().find(|(_, r)| r.contains(pos))
+        {
+            self.select_part(*index);
+            return;
+        }
+        if response.dragged() && !self.busy() {
+            let delta = response.drag_delta() / view.scale;
+            let (x, y) = (self.project.x_mm + delta.x, self.project.y_mm + delta.y);
+            if workspace::place(&mut self.project, x, y) {
+                self.dirty = true;
+            }
+        }
+        if !self.busy() {
+            self.handles(ui, motif, view, texture, clicked);
+        }
+    }
+
+    /// Zeichnet das gewählte Teil über den übrigen und gibt die übrigen mit
+    /// Index und Bildschirmrechteck zurück.
+    fn paint_parts(
+        &self,
+        painter: &egui::Painter,
+        view: BedView,
+        texture: egui::TextureId,
+    ) -> Vec<(usize, Rect)> {
+        let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+        // Bearbeitung in Farbe statt der Originalbilder, schon vor der
+        // Auftragsvorschau.
+        let live = self.live.as_ref().and_then(|(_, t)| t.as_ref());
+        // Die übrigen Teile unter dem gewählten, mit dünnem grauem Rahmen.
+        let others = self
+            .project
+            .parts
+            .iter()
+            .enumerate()
+            .map(|(k, part)| {
+                let index = k + usize::from(k >= self.project.active_part);
+                let rect = view.to_screen([part.x_mm, part.y_mm, part.width_mm, part.height_mm]);
+                match self.part_textures.get(k).and_then(Option::as_ref) {
+                    _ if live.is_some() => {}
+                    Some(texture) => {
+                        painter.image(texture.id(), rect, uv, Color32::WHITE);
+                    }
+                    None => {
+                        painter.rect_filled(rect, 0.0, Color32::from_gray(235));
+                    }
+                }
+                (index, rect)
+            })
+            .collect();
+        let p = &self.project;
+        match live {
+            Some(live) => painter.image(live.id(), view.to_screen(p.bounds()), uv, Color32::WHITE),
+            None => painter.image(
+                texture,
+                view.to_screen([p.x_mm, p.y_mm, p.width_mm, p.height_mm]),
+                uv,
+                Color32::WHITE,
+            ),
+        };
+        others
+    }
+
+    /// Rahmen und Klickflächen der übrigen Teile; das angeklickte Teil.
+    fn other_parts_clicked(
+        &self,
+        ui: &mut egui::Ui,
+        painter: &egui::Painter,
+        view: BedView,
+        others: &[(usize, Rect)],
+    ) -> Option<usize> {
+        let mut select = None;
+        for &(index, rect) in others {
+            painter.rect_stroke(
+                rect,
+                0.0,
+                Stroke::new(1.0, Color32::from_gray(150)),
+                egui::StrokeKind::Inside,
+            );
+            let (name, _, _) = part_summary(&self.project, index);
+            let response = ui
+                .interact(
+                    rect.intersect(view.rect),
+                    ui.id().with(("part", index)),
+                    Sense::click(),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text(part_title(name, index));
+            if response.clicked() {
+                select = Some(index);
+            }
+            // Rechtsklick wählt das Teil und öffnet gleich sein Menü
+            // (dasselbe wie beim gewählten Teil, siehe „motif“).
+            if response.secondary_clicked() {
+                select = Some(index);
+                let menu = ui.id().with("motif").with("popup");
+                let at = response.interact_pointer_pos();
+                // Wie egui's eigenes `context_menu` (Position für den
+                // Anker `PointerFixed`); einen anderen Weg gibt es nicht.
+                #[allow(deprecated)]
+                ui.memory_mut(|m| m.open_popup_at(menu, at));
+            }
+        }
+        select
+    }
+
+    /// In „Einzeln“: Objekt unter der Maus auf der Arbeitsfläche finden
+    /// (seine Zeile in der Liste gilt als ausgewählt) und das Objekt unter
+    /// der Maus (Liste oder Arbeitsfläche) gelb umranden.
+    fn hovered_object(&mut self, ui: &egui::Ui, painter: &egui::Painter, view: BedView) {
+        use std::hash::{Hash, Hasher};
+        let BedView { rect: bed, scale } = view;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.project.svg.hash(&mut hasher);
+        self.project.width_mm.to_bits().hash(&mut hasher);
+        self.project.height_mm.to_bits().hash(&mut hasher);
+        let key = hasher.finish();
+        let objects_mode =
+            jobs_ui::assignment_mode(&self.project) == jobs_ui::AssignmentMode::Objects;
+        let pointer = ui
+            .input(|i| i.pointer.hover_pos())
+            .filter(|p| bed.contains(*p) && ui.rect_contains_pointer(bed));
+        self.jobs.canvas_hover = match pointer {
+            Some(pos) if objects_mode && self.handle_drag.is_none() => {
+                if self.all_outlines.as_ref().is_none_or(|(k, _)| *k != key) {
+                    let outlines =
+                        visicut_core::geometry::object_outlines(&self.project).unwrap_or_default();
+                    self.all_outlines = Some((key, outlines));
+                }
+                let [x, y] = view.to_mm(pos);
+                let mm = [
+                    f64::from(x - self.project.x_mm),
+                    f64::from(y - self.project.y_mm),
+                ];
+                self.all_outlines.as_ref().and_then(|(_, outlines)| {
+                    visicut_core::geometry::object_at(outlines, mm, f64::from(4.0 / scale))
+                })
+            }
+            _ => None,
+        };
+        // Gelb: keine Bearbeitungsfarbe.
+        let Some(index) = self.jobs.hovered_object.take().or(self.jobs.canvas_hover) else {
+            return;
+        };
+        if !self
+            .hover_outline
+            .as_ref()
+            .is_some_and(|(k, i, _)| *k == key && *i == index)
+        {
+            let outline =
+                visicut_core::geometry::object_outline(&self.project, index).unwrap_or_default();
+            self.hover_outline = Some((key, index, outline));
+        }
+        if let Some((_, _, outline)) = &self.hover_outline {
+            let origin = [self.project.x_mm as f64, self.project.y_mm as f64];
+            for contour in outline {
+                let points: Vec<Pos2> = contour
+                    .iter()
+                    .map(|p| {
+                        bed.min
+                            + Vec2::new((origin[0] + p[0]) as f32, (origin[1] + p[1]) as f32)
+                                * scale
+                    })
+                    .collect();
+                painter.add(egui::Shape::line(
+                    points.clone(),
+                    Stroke::new(4.0, Color32::from_rgb(255, 204, 0)),
+                ));
+                painter.add(egui::Shape::line(
+                    points,
+                    Stroke::new(1.0, Color32::from_black_alpha(180)),
+                ));
+            }
+        }
+    }
+
+    /// Kontextmenü des gewählten Teils.
+    fn motif_menu(&mut self, response: &egui::Response, clicked: &mut Option<Command>) {
+        let editable = !self.busy();
+        let text = self.project.part_text.clone();
+        let copied = self.copied.is_some();
+        let mut edit_text = false;
+        response.context_menu(|ui| {
+            if text.is_some() {
+                edit_text = ui
+                    .add_enabled(editable, egui::Button::new(tr("Text bearbeiten …")))
+                    .clicked();
+                ui.separator();
+            }
+            for command in [Command::Copy, Command::Paste, Command::PasteInPlace] {
+                let enabled = editable && (command == Command::Copy || copied);
+                if ui
+                    .add_enabled(enabled, command_button(ui, command))
+                    .clicked()
+                {
+                    *clicked = Some(command);
+                }
+            }
+            ui.separator();
+            for group in [
+                &[
+                    Command::Duplicate,
+                    Command::DuplicatePart,
+                    Command::Array,
+                    Command::Nest,
+                ][..],
+                &[
+                    Command::RotateLeft,
+                    Command::RotateRight,
+                    Command::FlipHorizontal,
+                    Command::FlipVertical,
+                ],
+                &[Command::Delete],
+            ] {
+                for command in group {
+                    if ui
+                        .add_enabled(editable, egui::Button::new(command.title()))
+                        .clicked()
+                    {
+                        *clicked = Some(*command);
+                    }
+                }
+                ui.separator();
+            }
+        });
+        if edit_text && let Some(text) = &text {
+            self.compose.edit_text(text);
+        }
     }
 
     /// Anfasser wie in VisiCut: Ecken und Kantenmitten skalieren (Kette im
@@ -4154,18 +4217,13 @@ impl VisiCutR {
         &mut self,
         ui: &mut egui::Ui,
         motif: Rect,
-        bed: Rect,
-        scale: f32,
+        view: BedView,
         texture: egui::TextureId,
         clicked: &mut Option<Command>,
     ) {
         use egui::CursorIcon;
         let shift = ui.input(|i| i.modifiers.shift);
         let painter = ui.painter();
-        let to_mm = |p: Pos2| {
-            let mm = (p - bed.min) / scale;
-            [mm.x, mm.y]
-        };
         let p = &self.project;
         let rect_mm = [p.x_mm, p.y_mm, p.width_mm, p.height_mm];
         let handle_stroke = Stroke::new(1.0, Color32::from_black_alpha(200));
@@ -4193,7 +4251,7 @@ impl VisiCutR {
             {
                 let proportional = self.proportional != shift;
                 let [x, y, w, h] =
-                    workspace::drag_handle(start, handle, to_mm(pointer), proportional);
+                    workspace::drag_handle(start, handle, view.to_mm(pointer), proportional);
                 let p = &mut self.project;
                 (p.x_mm, p.y_mm, p.width_mm, p.height_mm) = (x, y, w, h);
                 self.dirty = true;
@@ -4210,7 +4268,7 @@ impl VisiCutR {
             );
         }
         // Drehanfasser über der Mitte, bei wenig Platz darunter.
-        let above = motif.top() - 22.0 >= bed.top();
+        let above = motif.top() - 22.0 >= view.rect.top();
         let (edge, knob) = if above {
             (
                 motif.center_top(),
@@ -4303,16 +4361,17 @@ impl VisiCutR {
 
     /// Senkrechte Bildschirmposition einer Lineal- oder Rastermarke `y` mm;
     /// mit Nullpunkt unten links zählt sie von der unteren Bettkante.
-    fn ruler_y(&self, bed: Rect, scale: f32, y: f32) -> f32 {
+    fn ruler_y(&self, view: BedView, y: f32) -> f32 {
         if self.devices.origin_bottom_left() {
-            bed.bottom() - y * scale
+            view.rect.bottom() - y * view.scale
         } else {
-            bed.top() + y * scale
+            view.rect.top() + y * view.scale
         }
     }
 
     /// Lineale mit mm-Beschriftung oben und links vom Bett.
-    fn rulers(&self, painter: &egui::Painter, bed: Rect, scale: f32) {
+    fn rulers(&self, painter: &egui::Painter, view: BedView) {
+        let BedView { rect: bed, scale } = view;
         let step = workspace::ruler_step_mm(scale);
         let color = Color32::from_gray(110);
         let font = egui::FontId::monospace(10.0);
@@ -4332,7 +4391,7 @@ impl VisiCutR {
             );
         }
         for y in workspace::ruler_marks(self.project.bed_height_mm, step) {
-            let py = self.ruler_y(bed, scale, y);
+            let py = self.ruler_y(view, y);
             painter.line_segment(
                 [Pos2::new(bed.left() - 6.0, py), Pos2::new(bed.left(), py)],
                 tick,
@@ -4356,208 +4415,246 @@ impl VisiCutR {
 
     /// Dialoge: Hinweis, ungesicherte Änderungen, Ersetzen, Senden.
     fn dialogs(&mut self, ctx: &egui::Context) {
-        if self.confirm_library_quit {
-            // Some(true): sichern, Some(false): verwerfen.
-            let mut choice = None;
-            let modal = egui::Modal::new(egui::Id::new("library_quit")).show(ctx, |ui| {
-                ui.set_max_width(380.0);
-                ui.heading(tr("Änderungen an der Materialbibliothek sichern?"));
-                ui.label(tr("Nicht gesicherte Änderungen gehen verloren."));
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui.button(tr("Sichern")).clicked() {
-                        choice = Some(true);
-                    }
-                    if ui.button(tr("Nicht sichern")).clicked() {
-                        choice = Some(false);
-                    }
-                    if ui.button(tr("Abbrechen")).clicked() {
-                        ui.close();
-                    }
-                });
-            });
-            match choice {
-                Some(save) => {
-                    self.confirm_library_quit = false;
-                    let saved = if save {
-                        self.jobs.save_library()
-                    } else {
-                        self.jobs.discard_library();
-                        Ok(())
-                    };
-                    match saved {
-                        Ok(()) => self.request(ctx, Replace::Quit),
-                        Err(e) => self.report(tr!(
-                            "Materialbibliothek nicht gesichert: {error}",
-                            error = e
-                        )),
-                    }
-                }
-                None if modal.should_close() => self.confirm_library_quit = false,
-                None => {}
-            }
+        self.library_quit_dialog(ctx);
+        self.replace_dialog(ctx);
+        self.import_overflow_dialog(ctx);
+        self.overwrite_dialog(ctx);
+        self.clear_cache_dialog(ctx);
+        self.send_dialog(ctx);
+        // Hinweise zuletzt, damit sie über anderen Dialogen liegen.
+        self.alert_dialog(ctx);
+    }
+
+    /// Materialbibliothek vor dem Beenden sichern?
+    fn library_quit_dialog(&mut self, ctx: &egui::Context) {
+        if !self.confirm_library_quit {
+            return;
         }
-        if let Some(action) = self.replace.take() {
-            let mut choice = None;
-            let modal = egui::Modal::new(egui::Id::new("replace")).show(ctx, |ui| {
-                ui.set_max_width(380.0);
-                ui.heading(tr!(
-                    "Änderungen an „{name}“ sichern?",
-                    name = self.project.name
-                ));
-                ui.label(tr("Nicht gesicherte Änderungen gehen verloren."));
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui.button(tr("Sichern …")).clicked() {
-                        choice = Some(true);
-                    }
-                    if ui.button(tr("Nicht sichern")).clicked() {
-                        choice = Some(false);
-                    }
-                    if ui.button(tr("Abbrechen")).clicked() {
-                        ui.close();
-                    }
-                });
-            });
-            match choice {
-                Some(true) => match self.save(false) {
-                    Ok(true) => self.perform(ctx, action),
-                    Ok(false) => {}
-                    Err(e) => self.report(tr!("Sichern nicht möglich: {error}", error = e)),
-                },
-                Some(false) => self.perform(ctx, action),
-                None if modal.should_close() => {}
-                None => self.replace = Some(action),
-            }
-        }
-        if let Some(pending) = self.pending_import.take() {
-            // Some(true): ganze Zeichnung, Some(false): nur die Fläche.
-            let mut choice = None;
-            let modal = egui::Modal::new(egui::Id::new("canvas_overflow")).show(ctx, |ui| {
-                ui.set_max_width(400.0);
-                ui.heading(tr("Zeichnung größer als die Zeichenfläche"));
-                ui.label(tr(
-                    "Ein Teil der Zeichnung liegt außerhalb der Zeichenfläche der Datei. Was soll importiert werden?",
-                ));
-                if pending.paths.len() > 1 {
-                    ui.add_space(4.0);
-                    for name in &pending.names {
-                        ui.monospace(name);
-                    }
-                    ui.label(tr("Die Wahl gilt für alle genannten Dateien."));
+        // Some(true): sichern, Some(false): verwerfen.
+        let mut choice = None;
+        let modal = egui::Modal::new(egui::Id::new("library_quit")).show(ctx, |ui| {
+            ui.set_max_width(380.0);
+            ui.heading(tr("Änderungen an der Materialbibliothek sichern?"));
+            ui.label(tr("Nicht gesicherte Änderungen gehen verloren."));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button(tr("Sichern")).clicked() {
+                    choice = Some(true);
                 }
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui.button(tr("Alles importieren")).clicked() {
-                        choice = Some(true);
-                    }
-                    if ui.button(tr("Nur Zeichenfläche")).clicked() {
-                        choice = Some(false);
-                    }
-                    if ui.button(tr("Abbrechen")).clicked() {
-                        ui.close();
-                    }
-                });
-            });
-            match choice {
-                Some(whole) => {
-                    self.fit_policy = Some(whole);
-                    if pending.replace {
-                        if let Err(e) = self.open_path(ctx, &pending.paths[0]) {
-                            self.report(e);
-                        }
-                    } else {
-                        self.drop_files(ctx, pending.paths);
-                    }
-                    self.fit_policy = None;
+                if ui.button(tr("Nicht sichern")).clicked() {
+                    choice = Some(false);
                 }
-                None if modal.should_close() => {}
-                None => self.pending_import = Some(pending),
+                if ui.button(tr("Abbrechen")).clicked() {
+                    ui.close();
+                }
+            });
+        });
+        match choice {
+            Some(save) => {
+                self.confirm_library_quit = false;
+                let saved = if save {
+                    self.jobs.save_library()
+                } else {
+                    self.jobs.discard_library();
+                    Ok(())
+                };
+                match saved {
+                    Ok(()) => self.request(ctx, Replace::Quit),
+                    Err(e) => self.report(tr!(
+                        "Materialbibliothek nicht gesichert: {error}",
+                        error = e
+                    )),
+                }
             }
+            None if modal.should_close() => self.confirm_library_quit = false,
+            None => {}
         }
-        if let Some(pending) = self.overwrite.take() {
-            let mut replace = false;
-            let modal = egui::Modal::new(egui::Id::new("overwrite")).show(ctx, |ui| {
-                ui.heading(tr("Vorhandene LTT-Dateien ersetzen?"));
-                for name in &pending.existing {
+    }
+
+    /// Ungesicherte Änderungen vor dem Ersetzen des Projekts.
+    fn replace_dialog(&mut self, ctx: &egui::Context) {
+        let Some(action) = self.replace.take() else {
+            return;
+        };
+        let mut choice = None;
+        let modal = egui::Modal::new(egui::Id::new("replace")).show(ctx, |ui| {
+            ui.set_max_width(380.0);
+            ui.heading(tr!(
+                "Änderungen an „{name}“ sichern?",
+                name = self.project.name
+            ));
+            ui.label(tr("Nicht gesicherte Änderungen gehen verloren."));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button(tr("Sichern …")).clicked() {
+                    choice = Some(true);
+                }
+                if ui.button(tr("Nicht sichern")).clicked() {
+                    choice = Some(false);
+                }
+                if ui.button(tr("Abbrechen")).clicked() {
+                    ui.close();
+                }
+            });
+        });
+        match choice {
+            Some(true) => match self.save(false) {
+                Ok(true) => self.perform(ctx, action),
+                Ok(false) => {}
+                Err(e) => self.report(tr!("Sichern nicht möglich: {error}", error = e)),
+            },
+            Some(false) => self.perform(ctx, action),
+            None if modal.should_close() => {}
+            None => self.replace = Some(action),
+        }
+    }
+
+    /// Zeichnung größer als ihre Zeichenfläche: alles oder nur die Fläche importieren.
+    fn import_overflow_dialog(&mut self, ctx: &egui::Context) {
+        let Some(pending) = self.pending_import.take() else {
+            return;
+        };
+        // Some(true): ganze Zeichnung, Some(false): nur die Fläche.
+        let mut choice = None;
+        let modal = egui::Modal::new(egui::Id::new("canvas_overflow")).show(ctx, |ui| {
+            ui.set_max_width(400.0);
+            ui.heading(tr("Zeichnung größer als die Zeichenfläche"));
+            ui.label(tr(
+                "Ein Teil der Zeichnung liegt außerhalb der Zeichenfläche der Datei. Was soll importiert werden?",
+            ));
+            if pending.paths.len() > 1 {
+                ui.add_space(4.0);
+                for name in &pending.names {
                     ui.monospace(name);
                 }
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    replace = ui.button(tr("Ersetzen")).clicked();
-                    if ui.button(tr("Abbrechen")).clicked() {
-                        ui.close();
-                    }
-                });
-            });
-            if replace {
-                self.write_export(pending);
-            } else if !modal.should_close() {
-                self.overwrite = Some(pending);
+                ui.label(tr("Die Wahl gilt für alle genannten Dateien."));
             }
-        }
-        if let Some(count) = self.confirm_clear_cache.take() {
-            let mut clear = false;
-            let modal = egui::Modal::new(egui::Id::new("clear_cache")).show(ctx, |ui| {
-                ui.set_max_width(380.0);
-                ui.heading(tr!("{count} ungesicherte Stände löschen?", count = count));
-                ui.label(tr(
-                    "Die abgelegten Projekte im Zwischenspeicher werden endgültig gelöscht. Gesicherte Projekte und das geöffnete Projekt bleiben erhalten.",
-                ));
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    clear = ui.button(tr("Löschen")).clicked();
-                    if ui.button(tr("Abbrechen")).clicked() {
-                        ui.close();
-                    }
-                });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button(tr("Alles importieren")).clicked() {
+                    choice = Some(true);
+                }
+                if ui.button(tr("Nur Zeichenfläche")).clicked() {
+                    choice = Some(false);
+                }
+                if ui.button(tr("Abbrechen")).clicked() {
+                    ui.close();
+                }
             });
-            if clear {
-                self.clear_cache();
-            } else if !modal.should_close() {
-                self.confirm_clear_cache = Some(count);
+        });
+        match choice {
+            Some(whole) => {
+                self.fit_policy = Some(whole);
+                if pending.replace {
+                    if let Err(e) = self.open_path(ctx, &pending.paths[0]) {
+                        self.report(e);
+                    }
+                } else {
+                    self.drop_files(ctx, pending.paths);
+                }
+                self.fit_policy = None;
             }
+            None if modal.should_close() => {}
+            None => self.pending_import = Some(pending),
         }
-        if let Some(prepared) = self.confirm_send.take() {
-            let mut send = false;
-            let mut cancel = false;
-            // Wie der Hinweis: Rahmen ein paar Punkte innerhalb des
-            // Fensterrands, in der Akzentfarbe.
-            let outer = egui::Frame::popup(&ctx.style()).inner_margin(5.0);
-            let modal = egui::Modal::new(egui::Id::new("send"))
-                .frame(outer)
-                .show(ctx, |ui| {
-                    egui::Frame::new()
-                        .stroke(egui::Stroke::new(2.0, form::ACCENT))
-                        .corner_radius(7.0)
-                        .inner_margin(egui::Margin::symmetric(18, 14))
-                        .show(ui, |ui| {
-                            ui.set_width(460.0);
-                            self.send_summary(ui, &prepared);
-                            ui.add_space(12.0);
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    send = ui
-                                        .add(form::primary_button(&format!("✈ {}", tr("Senden"))))
-                                        .clicked();
-                                    cancel = ui
-                                        .add(
-                                            egui::Button::new(tr("Abbrechen"))
-                                                .min_size(egui::vec2(0.0, 28.0)),
-                                        )
-                                        .clicked();
-                                },
-                            );
+    }
+
+    /// Vorhandene LTT-Dateien beim Export ersetzen?
+    fn overwrite_dialog(&mut self, ctx: &egui::Context) {
+        let Some(pending) = self.overwrite.take() else {
+            return;
+        };
+        let mut replace = false;
+        let modal = egui::Modal::new(egui::Id::new("overwrite")).show(ctx, |ui| {
+            ui.heading(tr("Vorhandene LTT-Dateien ersetzen?"));
+            for name in &pending.existing {
+                ui.monospace(name);
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                replace = ui.button(tr("Ersetzen")).clicked();
+                if ui.button(tr("Abbrechen")).clicked() {
+                    ui.close();
+                }
+            });
+        });
+        if replace {
+            self.write_export(pending);
+        } else if !modal.should_close() {
+            self.overwrite = Some(pending);
+        }
+    }
+
+    /// Ungesicherte Stände im Zwischenspeicher löschen?
+    fn clear_cache_dialog(&mut self, ctx: &egui::Context) {
+        let Some(count) = self.confirm_clear_cache.take() else {
+            return;
+        };
+        let mut clear = false;
+        let modal = egui::Modal::new(egui::Id::new("clear_cache")).show(ctx, |ui| {
+            ui.set_max_width(380.0);
+            ui.heading(tr!("{count} ungesicherte Stände löschen?", count = count));
+            ui.label(tr(
+                "Die abgelegten Projekte im Zwischenspeicher werden endgültig gelöscht. Gesicherte Projekte und das geöffnete Projekt bleiben erhalten.",
+            ));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                clear = ui.button(tr("Löschen")).clicked();
+                if ui.button(tr("Abbrechen")).clicked() {
+                    ui.close();
+                }
+            });
+        });
+        if clear {
+            self.clear_cache();
+        } else if !modal.should_close() {
+            self.confirm_clear_cache = Some(count);
+        }
+    }
+
+    /// Zusammenfassung vor dem Senden an den Lasercutter.
+    fn send_dialog(&mut self, ctx: &egui::Context) {
+        let Some(prepared) = self.confirm_send.take() else {
+            return;
+        };
+        let mut send = false;
+        let mut cancel = false;
+        // Wie der Hinweis: Rahmen ein paar Punkte innerhalb des
+        // Fensterrands, in der Akzentfarbe.
+        let outer = egui::Frame::popup(&ctx.style()).inner_margin(5.0);
+        let modal = egui::Modal::new(egui::Id::new("send"))
+            .frame(outer)
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .stroke(egui::Stroke::new(2.0, form::ACCENT))
+                    .corner_radius(7.0)
+                    .inner_margin(egui::Margin::symmetric(18, 14))
+                    .show(ui, |ui| {
+                        ui.set_width(460.0);
+                        self.send_summary(ui, &prepared);
+                        ui.add_space(12.0);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            send = ui
+                                .add(form::primary_button(&format!("✈ {}", tr("Senden"))))
+                                .clicked();
+                            cancel = ui
+                                .add(
+                                    egui::Button::new(tr("Abbrechen"))
+                                        .min_size(egui::vec2(0.0, 28.0)),
+                                )
+                                .clicked();
                         });
-                });
-            if send {
-                self.transmit(prepared);
-            } else if !cancel && !modal.should_close() {
-                self.confirm_send = Some(prepared);
-            }
+                    });
+            });
+        if send {
+            self.transmit(prepared);
+        } else if !cancel && !modal.should_close() {
+            self.confirm_send = Some(prepared);
         }
-        // Hinweise zuletzt, damit sie über anderen Dialogen liegen.
+    }
+
+    /// Hinweis mit rotem Rahmen; schließt bei Bedarf nach einer Frist von selbst.
+    fn alert_dialog(&mut self, ctx: &egui::Context) {
         let left = self
             .alert_until
             .as_ref()
@@ -4566,59 +4663,58 @@ impl VisiCutR {
         if left.is_some_and(|left| left.is_zero()) {
             self.alert = None;
         }
-        if let Some(text) = &self.alert {
-            let mut close = false;
-            // Roter Rahmen ein paar Punkte innerhalb des Fensterrands, Inhalt
-            // zentriert.
-            let outer = egui::Frame::popup(&ctx.style()).inner_margin(5.0);
-            let modal = egui::Modal::new(egui::Id::new("alert"))
-                .frame(outer)
-                .show(ctx, |ui| {
-                    egui::Frame::new()
-                        .stroke(egui::Stroke::new(2.0, ALERT_RED))
-                        .corner_radius(7.0)
-                        .inner_margin(egui::Margin::symmetric(18, 14))
-                        .show(ui, |ui| {
-                            ui.set_width(440.0);
-                            ui.vertical_centered(|ui| {
-                                let mut title = egui::text::LayoutJob::default();
-                                let size = 20.0;
-                                title.append(
-                                    "⚠  ",
-                                    0.0,
-                                    egui::TextFormat::simple(
-                                        egui::FontId::proportional(size),
-                                        ALERT_RED,
-                                    ),
-                                );
-                                title.append(
-                                    tr("Hinweis"),
-                                    0.0,
-                                    egui::TextFormat::simple(
-                                        form::bold(size),
-                                        ui.visuals().strong_text_color(),
-                                    ),
-                                );
-                                ui.label(title);
-                                ui.add_space(6.0);
-                                egui::ScrollArea::vertical()
-                                    .max_height(320.0)
-                                    .show(ui, |ui| ui.label(text));
-                                ui.add_space(10.0);
-                                close = ui.button(tr("OK")).clicked();
-                                if let Some(left) = left {
-                                    let seconds = left.as_secs_f32().ceil() as u32;
-                                    ui.weak(tr!("schließt in {seconds} s", seconds = seconds));
-                                    ctx.request_repaint_after(std::time::Duration::from_millis(
-                                        250,
-                                    ));
-                                }
-                            });
+        let Some(text) = &self.alert else {
+            return;
+        };
+        let mut close = false;
+        // Roter Rahmen ein paar Punkte innerhalb des Fensterrands, Inhalt
+        // zentriert.
+        let outer = egui::Frame::popup(&ctx.style()).inner_margin(5.0);
+        let modal = egui::Modal::new(egui::Id::new("alert"))
+            .frame(outer)
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .stroke(egui::Stroke::new(2.0, ALERT_RED))
+                    .corner_radius(7.0)
+                    .inner_margin(egui::Margin::symmetric(18, 14))
+                    .show(ui, |ui| {
+                        ui.set_width(440.0);
+                        ui.vertical_centered(|ui| {
+                            let mut title = egui::text::LayoutJob::default();
+                            let size = 20.0;
+                            title.append(
+                                "⚠  ",
+                                0.0,
+                                egui::TextFormat::simple(
+                                    egui::FontId::proportional(size),
+                                    ALERT_RED,
+                                ),
+                            );
+                            title.append(
+                                tr("Hinweis"),
+                                0.0,
+                                egui::TextFormat::simple(
+                                    form::bold(size),
+                                    ui.visuals().strong_text_color(),
+                                ),
+                            );
+                            ui.label(title);
+                            ui.add_space(6.0);
+                            egui::ScrollArea::vertical()
+                                .max_height(320.0)
+                                .show(ui, |ui| ui.label(text));
+                            ui.add_space(10.0);
+                            close = ui.button(tr("OK")).clicked();
+                            if let Some(left) = left {
+                                let seconds = left.as_secs_f32().ceil() as u32;
+                                ui.weak(tr!("schließt in {seconds} s", seconds = seconds));
+                                ctx.request_repaint_after(std::time::Duration::from_millis(250));
+                            }
                         });
-                });
-            if close || modal.should_close() {
-                self.alert = None;
-            }
+                    });
+            });
+        if close || modal.should_close() {
+            self.alert = None;
         }
     }
 
@@ -4888,6 +4984,38 @@ fn number(
     form::row(ui, label, |ui| {
         form::unit_value(ui, value, range, suffix.trim(), 110.0).changed()
     })
+}
+
+/// Das Arbeitsbett auf dem Bildschirm: Rechteck und Maßstab (Punkte je mm).
+#[derive(Clone, Copy)]
+struct BedView {
+    rect: Rect,
+    scale: f32,
+}
+
+impl BedView {
+    /// Rechteck `[x, y, b, h]` in mm auf dem Bildschirm.
+    fn to_screen(self, [x, y, w, h]: [f32; 4]) -> Rect {
+        Rect::from_min_size(
+            self.rect.min + Vec2::new(x, y) * self.scale,
+            Vec2::new(w, h) * self.scale,
+        )
+    }
+
+    /// Bildschirmpunkt in mm vom Bettursprung.
+    fn to_mm(self, pos: Pos2) -> [f32; 2] {
+        let mm = (pos - self.rect.min) / self.scale;
+        [mm.x, mm.y]
+    }
+}
+
+/// Menüeintrag eines Befehls mit seinem Tastenkürzel.
+fn command_button(ui: &egui::Ui, command: Command) -> egui::Button<'static> {
+    let button = egui::Button::new(command.title());
+    match command.shortcut() {
+        Some(shortcut) => button.shortcut_text(ui.ctx().format_shortcut(&shortcut)),
+        None => button,
+    }
 }
 
 /// Ziehen an einem Anfasser: Lage und Größe (mm) beim Start bzw. Startpunkt

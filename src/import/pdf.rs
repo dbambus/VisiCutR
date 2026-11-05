@@ -13,7 +13,7 @@
 //! the EPS BoundingBox.
 mod ghostscript;
 
-use super::{Imported, eps};
+use super::{ImportError, Imported, eps};
 use crate::{i18n::tr, tr};
 use hayro_svg::hayro_interpret::{InterpreterSettings, InterpreterWarning};
 use hayro_svg::hayro_syntax::{LoadPdfError, Pdf, PdfData};
@@ -26,22 +26,16 @@ const MM_PER_PT: f32 = 25.4 / 72.0;
 /// render"), which SVG would not draw at all.
 const HAIRLINE_MM: f32 = 0.1;
 
-pub fn read_pdf(path: &Path) -> Result<Imported, String> {
-    let data = std::fs::read(path)
-        .map_err(|e| tr!("PDF konnte nicht gelesen werden: {error}", error = e))?;
+pub fn read_pdf(path: &Path) -> Result<Imported, ImportError> {
+    let data = std::fs::read(path).map_err(ImportError::PdfUnreadable)?;
     convert(data)
 }
 
 /// Reads an EPS or PS file. If the built-in interpreter cannot handle it, the
 /// file goes to Ghostscript; without Ghostscript the message names the
 /// operator that stopped the interpreter.
-pub fn read_postscript(path: &Path) -> Result<Imported, String> {
-    let data = std::fs::read(path).map_err(|e| {
-        tr!(
-            "EPS/PS-Datei konnte nicht gelesen werden: {error}",
-            error = e
-        )
-    })?;
+pub fn read_postscript(path: &Path) -> Result<Imported, ImportError> {
+    let data = std::fs::read(path).map_err(ImportError::PostScriptUnreadable)?;
     match eps::interpret(&data) {
         Ok(imported) => Ok(Imported {
             svg: group_drawing(imported.svg),
@@ -49,7 +43,7 @@ pub fn read_postscript(path: &Path) -> Result<Imported, String> {
         }),
         Err(reason) => {
             if ghostscript::find().is_none() {
-                return Err(format!("{reason}. {}", ghostscript::missing()));
+                return Err(ImportError::NeedsGhostscript(reason));
             }
             convert(ghostscript::to_pdf(path)?)
         }
@@ -58,10 +52,10 @@ pub fn read_postscript(path: &Path) -> Result<Imported, String> {
 
 /// Converts the first page of a PDF document into an SVG sized in millimetres,
 /// in the import worker: hayro inflates streams without a size limit.
-fn convert(data: Vec<u8>) -> Result<Imported, String> {
+fn convert(data: Vec<u8>) -> Result<Imported, ImportError> {
     use super::worker::{Job, Output};
     if !data.starts_with(b"%PDF") && !data.windows(5).take(1024).any(|w| w == b"%PDF-") {
-        return Err(tr("Datei ist keine gültige PDF-Datei").into());
+        return Err(ImportError::NotPdf);
     }
     match Job::pdf(&data).run(super::worker::PDF_TIME_LIMIT)? {
         Output::Drawn { svg, warnings } => Ok(Imported {
@@ -69,29 +63,25 @@ fn convert(data: Vec<u8>) -> Result<Imported, String> {
             warnings,
             ..Default::default()
         }),
-        _ => Err(tr("Import ist unerwartet abgebrochen").into()),
+        _ => Err(ImportError::WorkerAborted),
     }
 }
 
 /// [`convert`] in this process.
-pub(super) fn convert_here(data: Vec<u8>) -> Result<Imported, String> {
+pub(super) fn convert_here(data: Vec<u8>) -> Result<Imported, ImportError> {
     // hayro does not use unsafe code but may still panic on malformed input;
     // a broken file must not take the whole application down.
     std::panic::catch_unwind(move || convert_unchecked(data))
-        .unwrap_or_else(|_| Err(tr("PDF ist beschädigt und konnte nicht gelesen werden").into()))
+        .unwrap_or_else(|_| Err(ImportError::PdfDamaged))
 }
 
-fn convert_unchecked(data: Vec<u8>) -> Result<Imported, String> {
+fn convert_unchecked(data: Vec<u8>) -> Result<Imported, ImportError> {
     let pdf = Pdf::new(PdfData::from(data)).map_err(|e| match e {
-        LoadPdfError::Decryption(_) => tr("PDF ist verschlüsselt oder passwortgeschützt; \
-            bitte eine ungeschützte Kopie speichern")
-        .to_string(),
-        LoadPdfError::Invalid => {
-            tr("PDF ist beschädigt und konnte nicht gelesen werden").to_string()
-        }
+        LoadPdfError::Decryption(_) => ImportError::PdfEncrypted,
+        LoadPdfError::Invalid => ImportError::PdfDamaged,
     })?;
     let pages = pdf.pages();
-    let page = pages.first().ok_or(tr("PDF enthält keine Seiten"))?;
+    let page = pages.first().ok_or(ImportError::PdfWithoutPages)?;
 
     let problems = Arc::new(Mutex::new(Vec::new()));
     let sink = problems.clone();
@@ -110,7 +100,7 @@ fn convert_unchecked(data: Vec<u8>) -> Result<Imported, String> {
     let svg = postprocess(&svg, width_pt, height_pt)?;
     let svg = group_drawing(crop_to_content(svg, width_pt, height_pt));
     if svg.len() > crate::svg_import::MAX_SVG_BYTES {
-        return Err(tr("PDF-Seite ist zu komplex (SVG größer als 20 MB)").into());
+        return Err(ImportError::PdfTooComplex);
     }
 
     let mut warnings = Vec::new();
@@ -220,14 +210,13 @@ fn crop_to_content(svg: String, width_pt: f32, height_pt: f32) -> String {
 /// hayro-svg writes the page size in points as unitless width/height, which
 /// SVG reads as CSS pixels; the root start tag is therefore rewritten with
 /// millimetres while the viewBox stays in points.
-fn postprocess(svg: &str, width_pt: f32, height_pt: f32) -> Result<String, String> {
-    let document = roxmltree::Document::parse(svg)
-        .map_err(|e| tr!("PDF konnte nicht umgewandelt werden: {error}", error = e))?;
+fn postprocess(svg: &str, width_pt: f32, height_pt: f32) -> Result<String, ImportError> {
+    let document = roxmltree::Document::parse(svg).map_err(ImportError::PdfConversion)?;
     let root = document.root_element();
     let body_start = svg[root.range()]
         .find('>')
         .map(|i| root.range().start + i + 1)
-        .ok_or(tr("PDF konnte nicht umgewandelt werden"))?;
+        .ok_or(ImportError::PdfConversionFailed)?;
     let mut out = String::with_capacity(svg.len() + 128);
     out.push_str(&root_tag(0.0, 0.0, width_pt, height_pt));
 

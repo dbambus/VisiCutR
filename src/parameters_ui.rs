@@ -30,7 +30,8 @@ impl ParametersUi {
     ) -> Option<Vec<(String, ParameterValue)>> {
         if self.cached.as_ref().is_none_or(|(p, _)| p != parametric) {
             let parameters = visicut_core::import::render_parametric(parametric)
-                .map(|(_, parameters)| parameters);
+                .map(|(_, parameters)| parameters)
+                .map_err(String::from);
             self.cached = Some((parametric.clone(), parameters));
         }
         let (_, parameters) = self.cached.as_mut()?;

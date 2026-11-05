@@ -193,7 +193,7 @@ fn warns_about_further_pages() {
 #[test]
 fn rejects_files_that_are_not_pdf() {
     let error = convert(b"hello world".to_vec()).err().unwrap();
-    assert!(error.contains("keine gültige PDF"), "{error}");
+    assert!(matches!(error, ImportError::NotPdf), "{error}");
 }
 
 #[test]
@@ -202,7 +202,10 @@ fn rejects_broken_pdf() {
     bytes.truncate(40);
     let error = convert(bytes).err().unwrap();
     assert!(
-        error.contains("beschädigt") || error.contains("keine Seiten"),
+        matches!(
+            error,
+            ImportError::PdfDamaged | ImportError::PdfWithoutPages
+        ),
         "{error}"
     );
 }
@@ -216,7 +219,7 @@ fn rejects_encrypted_pdf() {
     let error = convert(pdf(&[DRAWING], [0.0, 0.0, 100.0, 100.0], encrypt))
         .err()
         .unwrap();
-    assert!(error.contains("verschlüsselt"), "{error}");
+    assert!(matches!(error, ImportError::PdfEncrypted), "{error}");
 }
 
 #[test]
@@ -308,7 +311,7 @@ fn reports_ghostscript_errors() {
         TempPath(std::env::temp_dir().join(format!("visicut-ps-test-{}.ps", std::process::id())));
     std::fs::write(&path.0, "%!PS\nthis_is_not_an_operator\n").unwrap();
     let error = crate::import::read_file(&path.0).err().unwrap();
-    assert!(error.contains("Ghostscript"), "{error}");
+    assert!(error.to_string().contains("Ghostscript"), "{error}");
 }
 
 #[test]
@@ -338,8 +341,15 @@ fn unsupported_text_without_ghostscript_names_the_operator() {
     )
     .unwrap();
     let error = crate::import::read_file(&path.0).err().unwrap();
-    assert!(error.contains("„show“"), "{error}");
-    assert!(error.contains("Ghostscript"), "{error}");
+    assert!(
+        matches!(
+            &error,
+            ImportError::NeedsGhostscript(crate::import::eps::EpsError::Unsupported { operator, .. })
+                if operator == "show"
+        ),
+        "{error}"
+    );
+    assert!(error.to_string().contains("Ghostscript"), "{error}");
 }
 
 #[test]

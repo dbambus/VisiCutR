@@ -35,6 +35,7 @@
 //! unbekanntem Filter im Rest macht den Rest ungültig, damit kein Objekt
 //! stillschweigend geschnitten wird.
 
+use crate::import::ImportError;
 use crate::mapping::{Attribute, Filter, ObjectAttributes, Predefined, Rule};
 use crate::project::{JobStep, Operation};
 use crate::raster::{Dithering, RASTER_DPIS, RasterSettings};
@@ -107,7 +108,7 @@ pub struct Placed {
     /// so wie VisiCut.
     pub svg: bool,
     /// Inhalt von `mappings.xml` (`None`: die Datei fehlt).
-    pub mapping: Option<Result<Vec<Entry>, String>>,
+    pub mapping: Option<Result<Vec<Entry>, ImportError>>,
 }
 
 #[derive(Debug, Default)]
@@ -118,35 +119,35 @@ pub struct Translation {
 }
 
 /// Liest `mappings.xml`.
-pub fn parse(bytes: &[u8]) -> Result<Vec<Entry>, String> {
+pub fn parse(bytes: &[u8]) -> Result<Vec<Entry>, ImportError> {
     parse_named(bytes).map(|(_, entries)| entries)
 }
 
 /// Liest einen Zuordnungssatz mit seinem Namen (`name`, fehlt in PLF-Dateien).
-fn parse_named(bytes: &[u8]) -> Result<(Option<String>, Vec<Entry>), String> {
+fn parse_named(bytes: &[u8]) -> Result<(Option<String>, Vec<Entry>), ImportError> {
     let source = String::from_utf8_lossy(bytes);
     crate::svg::check_nesting(&source)?;
-    let document = roxmltree::Document::parse(&source).map_err(|e| e.to_string())?;
+    let document = roxmltree::Document::parse(&source).map_err(ImportError::Xml)?;
     let root = document.root_element();
     let name = text(child(root, "name"));
     parse_set(root).map(|entries| (name, entries))
 }
 
-fn parse_set(root: Node) -> Result<Vec<Entry>, String> {
+fn parse_set(root: Node) -> Result<Vec<Entry>, ImportError> {
     if !root.tag_name().name().ends_with("MappingSet") {
-        return Err(tr("kein Zuordnungssatz").into());
+        return Err(ImportError::NoMappingSet);
     }
-    let list = child(root, "linked-list").ok_or(tr("Liste der Zuordnungen fehlt"))?;
+    let list = child(root, "linked-list").ok_or(ImportError::MappingListMissing)?;
     list.children()
         .filter(|n| n.is_element() && n.has_tag_name("mapping"))
         .map(parse_entry)
         .collect()
 }
 
-fn parse_entry(node: Node) -> Result<Entry, String> {
+fn parse_entry(node: Node) -> Result<Entry, ImportError> {
     let filters = match child(node, "a") {
         Some(set) => {
-            let list = child(set, "linked-list").ok_or(tr("Filtersatz ohne Liste"))?;
+            let list = child(set, "linked-list").ok_or(ImportError::FilterSetWithoutList)?;
             Some(
                 list.children()
                     .filter(|n| n.is_element() && n.has_tag_name("filter"))
@@ -160,9 +161,9 @@ fn parse_entry(node: Node) -> Result<Entry, String> {
     Ok(Entry { filters, profile })
 }
 
-fn parse_filter(node: Node) -> Result<JavaFilter, String> {
-    let attribute = text(child(node, "attribute")).ok_or(tr("Filter ohne Attribut"))?;
-    let value = child(node, "value").ok_or(tr("Filter ohne Wert"))?;
+fn parse_filter(node: Node) -> Result<JavaFilter, ImportError> {
+    let attribute = text(child(node, "attribute")).ok_or(ImportError::FilterWithoutAttribute)?;
+    let value = child(node, "value").ok_or(ImportError::FilterWithoutValue)?;
     Ok(JavaFilter {
         attribute,
         value: parse_value(value),
@@ -203,7 +204,7 @@ fn color(node: Node) -> Option<[u8; 3]> {
     Some([channel("red")?, channel("green")?, channel("blue")?])
 }
 
-fn parse_profile(node: Node) -> Result<Profile, String> {
+fn parse_profile(node: Node) -> Result<Profile, ImportError> {
     let dpi = number(node, "DPI").unwrap_or(SUPPORTED_DPI);
     match node.attribute("class").unwrap_or("") {
         "vectorProfile" => Ok(Profile::Vector {
@@ -225,7 +226,7 @@ fn parse_profile(node: Node) -> Result<Profile, String> {
             invert: flag(node, "invertColors", false),
             color_shift: int(node, "colorShift"),
         }),
-        other => Err(tr!("Profil „{other}“ ist unbekannt", other = other)),
+        other => Err(ImportError::UnknownProfile(other.into())),
     }
 }
 
@@ -397,7 +398,7 @@ fn translate_part(
     out: &mut Translation,
 ) {
     // Filter umwandeln. Ein Fehler betrifft nur den Eintrag mit diesem Filter.
-    let converted: Vec<Result<Option<Vec<Filter>>, String>> = entries
+    let converted: Vec<Result<Option<Vec<Filter>>, ImportError>> = entries
         .iter()
         .map(|entry| match &entry.filters {
             None => Ok(None),
@@ -513,7 +514,11 @@ fn matching(filters: &[Filter], objects: &[ObjectAttributes]) -> Vec<usize> {
 /// Java wertet „Color“ bei SVG-Objekten nur als Linienfarbe aus, deshalb
 /// entspricht es hier `StrokeColor`. Die Linienstärke vergleicht Java genau,
 /// VisiCutR mit 1e-6 mm Toleranz.
-fn convert(filter: &JavaFilter, part: &str, warnings: &mut Vec<String>) -> Result<Filter, String> {
+fn convert(
+    filter: &JavaFilter,
+    part: &str,
+    warnings: &mut Vec<String>,
+) -> Result<Filter, ImportError> {
     let attribute = match filter.attribute.as_str() {
         "Stroke Color" | "Color" => Attribute::StrokeColor,
         "Fill Color" => Attribute::FillColor,
@@ -522,10 +527,7 @@ fn convert(filter: &JavaFilter, part: &str, warnings: &mut Vec<String>) -> Resul
         "Id" | "ID" => Attribute::Id,
         "Group" => Attribute::Group,
         other => {
-            return Err(tr!(
-                "Filter „{other}“ ist in VisiCutR nicht bekannt",
-                other = other
-            ));
+            return Err(ImportError::UnknownFilter(other.into()));
         }
     };
     let value = match (&filter.value, attribute) {
@@ -537,7 +539,7 @@ fn convert(filter: &JavaFilter, part: &str, warnings: &mut Vec<String>) -> Resul
         (Value::Text(text), Attribute::StrokeWidth) => {
             let width: f64 = text
                 .parse()
-                .map_err(|_| tr!("Linienstärke „{text}“ ist keine Zahl", text = text))?;
+                .map_err(|_| ImportError::StrokeWidthNotANumber(text.clone()))?;
             // VisiCut vergleicht eine Zeichenkette nie mit der Zahl und trifft
             // daher nichts. Übernommen wird der erkennbare Wert.
             warnings.push(tr!(
@@ -550,9 +552,8 @@ fn convert(filter: &JavaFilter, part: &str, warnings: &mut Vec<String>) -> Resul
         }
         (Value::Text(text), _) => text.clone(),
         _ => {
-            return Err(tr!(
-                "Wert des Filters „{name}“ wird nicht unterstützt",
-                name = filter.attribute
+            return Err(ImportError::UnsupportedFilterValue(
+                filter.attribute.clone(),
             ));
         }
     };
@@ -693,7 +694,7 @@ fn profile_settings(
 pub fn import_templates(
     bytes: &[u8],
     file_name: &str,
-) -> Result<(Vec<Predefined>, Vec<String>), String> {
+) -> Result<(Vec<Predefined>, Vec<String>), ImportError> {
     let mut warnings = Vec::new();
     if !bytes.starts_with(b"PK") {
         let stem = file_name.strip_suffix(".xml").unwrap_or(file_name);
@@ -701,12 +702,12 @@ pub fn import_templates(
         return Ok((vec![template], warnings));
     }
     let mut archive =
-        zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
+        zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(ImportError::Zip)?;
     let mut templates = Vec::new();
     let mut budget = crate::import::ZipBudget::new(50 * 1024 * 1024);
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-        let name = file.name().map_err(|e| e.to_string())?.to_string();
+        let mut file = archive.by_index(i).map_err(ImportError::Zip)?;
+        let name = file.name().map_err(ImportError::Zip)?.to_string();
         // Einstellungsarchive legen Zuordnungen in mappings/ ab, GitHub davor
         // einen Ordner.
         let in_mappings = name.split('/').rev().nth(1) == Some("mappings");
@@ -729,8 +730,8 @@ pub fn import_templates(
     }
     if templates.is_empty() {
         return Err(match warnings.is_empty() {
-            true => tr("Archiv enthält keine VisiCut-Zuordnungen").into(),
-            false => warnings.join("; "),
+            true => ImportError::NoMappingsInArchive,
+            false => ImportError::NoUsableMappings(warnings),
         });
     }
     Ok((templates, warnings))
@@ -741,7 +742,7 @@ fn template(
     bytes: &[u8],
     fallback: &str,
     warnings: &mut Vec<String>,
-) -> Result<Predefined, String> {
+) -> Result<Predefined, ImportError> {
     let (name, entries) = parse_named(bytes)?;
     let name = name.unwrap_or_else(|| fallback.to_string());
     let mut template = Predefined {
@@ -798,7 +799,7 @@ fn template(
         }
     }
     if template.rules.is_empty() {
-        return Err(tr("Die Vorlage enthält keine Regel").into());
+        return Err(crate::mapping::MappingError::TemplateWithoutRule.into());
     }
     Ok(template)
 }
@@ -915,11 +916,10 @@ mod tests {
             inverted: false,
             compare: false,
         };
-        assert!(
-            convert(&unknown, "t", &mut warnings)
-                .unwrap_err()
-                .contains("Ebene 7")
-        );
+        assert!(matches!(
+            convert(&unknown, "t", &mut warnings),
+            Err(ImportError::UnknownFilter(name)) if name == "Ebene 7"
+        ));
     }
 
     #[test]

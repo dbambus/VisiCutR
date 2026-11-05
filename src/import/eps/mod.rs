@@ -7,6 +7,7 @@
 //! corner becomes the SVG origin and the y axis points down, as in the
 //! Ghostscript conversion. Anything outside the subset is an error that names
 //! the operator; `pdf::read_postscript` then falls back to Ghostscript.
+mod error;
 mod graphics;
 mod machine;
 mod parse;
@@ -15,6 +16,7 @@ mod tests;
 
 use crate::i18n::tr;
 use crate::svg_import::{Imported, MAX_SVG_BYTES};
+pub use error::EpsError;
 use graphics::num;
 
 /// Millimetres per PostScript point.
@@ -23,7 +25,7 @@ const MM_PER_PT: f64 = 25.4 / 72.0;
 const DEFAULT_BOX: [f64; 4] = [0.0, 0.0, 800.0, 600.0];
 
 /// Interprets an EPS or PS file and returns its paths as SVG.
-pub(super) fn interpret(data: &[u8]) -> Result<Imported, String> {
+pub(super) fn interpret(data: &[u8]) -> Result<Imported, EpsError> {
     let mut warnings = Vec::new();
     let [llx, lly, urx, ury] = bounding_box(data).unwrap_or_else(|| {
         warnings.push(
@@ -34,7 +36,7 @@ pub(super) fn interpret(data: &[u8]) -> Result<Imported, String> {
     let width = urx - llx;
     let height = ury - lly;
     if !(width > 0.0 && height > 0.0) {
-        return Err(tr("Die BoundingBox der EPS-Datei ist leer oder ungültig").into());
+        return Err(EpsError::EmptyBoundingBox);
     }
     let program = parse::parse(data)?;
     // Maps user space to SVG device space: origin at the lower left corner of
@@ -51,7 +53,7 @@ pub(super) fn interpret(data: &[u8]) -> Result<Imported, String> {
         machine.into_elements(),
     );
     if svg.len() > MAX_SVG_BYTES {
-        return Err(tr("EPS-Datei ist zu komplex (SVG größer als 20 MB)").into());
+        return Err(EpsError::TooComplex);
     }
     Ok(Imported {
         svg,

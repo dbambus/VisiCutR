@@ -1,6 +1,7 @@
 //! Converts EPS and PostScript files to PDF with an installed Ghostscript.
 //! Used as fallback for what the built-in interpreter does not support.
-use crate::{i18n::tr, tr};
+use crate::i18n::tr;
+use crate::import::ImportError;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -13,19 +14,11 @@ const MAX_MESSAGES: u64 = 64 * 1024;
 /// Largest PDF read back.
 const MAX_PDF_BYTES: u64 = 100 * 1024 * 1024;
 
-pub fn missing() -> &'static str {
-    tr(
-        "Für EPS/PS-Dateien wird Ghostscript benötigt, es wurde aber nicht gefunden. \
-        Bitte Ghostscript installieren (https://ghostscript.com) oder die Datei als SVG oder \
-        PDF speichern",
-    )
-}
-
 /// Runs `gs -sDEVICE=pdfwrite` on `path` and returns the PDF bytes.
-pub fn to_pdf(path: &Path) -> Result<Vec<u8>, String> {
-    let gs = find().ok_or(missing())?;
+pub fn to_pdf(path: &Path) -> Result<Vec<u8>, ImportError> {
+    let gs = find().ok_or(ImportError::GhostscriptMissing)?;
     let timeout = crate::import::time_left(TIMEOUT)?;
-    let input = std::path::absolute(path).map_err(|e| e.to_string())?;
+    let input = std::path::absolute(path)?;
     let output = TempFile::new();
     let mut command = Command::new(&gs);
     command
@@ -49,12 +42,7 @@ pub fn to_pdf(path: &Path) -> Result<Vec<u8>, String> {
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
     hide_console(&mut command);
-    let mut child = command.spawn().map_err(|e| {
-        tr!(
-            "Ghostscript konnte nicht gestartet werden: {error}",
-            error = e
-        )
-    })?;
+    let mut child = command.spawn().map_err(ImportError::GhostscriptStart)?;
     let mut stderr = child.stderr.take();
     let reader = std::thread::spawn(move || {
         let mut text = Vec::new();
@@ -72,21 +60,18 @@ pub fn to_pdf(path: &Path) -> Result<Vec<u8>, String> {
             Ok(None) if started.elapsed() > timeout => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(tr!(
-                    "Ghostscript hat die EPS/PS-Datei nicht innerhalb von {seconds} Sekunden umgewandelt",
-                    seconds = timeout.as_secs()
-                ));
+                return Err(ImportError::GhostscriptTimeout(timeout));
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(20)),
             Err(e) => {
-                return Err(tr!("Ghostscript ist fehlgeschlagen: {error}", error = e));
+                return Err(ImportError::GhostscriptFailed(e));
             }
         }
     };
     let messages = reader.join().unwrap_or_default();
     let size = std::fs::metadata(&output.0).map_or(0, |m| m.len());
     if size > MAX_PDF_BYTES {
-        return Err(tr("PDF ist größer als 100 MB").into());
+        return Err(ImportError::PdfTooLarge);
     }
     let pdf = std::fs::read(&output.0).unwrap_or_default();
     if !status.success() || pdf.is_empty() {
@@ -95,10 +80,7 @@ pub fn to_pdf(path: &Path) -> Result<Vec<u8>, String> {
             .find(|line| line.starts_with("Error:"))
             .or_else(|| lines().next())
             .unwrap_or(tr("keine Ausgabe"));
-        return Err(tr!(
-            "Ghostscript konnte die EPS/PS-Datei nicht umwandeln: {detail}",
-            detail = detail
-        ));
+        return Err(ImportError::GhostscriptConversion(detail.into()));
     }
     Ok(pdf)
 }

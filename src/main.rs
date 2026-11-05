@@ -2078,7 +2078,7 @@ impl VisiCutR {
                 self.status = tr("Als VisiCut-Projekt exportiert").into();
                 self.alert = Some(notes.join("\n"));
             }
-            Err(e) => self.report(e),
+            Err(e) => self.report(e.to_string()),
         }
     }
 

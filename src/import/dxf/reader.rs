@@ -5,7 +5,7 @@
 //! importer needs: header variables, layer and linetype tables, blocks and
 //! entities. Unknown sections, objects and group codes are ignored, and badly
 //! formatted numbers read as missing instead of rejecting the whole file.
-use crate::{i18n::tr, tr};
+use super::DxfError;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -134,7 +134,7 @@ impl Document {
     }
 }
 
-pub fn parse(bytes: &[u8]) -> Result<Document, String> {
+pub fn parse(bytes: &[u8]) -> Result<Document, DxfError> {
     let pairs = if bytes.starts_with(b"AutoCAD Binary DXF") {
         binary_pairs(bytes)?
     } else {
@@ -145,7 +145,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, String> {
         .iter()
         .any(|r| r.kind == "SECTION" || r.kind == "EOF")
     {
-        return Err(tr("Keine gültige DXF-Datei").into());
+        return Err(DxfError::NotDxf);
     }
     Ok(document(records))
 }
@@ -171,7 +171,7 @@ fn windows_1252(byte: u8) -> char {
     }
 }
 
-fn ascii_pairs(bytes: &[u8]) -> Result<Vec<Pair>, String> {
+fn ascii_pairs(bytes: &[u8]) -> Result<Vec<Pair>, DxfError> {
     let text = decode(bytes);
     let text = if text.contains('\n') {
         text
@@ -187,12 +187,9 @@ fn ascii_pairs(bytes: &[u8]) -> Result<Vec<Pair>, String> {
         }
         let Ok(code) = line.parse::<i32>() else {
             if pairs.is_empty() {
-                return Err(tr("Keine gültige DXF-Datei").into());
+                return Err(DxfError::NotDxf);
             }
-            return Err(tr!(
-                "DXF-Datei ist beschädigt (Zeile {line})",
-                line = number + 1
-            ));
+            return Err(DxfError::Damaged(number + 1));
         };
         let Some((_, value)) = lines.next() else {
             break;
@@ -246,8 +243,8 @@ fn value_kind(code: i32) -> Option<Kind> {
     })
 }
 
-fn binary_pairs(bytes: &[u8]) -> Result<Vec<Pair>, String> {
-    let broken = || tr("Binäre DXF-Datei ist beschädigt").to_string();
+fn binary_pairs(bytes: &[u8]) -> Result<Vec<Pair>, DxfError> {
+    let broken = || DxfError::BinaryDamaged;
     // Sentinel "AutoCAD Binary DXF\r\n\x1a\0"; tolerate a lost '\r'.
     let start = bytes
         .iter()
@@ -259,7 +256,7 @@ fn binary_pairs(bytes: &[u8]) -> Result<Vec<Pair>, String> {
     // R12 writes one-byte group codes, R13 and later two bytes.
     let wide = bytes.get(start) == Some(&0) && bytes.get(start + 1) == Some(&0);
     let mut at = start;
-    let take = |at: &mut usize, n: usize| -> Result<&[u8], String> {
+    let take = |at: &mut usize, n: usize| -> Result<&[u8], DxfError> {
         let slice = bytes.get(*at..*at + n).ok_or_else(broken)?;
         *at += n;
         Ok(slice)

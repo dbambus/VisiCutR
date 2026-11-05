@@ -11,6 +11,7 @@
 //! `Helper.evaluateExpression`.
 use super::script::{self, Engine};
 use super::xml;
+use crate::import::ImportError;
 use crate::{i18n::tr, tr};
 use boa_engine::{JsString, JsValue, js_string};
 use roxmltree::Node;
@@ -118,7 +119,7 @@ pub fn render(
     psvg: bool,
     saved: Vec<(String, Value)>,
     limit: Duration,
-) -> Result<Rendered, String> {
+) -> Result<Rendered, ImportError> {
     use crate::import::worker::{Job, Output};
     match (Job::Parametric {
         source,
@@ -128,7 +129,7 @@ pub fn render(
     .run(limit)?
     {
         Output::Rendered(rendered) => Ok(rendered),
-        _ => Err(tr("Skriptausführung ist unerwartet abgebrochen").into()),
+        _ => Err(ImportError::ScriptAborted),
     }
 }
 
@@ -138,7 +139,7 @@ pub(crate) fn render_here(
     psvg: bool,
     saved: Vec<(String, Value)>,
     limit: Duration,
-) -> Result<Rendered, String> {
+) -> Result<Rendered, ImportError> {
     let source = xml::declare_thymeleaf(&source);
     script::run_isolated(limit, move |engine| {
         let options = roxmltree::ParsingOptions {
@@ -147,7 +148,7 @@ pub(crate) fn render_here(
         };
         crate::svg::check_nesting(&source)?;
         let document = roxmltree::Document::parse_with_options(&source, options)
-            .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
+            .map_err(ImportError::SvgXml)?;
         engine.eval(BOOTSTRAP)?;
         let mut renderer = Renderer {
             engine,
@@ -196,7 +197,10 @@ struct Computed {
 }
 
 impl Renderer<'_> {
-    fn parameters(&mut self, document: &roxmltree::Document) -> Result<Vec<Parameter>, String> {
+    fn parameters(
+        &mut self,
+        document: &roxmltree::Document,
+    ) -> Result<Vec<Parameter>, ImportError> {
         let mut result: Vec<Parameter> = Vec::new();
         let refs = document
             .descendants()
@@ -226,27 +230,25 @@ impl Renderer<'_> {
                     .to_number(&mut self.engine.context)
                     .ok()
                     .filter(|n| !n.is_nan())
-                    .ok_or_else(|| {
-                        tr!(
-                            "Parameter „{name}“: Vorgabe „{expression}“ ist keine Zahl",
-                            name = name,
-                            expression = expression
-                        )
+                    .ok_or_else(|| ImportError::ParameterNotANumber {
+                        name: name.clone(),
+                        expression: expression.clone(),
                     })?;
                 default = Some(number.to_string());
             }
             let kind = node.attribute("type").unwrap_or("Double");
             let base = kind.split('(').next().unwrap_or(kind).trim();
-            let number = |text: &Option<String>| -> Result<f64, String> {
+            let number = |text: &Option<String>| -> Result<f64, ImportError> {
                 match text {
                     None => Ok(0.0),
-                    Some(t) => t.trim().parse::<f64>().map_err(|_| {
-                        tr!(
-                            "Parameter „{name}“: Vorgabe „{expression}“ ist keine Zahl",
-                            name = name,
-                            expression = t
-                        )
-                    }),
+                    Some(t) => {
+                        t.trim()
+                            .parse::<f64>()
+                            .map_err(|_| ImportError::ParameterNotANumber {
+                                name: name.clone(),
+                                expression: t.clone(),
+                            })
+                    }
                 }
             };
             let (value, parameter_kind) = match base {
@@ -323,9 +325,9 @@ impl Renderer<'_> {
         Ok(result)
     }
 
-    fn element(&mut self, node: Node, out: &mut String) -> Result<(), String> {
+    fn element(&mut self, node: Node, out: &mut String) -> Result<(), ImportError> {
         if out.len() > crate::svg_import::MAX_SVG_BYTES {
-            return Err(tr("Parametrische SVG würde größer als 20 MB").into());
+            return Err(ImportError::ParametricTooLarge);
         }
         let mut th = Vec::new();
         let mut computed = Vec::new();
@@ -388,7 +390,7 @@ impl Renderer<'_> {
         th: &[(String, String, Range<usize>)],
         computed: &[Computed],
         out: &mut String,
-    ) -> Result<(), String> {
+    ) -> Result<(), ImportError> {
         let get = |name: &str| {
             th.iter()
                 .find(|(n, _, _)| n == name)
@@ -416,7 +418,7 @@ impl Renderer<'_> {
         th: &[(String, String, Range<usize>)],
         computed: &[Computed],
         out: &mut String,
-    ) -> Result<(), String> {
+    ) -> Result<(), ImportError> {
         let source = self.source;
         let mut set: Vec<(String, Option<String>)> = Vec::new();
         let mut text = None;
@@ -544,7 +546,7 @@ impl Renderer<'_> {
     }
 
     /// Copies everything between the tags, processing child elements.
-    fn content(&mut self, node: Node, tag_end: usize, out: &mut String) -> Result<(), String> {
+    fn content(&mut self, node: Node, tag_end: usize, out: &mut String) -> Result<(), ImportError> {
         let source = self.source;
         if xml::is_self_closing(source, tag_end) {
             return Ok(());
@@ -575,12 +577,12 @@ impl Renderer<'_> {
         }
     }
 
-    fn evaluate(&mut self, expression: &str) -> Result<JsValue, String> {
+    fn evaluate(&mut self, expression: &str) -> Result<JsValue, ImportError> {
         let code = thymeleaf_to_js(expression)?;
         self.evaluate_js(&code, expression)
     }
 
-    fn evaluate_js(&mut self, code: &str, shown: &str) -> Result<JsValue, String> {
+    fn evaluate_js(&mut self, code: &str, shown: &str) -> Result<JsValue, ImportError> {
         let global = self.engine.context.global_object();
         for (name, value) in &self.scope {
             global
@@ -592,42 +594,37 @@ impl Renderer<'_> {
                 )
                 .map_err(|e| script::describe(&e))?;
         }
-        self.engine
-            .eval(code)
-            .map_err(|e| tr!("Ausdruck „{shown}“: {error}", shown = shown, error = e))
+        self.engine.eval(code).map_err(|e| ImportError::Expression {
+            shown: shown.into(),
+            error: Box::new(e),
+        })
     }
 
-    fn truthy(&mut self, expression: &str) -> Result<bool, String> {
+    fn truthy(&mut self, expression: &str) -> Result<bool, ImportError> {
         let code = format!("__truthy({})", thymeleaf_to_js(expression)?);
         Ok(self.evaluate_js(&code, expression)?.to_boolean())
     }
 
-    fn items(&mut self, expression: &str) -> Result<Vec<JsValue>, String> {
+    fn items(&mut self, expression: &str) -> Result<Vec<JsValue>, ImportError> {
         let code = format!("__iter({})", thymeleaf_to_js(expression)?);
         let array = self.evaluate_js(&code, expression)?;
         let context = &mut self.engine.context;
-        let object = array.as_object().ok_or_else(|| {
-            tr!(
-                "th:each „{expression}“ ergibt keine Liste",
-                expression = expression
-            )
-        })?;
+        let object = array
+            .as_object()
+            .ok_or_else(|| ImportError::EachNotAList(expression.into()))?;
         let length = object
             .get(js_string!("length"), context)
             .and_then(|l| l.to_length(context))
             .map_err(|e| script::describe(&e))?;
         if length > 100_000 {
-            return Err(tr!(
-                "th:each „{expression}“ ergibt zu viele Elemente",
-                expression = expression
-            ));
+            return Err(ImportError::EachTooMany(expression.into()));
         }
         (0..length as u32)
             .map(|i| object.get(i, context).map_err(|e| script::describe(&e)))
             .collect()
     }
 
-    fn optional_string(&mut self, value: &JsValue) -> Result<Option<String>, String> {
+    fn optional_string(&mut self, value: &JsValue) -> Result<Option<String>, ImportError> {
         if value.is_null_or_undefined() {
             Ok(None)
         } else {
@@ -643,7 +640,7 @@ fn attribute_value(node: Node, source: &str, qname: &str) -> Option<String> {
 }
 
 /// `a{$x * 2}b` → `'a' + (x * 2) + 'b'`, like `PSVGImporter`'s translation.
-fn psvg_template(value: &str) -> Result<String, String> {
+fn psvg_template(value: &str) -> Result<String, ImportError> {
     let value = value.replace('$', "");
     let mut parts = vec!["''".to_string()];
     let mut rest = value.as_str();
@@ -654,7 +651,7 @@ fn psvg_template(value: &str) -> Result<String, String> {
         let close = rest[open..]
             .find('}')
             .map(|i| open + i)
-            .ok_or_else(|| tr!("Ausdruck „{text}“: schließende Klammer fehlt", text = value))?;
+            .ok_or_else(|| ImportError::MissingClosingBrace(value.clone()))?;
         parts.push(format!("({})", convert(&rest[open + 1..close], true)?));
         rest = &rest[close + 1..];
     }
@@ -669,11 +666,11 @@ fn js_string_literal(text: &str) -> String {
 }
 
 /// Translates a Thymeleaf standard expression (OGNL inside `${…}`) to JS.
-pub fn thymeleaf_to_js(expression: &str) -> Result<String, String> {
+pub fn thymeleaf_to_js(expression: &str) -> Result<String, ImportError> {
     convert(expression, false)
 }
 
-fn convert(text: &str, inside: bool) -> Result<String, String> {
+fn convert(text: &str, inside: bool) -> Result<String, ImportError> {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::new();
     let mut i = 0;
@@ -682,12 +679,8 @@ fn convert(text: &str, inside: bool) -> Result<String, String> {
         let next = chars.get(i + 1).copied();
         match c {
             '\'' | '"' => {
-                let end = string_end(&chars, i).ok_or_else(|| {
-                    tr!(
-                        "Ausdruck „{text}“: Anführungszeichen nicht geschlossen",
-                        text = text
-                    )
-                })?;
+                let end =
+                    string_end(&chars, i).ok_or_else(|| ImportError::UnclosedQuote(text.into()))?;
                 if c == '\'' {
                     let literal: String = chars[i + 1..end].iter().collect();
                     out.push_str(&js_string_literal(&literal.replace("\\'", "'")));
@@ -697,9 +690,8 @@ fn convert(text: &str, inside: bool) -> Result<String, String> {
                 i = end + 1;
             }
             '$' | '*' if !inside && next == Some('{') => {
-                let end = brace_end(&chars, i + 1).ok_or_else(|| {
-                    tr!("Ausdruck „{text}“: schließende Klammer fehlt", text = text)
-                })?;
+                let end = brace_end(&chars, i + 1)
+                    .ok_or_else(|| ImportError::MissingClosingBrace(text.into()))?;
                 let inner: String = chars[i + 2..end].iter().collect();
                 out.push('(');
                 out.push_str(&convert(&inner, true)?);
@@ -707,11 +699,10 @@ fn convert(text: &str, inside: bool) -> Result<String, String> {
                 i = end + 1;
             }
             '#' | '@' | '~' if !inside && next == Some('{') => {
-                return Err(tr!(
-                    "Thymeleaf-Ausdruck „{expression}“ in „{text}“ wird nicht unterstützt",
-                    expression = format!("{c}{{…}}"),
-                    text = text
-                ));
+                return Err(ImportError::UnsupportedThymeleaf {
+                    expression: format!("{c}{{…}}"),
+                    text: text.into(),
+                });
             }
             '#' if inside => {
                 let rest: String = chars[i..].iter().collect();
@@ -724,10 +715,7 @@ fn convert(text: &str, inside: bool) -> Result<String, String> {
                         .chars()
                         .take_while(|c| *c == '#' || c.is_alphanumeric() || *c == '.')
                         .collect();
-                    return Err(tr!(
-                        "Thymeleaf-Hilfsobjekt „{name}“ wird nicht unterstützt",
-                        name = name
-                    ));
+                    return Err(ImportError::UnsupportedHelper(name));
                 }
             }
             '|' if !inside => {
@@ -735,15 +723,14 @@ fn convert(text: &str, inside: bool) -> Result<String, String> {
                     .iter()
                     .position(|c| *c == '|')
                     .map(|p| i + 1 + p)
-                    .ok_or_else(|| tr!("Ausdruck „{text}“: schließendes | fehlt", text = text))?;
+                    .ok_or_else(|| ImportError::MissingPipe(text.into()))?;
                 let mut parts = vec!["''".to_string()];
                 let mut literal = String::new();
                 let mut j = i + 1;
                 while j < end {
                     if chars[j] == '$' && chars.get(j + 1) == Some(&'{') {
-                        let close = brace_end(&chars[..end], j + 1).ok_or_else(|| {
-                            tr!("Ausdruck „{text}“: schließende Klammer fehlt", text = text)
-                        })?;
+                        let close = brace_end(&chars[..end], j + 1)
+                            .ok_or_else(|| ImportError::MissingClosingBrace(text.into()))?;
                         if !literal.is_empty() {
                             parts.push(js_string_literal(&std::mem::take(&mut literal)));
                         }
@@ -882,7 +869,7 @@ fn split_top_level(text: &str, separator: char) -> Vec<String> {
 }
 
 /// `a = expr, b = expr` (`th:attr`, `th:with`).
-fn assignments(text: &str) -> Result<Vec<(String, String)>, String> {
+fn assignments(text: &str) -> Result<Vec<(String, String)>, ImportError> {
     let mut result = Vec::new();
     for part in split_top_level(text, ',') {
         if part.trim().is_empty() {
@@ -895,7 +882,7 @@ fn assignments(text: &str) -> Result<Vec<(String, String)>, String> {
                 && !matches!(chars.get(i.wrapping_sub(1)), Some('=' | '!' | '<' | '>'))
         });
         let Some(position) = position else {
-            return Err(tr!("Zuweisung „{part}“ ohne „=“", part = part));
+            return Err(ImportError::AssignmentWithoutEquals(part.to_string()));
         };
         let name: String = chars[..position].iter().collect();
         let expression: String = chars[position + 1..].iter().collect();
@@ -905,10 +892,10 @@ fn assignments(text: &str) -> Result<Vec<(String, String)>, String> {
 }
 
 /// `item : ${list}` or `item, status : ${list}`.
-fn parse_each(text: &str) -> Result<(String, String, String), String> {
+fn parse_each(text: &str) -> Result<(String, String, String), ImportError> {
     let parts = split_top_level(text, ':');
     if parts.len() < 2 {
-        return Err(tr!("th:each „{text}“ ist ungültig", text = text));
+        return Err(ImportError::InvalidEach(text.into()));
     }
     let expression = parts[1..].join(":");
     let mut names = parts[0].split(',').map(str::trim);
@@ -917,14 +904,14 @@ fn parse_each(text: &str) -> Result<(String, String, String), String> {
         .next()
         .map_or_else(|| format!("{variable}Stat"), str::to_string);
     if variable.is_empty() {
-        return Err(tr!("th:each „{text}“ ist ungültig", text = text));
+        return Err(ImportError::InvalidEach(text.into()));
     }
     Ok((variable, status, expression.trim().to_string()))
 }
 
 /// Values from VisiCut's `.parameters` file (XStream XML of a map).
-pub fn read_saved_values(text: &str) -> Result<Vec<(String, Value)>, String> {
-    let document = roxmltree::Document::parse(text).map_err(|e| e.to_string())?;
+pub fn read_saved_values(text: &str) -> Result<Vec<(String, Value)>, ImportError> {
+    let document = roxmltree::Document::parse(text).map_err(ImportError::Xml)?;
     let mut result = Vec::new();
     for entry in document
         .root_element()
@@ -972,7 +959,10 @@ mod tests {
         let error = render(nested(100_000), true, Vec::new(), script::TIME_LIMIT)
             .err()
             .expect("refused");
-        assert!(error.contains("verschachtelt"), "{error}");
+        assert!(
+            matches!(error, ImportError::Svg(crate::svg::SvgError::TooDeep)),
+            "{error}"
+        );
     }
 
     #[test]

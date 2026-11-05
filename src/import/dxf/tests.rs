@@ -33,7 +33,7 @@ fn drawing(header: &str, tables: &str, blocks: &str, entities: &str) -> String {
 
 const MM: &str = "|9|$INSUNITS|70|4";
 
-fn import_bytes(content: &[u8]) -> Result<Imported, String> {
+fn import_bytes(content: &[u8]) -> Result<Imported, DxfError> {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
         "visicut-dxf-{}-{}",
@@ -289,7 +289,7 @@ fn rejects_broken_files() {
     let Err(error) = import_bytes(broken.as_bytes()) else {
         panic!("broken file accepted");
     };
-    assert!(error.contains("beschädigt"), "{error}");
+    assert!(matches!(error, DxfError::Damaged(_)), "{error}");
     let empty = drawing(MM, "", "", "");
     assert!(import_bytes(empty.as_bytes()).is_err());
     assert!(import_bytes(b"AutoCAD Binary DXF\r\n\x1a\0\0SECT").is_err());
@@ -399,7 +399,7 @@ fn self_inserting_blocks_stop_at_the_instance_limit() {
     )
     .err()
     .expect("refused");
-    assert!(error.contains("Blockreferenzen"), "{error}");
+    assert!(matches!(error, DxfError::TooManyBlockReferences), "{error}");
     assert!(start.elapsed() < std::time::Duration::from_secs(30));
 }
 

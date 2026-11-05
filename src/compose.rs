@@ -1161,18 +1161,20 @@ pub fn add_files_as_parts(
     for path in paths {
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-        let appended = crate::import::read_file(path).and_then(|imported| {
-            // Ragt die Zeichnung über die Zeichenfläche, wächst diese mit.
-            let svg = whole_drawing
-                .then(|| crate::svg_import::fit_to_content(&imported.svg))
-                .flatten()
-                .unwrap_or(imported.svg);
-            let (mut next, more) = add_part(&result, &stem, &svg, imported.steps)?;
-            next.part_source_file = Some(path.display().to_string());
-            next.part_parametric = imported.parametric;
-            add_extra_parts(&mut next, imported.extra_parts)?;
-            Ok((next, imported.warnings, more))
-        });
+        let appended = crate::import::read_file(path)
+            .map_err(String::from)
+            .and_then(|imported| {
+                // Ragt die Zeichnung über die Zeichenfläche, wächst diese mit.
+                let svg = whole_drawing
+                    .then(|| crate::svg_import::fit_to_content(&imported.svg))
+                    .flatten()
+                    .unwrap_or(imported.svg);
+                let (mut next, more) = add_part(&result, &stem, &svg, imported.steps)?;
+                next.part_source_file = Some(path.display().to_string());
+                next.part_parametric = imported.parametric;
+                add_extra_parts(&mut next, imported.extra_parts)?;
+                Ok((next, imported.warnings, more))
+            });
         match appended {
             Ok((next, warnings, more)) => {
                 result = next;
@@ -1374,10 +1376,12 @@ pub fn append_files(
     let mut added = 0;
     for path in paths {
         let name = path.file_name().unwrap_or_default().to_string_lossy();
-        let appended = crate::import::read_file(path).and_then(|imported| {
-            let (next, more) = append(&result, &imported.svg)?;
-            Ok((next, imported, more))
-        });
+        let appended = crate::import::read_file(path)
+            .map_err(String::from)
+            .and_then(|imported| {
+                let (next, more) = append(&result, &imported.svg)?;
+                Ok((next, imported, more))
+            });
         match appended {
             Ok((next, imported, more)) => {
                 result = next;

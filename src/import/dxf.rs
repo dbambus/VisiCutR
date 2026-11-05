@@ -8,6 +8,7 @@
 //! unitless drawings are read as millimetres as in Java.
 mod colors;
 mod convert;
+mod error;
 mod geom;
 mod reader;
 #[cfg(test)]
@@ -17,13 +18,14 @@ mod text;
 use super::Imported;
 use crate::{i18n::tr, tr};
 use convert::Prim;
+pub use error::DxfError;
 use geom::{Affine, BBox, Seg};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::path::Path;
 
-pub fn read(path: &Path) -> Result<Imported, String> {
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+pub fn read(path: &Path) -> Result<Imported, DxfError> {
+    let bytes = std::fs::read(path)?;
     from_bytes(&bytes)
 }
 
@@ -31,8 +33,8 @@ pub fn read(path: &Path) -> Result<Imported, String> {
 /// import (kabeja), to which the transform of a PLF part refers: drawing
 /// units with Y flipped, origin at the DXF origin. [`read`] puts the origin at
 /// the top left of the drawing and converts `$INSUNITS` to millimetres.
-pub(super) fn java_frame(path: &Path) -> Result<[f64; 6], String> {
-    let doc = reader::parse(&std::fs::read(path).map_err(|e| e.to_string())?)?;
+pub(super) fn java_frame(path: &Path) -> Result<[f64; 6], DxfError> {
+    let doc = reader::parse(&std::fs::read(path)?)?;
     let unit = doc
         .header_f("$INSUNITS", 70)
         .and_then(|u| unit_mm(u as i64))
@@ -49,7 +51,7 @@ pub(super) fn java_frame(path: &Path) -> Result<[f64; 6], String> {
     ])
 }
 
-fn from_bytes(bytes: &[u8]) -> Result<Imported, String> {
+fn from_bytes(bytes: &[u8]) -> Result<Imported, DxfError> {
     let doc = reader::parse(bytes)?;
     let mut warnings = Vec::new();
     let units = doc.header_f("$INSUNITS", 70).map_or(0, |u| u as i64);
@@ -64,7 +66,7 @@ fn from_bytes(bytes: &[u8]) -> Result<Imported, String> {
     let converted = convert::convert(&doc, unit_mm)?;
     warnings.extend(converted.warnings);
     if converted.prims.is_empty() {
-        return Err(tr("DXF-Datei enthält keine darstellbaren Objekte").into());
+        return Err(DxfError::NothingToShow);
     }
     let layer_order: Vec<String> = doc.layers.iter().map(|l| l.name.clone()).collect();
     let (svg, [width, height]) = write_svg(&converted.prims, &layer_order)?;
@@ -242,7 +244,7 @@ fn estimated_extent(prim: &Prim) -> Option<[f64; 4]> {
 }
 
 /// Extent of the drawing in millimetres, texts included.
-fn drawing_bbox(prims: &[Prim], extents: &[Option<[f64; 4]>]) -> Result<BBox, String> {
+fn drawing_bbox(prims: &[Prim], extents: &[Option<[f64; 4]>]) -> Result<BBox, DxfError> {
     let mut bbox = BBox::default();
     for (prim, extent) in prims.iter().zip(extents) {
         match prim {
@@ -257,22 +259,21 @@ fn drawing_bbox(prims: &[Prim], extents: &[Option<[f64; 4]>]) -> Result<BBox, St
         }
     }
     if bbox.is_empty() || !bbox.min.iter().chain(&bbox.max).all(|v| v.is_finite()) {
-        return Err(tr("DXF-Datei enthält keine darstellbaren Objekte").into());
+        return Err(DxfError::NothingToShow);
     }
     Ok(bbox)
 }
 
-fn write_svg(prims: &[Prim], layer_order: &[String]) -> Result<(String, [f64; 2]), String> {
+fn write_svg(prims: &[Prim], layer_order: &[String]) -> Result<(String, [f64; 2]), DxfError> {
     let extents = text_extents(prims);
     let bbox = drawing_bbox(prims, &extents)?;
     let width = (bbox.max[0] - bbox.min[0]).max(0.01);
     let height = (bbox.max[1] - bbox.min[1]).max(0.01);
     if width > 1e7 || height > 1e7 {
-        return Err(tr!(
-            "DXF-Zeichnung ist zu groß ({width} × {height} mm); Einheiten prüfen",
-            width = num(width),
-            height = num(height)
-        ));
+        return Err(DxfError::TooLarge {
+            width: num(width),
+            height: num(height),
+        });
     }
     // World (Y up) → SVG (Y down, origin at the top-left of the drawing).
     let flip = Affine {

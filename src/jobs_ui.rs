@@ -1618,7 +1618,9 @@ impl JobUi {
             let file_name = path.file_name().unwrap_or_default().to_string_lossy();
             let imported = std::fs::read(path)
                 .map_err(|e| e.to_string())
-                .and_then(|bytes| visicut_core::import::import_templates(&bytes, &file_name));
+                .and_then(|bytes| {
+                    visicut_core::import::import_templates(&bytes, &file_name).map_err(String::from)
+                });
             match imported {
                 Ok((templates, notes)) => {
                     warnings.extend(notes);

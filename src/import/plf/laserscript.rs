@@ -2,6 +2,7 @@
 //! `line(x, y)` in millimetres, like VisiCut's `LaserScriptImporter` and
 //! LibLaserCut's `LaserScriptBootstrap.js`.
 use super::script::{self, Engine};
+use crate::import::ImportError;
 use crate::{i18n::tr, tr};
 use boa_engine::{
     Context, JsArgs, JsNativeError, JsResult, JsString, JsValue, NativeFunction, js_string,
@@ -80,15 +81,15 @@ thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
 }
 
-pub fn run(source: String, limit: Duration) -> Result<Drawing, String> {
+pub fn run(source: String, limit: Duration) -> Result<Drawing, ImportError> {
     run_with(source, limit, MAX_POINTS)
 }
 
-fn run_with(source: String, limit: Duration, max_points: usize) -> Result<Drawing, String> {
+fn run_with(source: String, limit: Duration, max_points: usize) -> Result<Drawing, ImportError> {
     use crate::import::worker::{Job, Output};
     match (Job::LaserScript { source, max_points }).run(limit)? {
         Output::Drawing(drawing) => Ok(drawing),
-        _ => Err(tr("Skriptausführung ist unerwartet abgebrochen").into()),
+        _ => Err(ImportError::ScriptAborted),
     }
 }
 
@@ -97,11 +98,11 @@ pub(crate) fn run_here(
     source: String,
     limit: Duration,
     max_points: usize,
-) -> Result<Drawing, String> {
+) -> Result<Drawing, ImportError> {
     script::run_isolated(limit, move |engine| execute(engine, &source, max_points))
 }
 
-fn execute(engine: &mut Engine, source: &str, max_points: usize) -> Result<Drawing, String> {
+fn execute(engine: &mut Engine, source: &str, max_points: usize) -> Result<Drawing, ImportError> {
     STATE.with(|s| s.borrow_mut().max_points = max_points);
     register(&mut engine.context, "move", 2, js_move)?;
     register(&mut engine.context, "line", 2, js_line)?;
@@ -112,12 +113,9 @@ fn execute(engine: &mut Engine, source: &str, max_points: usize) -> Result<Drawi
     let result = engine.eval(source);
     let state = STATE.with(|s| std::mem::take(&mut *s.borrow_mut()));
     if state.overflow {
-        return Err(tr!(
-            "LaserScript zeichnet mehr als {count} Punkte; Import abgebrochen",
-            count = max_points
-        ));
+        return Err(ImportError::TooManyPoints(max_points));
     }
-    result.map_err(|e| format!("LaserScript: {e}"))?;
+    result.map_err(|e| ImportError::LaserScript(Box::new(e)))?;
     let mut messages = state.messages;
     if state.dropped_messages > 0 {
         messages.push(tr!(
@@ -140,7 +138,7 @@ fn register(
     name: &str,
     length: usize,
     function: fn(&JsValue, &[JsValue], &mut Context) -> JsResult<JsValue>,
-) -> Result<(), String> {
+) -> Result<(), ImportError> {
     context
         .register_global_builtin_callable(
             JsString::from(name),
@@ -297,9 +295,9 @@ pub fn number(value: f64) -> String {
 
 /// SVG in millimetres; coordinates stay those of the script, so the drawing
 /// keeps its position relative to the laser's origin.
-pub fn to_svg(drawing: &Drawing) -> Result<(String, Vec<String>), String> {
+pub fn to_svg(drawing: &Drawing) -> Result<(String, Vec<String>), ImportError> {
     let Some([x0, y0, x1, y1]) = drawing.bounds.filter(|_| drawing.lines > 0) else {
-        return Err(tr("LaserScript hat keine Linien gezeichnet").into());
+        return Err(ImportError::NoLines);
     };
     let mut warnings = Vec::new();
     if x0 < 0.0 || y0 < 0.0 {
@@ -425,7 +423,10 @@ mod tests {
     fn rejects_invalid_coordinates_and_errors() {
         assert!(run("move('a', 1)".into(), script::TIME_LIMIT).is_err());
         let error = run("move(0, 0); line(1, ".into(), script::TIME_LIMIT).unwrap_err();
-        assert!(error.starts_with("LaserScript: Skriptfehler"), "{error}");
+        assert!(
+            matches!(&error, ImportError::LaserScript(inner) if matches!(**inner, ImportError::Script(_))),
+            "{error}"
+        );
     }
 
     #[test]
@@ -436,6 +437,6 @@ mod tests {
             1000,
         )
         .unwrap_err();
-        assert!(error.contains("Punkte"), "{error}");
+        assert!(matches!(error, ImportError::TooManyPoints(1000)), "{error}");
     }
 }

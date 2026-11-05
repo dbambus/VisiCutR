@@ -9,7 +9,7 @@
 //!
 //! Boa has no memory limit and cannot be stopped inside built-in functions,
 //! so the application runs scripts in a child process (`import::worker`).
-use crate::{i18n::tr, tr};
+use crate::import::ImportError;
 use boa_engine::{Context, JsError, JsValue, Script, Source};
 use std::future::Future;
 use std::sync::mpsc;
@@ -49,10 +49,10 @@ impl Engine {
     }
 
     /// Runs `code` as a script and returns its completion value.
-    pub fn eval(&mut self, code: &str) -> Result<JsValue, String> {
+    pub fn eval(&mut self, code: &str) -> Result<JsValue, ImportError> {
         if self.aborted || Instant::now() > self.deadline {
             self.aborted = true;
-            return Err(timeout_message(self.limit));
+            return Err(ImportError::ScriptTimeout(self.limit));
         }
         let script = Script::parse(Source::from_bytes(code), None, &mut self.context)
             .map_err(|e| describe(&e))?;
@@ -74,13 +74,13 @@ impl Engine {
             None => {
                 // The interrupted script left its frame on the VM stack.
                 self.aborted = true;
-                Err(timeout_message(self.limit))
+                Err(ImportError::ScriptTimeout(self.limit))
             }
         }
     }
 
     /// Converts `value` like JavaScript's `String(value)`.
-    pub fn string(&mut self, value: &JsValue) -> Result<String, String> {
+    pub fn string(&mut self, value: &JsValue) -> Result<String, ImportError> {
         value
             .to_string(&mut self.context)
             .map(|s| s.to_std_string_escaped())
@@ -90,10 +90,10 @@ impl Engine {
 
 /// Runs `job` with a fresh engine on its own thread and waits at most
 /// `limit` (plus a grace period) for the result.
-pub fn run_isolated<R, F>(limit: Duration, job: F) -> Result<R, String>
+pub fn run_isolated<R, F>(limit: Duration, job: F) -> Result<R, ImportError>
 where
     R: Send + 'static,
-    F: FnOnce(&mut Engine) -> Result<R, String> + Send + 'static,
+    F: FnOnce(&mut Engine) -> Result<R, ImportError> + Send + 'static,
 {
     let (sender, receiver) = mpsc::channel();
     std::thread::Builder::new()
@@ -103,32 +103,20 @@ where
             let mut engine = Engine::new(limit);
             let _ = sender.send(job(&mut engine));
         })
-        .map_err(|e| tr!("Skript konnte nicht gestartet werden: {error}", error = e))?;
+        .map_err(ImportError::ScriptStart)?;
     match receiver.recv_timeout(limit + GRACE) {
         Ok(result) => result,
         // The worker is left behind; Boa cannot be interrupted from outside.
-        Err(mpsc::RecvTimeoutError::Timeout) => Err(timeout_message(limit)),
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
-            Err(tr("Skriptausführung ist unerwartet abgebrochen").into())
-        }
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(ImportError::ScriptTimeout(limit)),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(ImportError::ScriptAborted),
     }
 }
 
-pub fn timeout_message(limit: Duration) -> String {
-    tr!(
-        "Skript nach {seconds} s abgebrochen (Endlosschleife oder zu aufwendig)",
-        seconds = limit.as_secs_f32()
-    )
-}
-
-pub fn describe(error: &JsError) -> String {
+pub fn describe(error: &JsError) -> ImportError {
     if error.as_native().is_some_and(|e| e.is_runtime_limit()) {
-        return tr!(
-            "Skript abgebrochen: Laufzeitgrenze überschritten ({error})",
-            error = error
-        );
+        return ImportError::ScriptLimit(error.to_string());
     }
-    tr!("Skriptfehler: {error}", error = error)
+    ImportError::Script(error.to_string())
 }
 
 #[cfg(test)]
@@ -153,7 +141,7 @@ mod tests {
                 .map(|_| ())
         })
         .unwrap_err();
-        assert!(error.contains("abgebrochen"), "{error}");
+        assert!(matches!(error, ImportError::ScriptTimeout(_)), "{error}");
     }
 
     #[test]
@@ -162,7 +150,10 @@ mod tests {
             engine.eval("function f() { return f(); } f()").map(|_| ())
         })
         .unwrap_err();
-        assert!(error.contains("Skript"), "{error}");
+        assert!(
+            matches!(error, ImportError::Script(_) | ImportError::ScriptLimit(_)),
+            "{error}"
+        );
     }
 
     #[test]

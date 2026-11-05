@@ -5,13 +5,14 @@
 //! Java `GraphicFileImporter` does by converting to its own graphic model.
 mod dxf;
 mod eps;
+mod error;
 mod gcode;
 mod pdf;
 mod plf;
 mod raster;
 
-use crate::i18n::tr;
 pub use crate::svg_import::Imported;
+pub use error::ImportError;
 mod worker;
 
 pub use plf::{
@@ -44,19 +45,16 @@ impl ZipBudget {
         &mut self,
         entry: &mut impl std::io::Read,
         limit: u64,
-    ) -> Result<Option<Vec<u8>>, String> {
+    ) -> Result<Option<Vec<u8>>, ImportError> {
         use std::io::Read;
         let cap = limit.min(self.left);
         let mut bytes = Vec::new();
-        entry
-            .take(cap + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|e| e.to_string())?;
+        entry.take(cap + 1).read_to_end(&mut bytes)?;
         let read = bytes.len() as u64;
         self.left = self.left.saturating_sub(read);
         if read > cap {
             return if cap < limit {
-                Err(tr("Archiv ist entpackt größer als erlaubt").into())
+                Err(ImportError::ArchiveTooLarge)
             } else {
                 Ok(None)
             };
@@ -86,16 +84,13 @@ thread_local! {
 }
 
 /// `limit`, shortened to what is left of the running import's time.
-pub(crate) fn time_left(limit: std::time::Duration) -> Result<std::time::Duration, String> {
+pub(crate) fn time_left(limit: std::time::Duration) -> Result<std::time::Duration, ImportError> {
     let Some(deadline) = DEADLINE.get() else {
         return Ok(limit);
     };
     match deadline.checked_duration_since(std::time::Instant::now()) {
         Some(left) if !left.is_zero() => Ok(limit.min(left)),
-        _ => Err(crate::tr!(
-            "Import nach {seconds} s abgebrochen (Datei zu aufwendig)",
-            seconds = TIME_LIMIT.as_secs_f32()
-        )),
+        _ => Err(ImportError::TimeLimit(TIME_LIMIT)),
     }
 }
 
@@ -115,7 +110,7 @@ pub fn prefetch(paths: &[std::path::PathBuf]) -> Prefetched {
         paths
             .iter()
             .filter(|p| is_importable(p))
-            .map(|p| (p.clone(), read_file(p)))
+            .map(|p| (p.clone(), read_file(p).map_err(String::from)))
             .collect(),
     )
 }
@@ -141,14 +136,14 @@ pub fn is_prefetched<'a>(paths: impl IntoIterator<Item = &'a Path>) -> bool {
     })
 }
 
-pub fn read_file(path: &Path) -> Result<Imported, String> {
+pub fn read_file(path: &Path) -> Result<Imported, ImportError> {
     let ready = PREFETCHED.with_borrow(|prefetched| {
         prefetched
             .as_ref()
             .and_then(|prefetched| prefetched.0.get(path).cloned())
     });
     if let Some(result) = ready {
-        return result;
+        return result.map_err(ImportError::Reported);
     }
     struct Outermost;
     impl Drop for Outermost {
@@ -163,10 +158,10 @@ pub fn read_file(path: &Path) -> Result<Imported, String> {
     read_file_within(path)
 }
 
-fn read_file_within(path: &Path) -> Result<Imported, String> {
-    let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
+fn read_file_within(path: &Path) -> Result<Imported, ImportError> {
+    let meta = std::fs::metadata(path)?;
     if meta.len() > MAX_FILE_BYTES {
-        return Err(tr("Datei ist größer als 25 MB").into());
+        return Err(ImportError::FileTooLarge);
     }
     let name = path
         .file_name()
@@ -177,16 +172,16 @@ fn read_file_within(path: &Path) -> Result<Imported, String> {
         return plf::read_parametric_svg(path);
     }
     match extension(path).as_deref() {
-        Some("svg") => crate::svg_import::read_svg_file(path).map_err(String::from),
+        Some("svg") => Ok(crate::svg_import::read_svg_file(path)?),
         Some("psvg") => plf::read_parametric_svg(path),
-        Some("dxf") => dxf::read(path),
+        Some("dxf") => Ok(dxf::read(path)?),
         Some("pdf") => pdf::read_pdf(path),
         Some("eps" | "ps") => pdf::read_postscript(path),
         Some("png" | "jpg" | "jpeg" | "bmp" | "gif") => raster::read(path),
         Some("nc" | "gcode") => gcode::read(path),
         Some("plf") => plf::read_plf(path),
         Some("ls") => plf::read_laser_script(path),
-        _ => Err(tr("Unbekanntes Dateiformat").into()),
+        _ => Err(ImportError::UnknownFormat),
     }
 }
 
@@ -212,13 +207,13 @@ mod tests {
     #[test]
     fn nested_imports_share_the_time_of_the_outermost() {
         let limit = std::time::Duration::from_secs(5);
-        assert_eq!(time_left(limit), Ok(limit), "outside an import");
+        assert_eq!(time_left(limit).ok(), Some(limit), "outside an import");
         DEADLINE.set(Some(
             std::time::Instant::now() + std::time::Duration::from_secs(2),
         ));
         assert!(time_left(limit).unwrap() <= std::time::Duration::from_secs(2));
         DEADLINE.set(Some(std::time::Instant::now()));
-        assert!(time_left(limit).unwrap_err().contains("abgebrochen"));
+        assert!(matches!(time_left(limit), Err(ImportError::TimeLimit(_))));
         // read_file sets the deadline only when none is running and clears it.
         DEADLINE.set(None);
         let _ = read_file(Path::new("does-not-exist.svg"));

@@ -4,9 +4,9 @@
 //! Resolution"). The resolution stored in the file (PNG `pHYs`, JPEG JFIF or
 //! Exif, BMP pixels per metre) is used instead when present; 72 DPI remains
 //! the fallback.
-use super::Imported;
+use super::{ImportError, Imported};
 use crate::svg_import::MAX_SVG_BYTES;
-use crate::{i18n::tr, tr};
+use crate::tr;
 use base64::Engine;
 use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, metadata::Orientation};
 use std::io::Cursor;
@@ -16,31 +16,27 @@ use std::path::Path;
 const DEFAULT_DPI: f64 = 72.0;
 /// Resolutions outside this range are treated as missing.
 const DPI_RANGE: std::ops::RangeInclusive<f64> = 1.0..=100_000.0;
-fn damaged() -> &'static str {
-    tr("Bilddatei ist beschädigt oder hat ein nicht unterstütztes Format")
-}
 
-pub fn read(path: &Path) -> Result<Imported, String> {
-    let data = std::fs::read(path).map_err(|e| e.to_string())?;
+pub fn read(path: &Path) -> Result<Imported, ImportError> {
+    let data = std::fs::read(path)?;
     from_bytes(data)
 }
 
-fn from_bytes(data: Vec<u8>) -> Result<Imported, String> {
-    let format = image::guess_format(&data).map_err(|_| damaged().to_string())?;
+fn from_bytes(data: Vec<u8>) -> Result<Imported, ImportError> {
+    let format = image::guess_format(&data).map_err(|_| ImportError::ImageDamaged)?;
     let (stored_dpi, cmyk) = match format {
         ImageFormat::Png => (png_dpi(&data), false),
         ImageFormat::Jpeg => jpeg_info(&data),
         ImageFormat::Bmp => (bmp_dpi(&data), false),
         ImageFormat::Gif => (None, false),
-        _ => return Err(damaged().into()),
+        _ => return Err(ImportError::ImageDamaged),
     };
     let mut decoder = ImageReader::with_format(Cursor::new(&data), format)
         .into_decoder()
-        .map_err(|e| format!("{}: {e}", damaged()))?;
+        .map_err(ImportError::ImageDecode)?;
     let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
     let exif = decoder.exif_metadata().ok().flatten();
-    let mut image =
-        DynamicImage::from_decoder(decoder).map_err(|e| format!("{}: {e}", damaged()))?;
+    let mut image = DynamicImage::from_decoder(decoder).map_err(ImportError::ImageDecode)?;
     let stored_dpi = stored_dpi.or_else(|| exif.as_deref().and_then(exif_dpi));
 
     let mut warnings = Vec::new();
@@ -83,10 +79,7 @@ fn from_bytes(data: Vec<u8>) -> Result<Imported, String> {
     let (width, height) = (image.width(), image.height());
     let encoded_len = bytes.len().div_ceil(3) * 4;
     if encoded_len + 512 > MAX_SVG_BYTES {
-        return Err(tr!(
-            "Bild ist eingebettet größer als {size} MB; bitte verkleinern oder stärker komprimieren",
-            size = MAX_SVG_BYTES / (1024 * 1024)
-        ));
+        return Err(ImportError::ImageTooLarge);
     }
     let mut svg = String::with_capacity(encoded_len + 512);
     svg.push_str(&format!(
@@ -104,13 +97,13 @@ fn from_bytes(data: Vec<u8>) -> Result<Imported, String> {
 }
 
 /// Re-encodes photos as JPEG (quality 95) and everything else losslessly as PNG.
-fn encode(image: &DynamicImage, photo: bool) -> Result<(&'static str, Vec<u8>), String> {
+fn encode(image: &DynamicImage, photo: bool) -> Result<(&'static str, Vec<u8>), ImportError> {
     let mut bytes = Vec::new();
     if photo {
         let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 95);
         DynamicImage::ImageRgb8(image.to_rgb8())
             .write_with_encoder(encoder)
-            .map_err(|e| e.to_string())?;
+            .map_err(ImportError::ImageEncode)?;
         Ok(("image/jpeg", bytes))
     } else {
         let image = if image.color().has_alpha() {
@@ -120,7 +113,7 @@ fn encode(image: &DynamicImage, photo: bool) -> Result<(&'static str, Vec<u8>), 
         };
         image
             .write_to(Cursor::new(&mut bytes), ImageFormat::Png)
-            .map_err(|e| e.to_string())?;
+            .map_err(ImportError::ImageEncode)?;
         Ok(("image/png", bytes))
     }
 }
@@ -450,7 +443,7 @@ mod tests {
         let Err(error) = from_bytes(with_chunk(&png, b"zzZz", &padding)) else {
             panic!("oversized image was accepted");
         };
-        assert!(error.contains("20 MB"), "{error}");
+        assert!(matches!(error, ImportError::ImageTooLarge), "{error}");
     }
 
     #[test]

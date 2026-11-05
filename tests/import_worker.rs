@@ -38,7 +38,7 @@ fn work_inside_built_in_functions_is_stopped_at_the_time_limit() {
         "{:?}",
         start.elapsed()
     );
-    assert!(error.contains("abgebrochen"), "{error}");
+    assert!(error.to_string().contains("abgebrochen"), "{error}");
 }
 
 #[cfg(target_os = "linux")]

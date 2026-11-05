@@ -1,4 +1,5 @@
 //! DXF entities → paths and texts in world millimetres (Y up).
+use super::DxfError;
 use super::colors::aci;
 use super::geom::{self, Affine, P, PathBuilder, Seg, full_turn};
 use super::reader::{Document, Entity, Pair, number};
@@ -88,7 +89,7 @@ struct Converter<'a> {
     block_instances: usize,
 }
 
-pub fn convert(doc: &Document, unit_mm: f64) -> Result<Converted, String> {
+pub fn convert(doc: &Document, unit_mm: f64) -> Result<Converted, DxfError> {
     let mut converter = Converter {
         doc,
         ltscale: doc
@@ -450,21 +451,21 @@ impl Converter<'_> {
         }
     }
 
-    fn push(&mut self, prim: Prim) -> Result<(), String> {
+    fn push(&mut self, prim: Prim) -> Result<(), DxfError> {
         if let Prim::Path { segs, .. } = &prim {
             self.segments += segs.len();
             if segs.len() >= geom::MAX_PATH_SEGMENTS || self.segments > MAX_SEGMENTS {
-                return Err(tr("DXF-Datei enthält zu viele Objekte").into());
+                return Err(DxfError::TooManyObjects);
             }
         }
         if self.prims.len() >= MAX_PRIMITIVES {
-            return Err(tr("DXF-Datei enthält zu viele Objekte").into());
+            return Err(DxfError::TooManyObjects);
         }
         self.prims.push(prim);
         Ok(())
     }
 
-    fn stroke(&mut self, layer: &str, style: &Style, path: PathBuilder) -> Result<(), String> {
+    fn stroke(&mut self, layer: &str, style: &Style, path: PathBuilder) -> Result<(), DxfError> {
         if !path.has_drawing() {
             return Ok(());
         }
@@ -493,7 +494,7 @@ impl Converter<'_> {
         *self.unsupported.entry(kind.to_owned()).or_default() += 1;
     }
 
-    fn entity(&mut self, e: &Entity, ctx: &Ctx) -> Result<(), String> {
+    fn entity(&mut self, e: &Entity, ctx: &Ctx) -> Result<(), DxfError> {
         if e.int(60) == Some(1) {
             return Ok(());
         }
@@ -686,10 +687,10 @@ impl Converter<'_> {
         layer: String,
         style: &Style,
         ctx: &Ctx,
-    ) -> Result<(), String> {
+    ) -> Result<(), DxfError> {
         self.block_instances += 1;
         if self.block_instances > MAX_BLOCK_INSTANCES {
-            return Err(tr("DXF-Datei enthält zu viele Blockreferenzen").into());
+            return Err(DxfError::TooManyBlockReferences);
         }
         let Some(block) = self.doc.block(name) else {
             self.missing_blocks.insert(name.to_owned());
@@ -725,7 +726,7 @@ impl Converter<'_> {
         layer: String,
         style: &Style,
         ctx: &Ctx,
-    ) -> Result<(), String> {
+    ) -> Result<(), DxfError> {
         let name = e.str(2).unwrap_or_default();
         let at = point(e, 10);
         let rotation = Affine::rotate(e.fd(50, 0.0).to_radians());
@@ -733,7 +734,7 @@ impl Converter<'_> {
         let columns = e.int(70).unwrap_or(1).max(1);
         let rows = e.int(71).unwrap_or(1).max(1);
         if columns.saturating_mul(rows) > 100_000 {
-            return Err(tr("DXF-Datei enthält zu viele Blockreferenzen").into());
+            return Err(DxfError::TooManyBlockReferences);
         }
         let (dx, dy) = (e.fd(44, 0.0), e.fd(45, 0.0));
         let placement = ocs(e, e.fd(30, 0.0)).then(Affine::translate(at[0], at[1]));
@@ -759,7 +760,7 @@ impl Converter<'_> {
         style: &Style,
         ctx: &Ctx,
         vertical_code: i32,
-    ) -> Result<(), String> {
+    ) -> Result<(), DxfError> {
         let content = text::single_line(e.str(1).unwrap_or_default());
         if content.trim().is_empty() {
             return Ok(());
@@ -816,7 +817,13 @@ impl Converter<'_> {
         })
     }
 
-    fn mtext(&mut self, e: &Entity, layer: String, style: &Style, ctx: &Ctx) -> Result<(), String> {
+    fn mtext(
+        &mut self,
+        e: &Entity,
+        layer: String,
+        style: &Style,
+        ctx: &Ctx,
+    ) -> Result<(), DxfError> {
         let mut raw: String = e
             .pairs
             .iter()
@@ -875,7 +882,13 @@ impl Converter<'_> {
         })
     }
 
-    fn hatch(&mut self, e: &Entity, layer: String, style: &Style, m: Affine) -> Result<(), String> {
+    fn hatch(
+        &mut self,
+        e: &Entity,
+        layer: String,
+        style: &Style,
+        m: Affine,
+    ) -> Result<(), DxfError> {
         let Some(start) = e.pairs.iter().position(|p| p.code == 91) else {
             return Ok(());
         };

@@ -2091,7 +2091,7 @@ impl VisiCutR {
             .and_then(|()| ltt::prepare_with(&self.project, single_job))
         {
             Ok(prepared) => prepared,
-            Err(e) => return self.report(e),
+            Err(e) => return self.report(e.to_string()),
         };
         let mut jobs = prepared.jobs;
         if jobs.len() == 1 {
@@ -2158,7 +2158,7 @@ impl VisiCutR {
             .and_then(|()| ltt::prepare_with(&self.project, single_job))
         {
             Ok(prepared) => self.confirm_send = Some(prepared),
-            Err(e) => self.report(e),
+            Err(e) => self.report(e.to_string()),
         }
     }
 
@@ -2167,7 +2167,7 @@ impl VisiCutR {
         let port = self.project.port;
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(ltt::transmit_jobs(&host, port, &prepared.jobs));
+            let _ = tx.send(ltt::transmit_jobs(&host, port, &prepared.jobs).map_err(String::from));
         });
         self.send_result = Some(rx);
         self.status = tr("Job wird an den Lasercutter übertragen …").into();

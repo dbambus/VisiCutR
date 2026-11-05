@@ -1,8 +1,11 @@
 // Protocol port from LibLaserCut LaserToolsTechnicsCutter, LGPL-3.0-or-later.
 // Original driver: Maximilian Gaukler; portions by Thomas Oster.
 // Provenance and deliberate limitations: ../../docs/LTT-Protokoll.md.
+mod error;
 mod order;
 mod vector;
+
+pub use error::LttError;
 
 use crate::{
     geometry,
@@ -14,8 +17,8 @@ use crate::{
 };
 use resvg::{tiny_skia, usvg};
 use std::{
-    io::{self, Write},
-    net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs},
+    io::Write,
+    net::{Shutdown, TcpStream, ToSocketAddrs},
     time::Duration,
 };
 
@@ -145,7 +148,7 @@ fn pair(out: &mut Vec<u8>, axis: Axis, x: i32, y: i32) {
 
 /// Start of a raster line given in pixels of `pitch` machine steps; rows
 /// outside the bed are refused instead of wrapping around.
-fn raster_pair(out: &mut Vec<u8>, axis: Axis, x: i32, y: i32, pitch: i32) -> Result<(), String> {
+fn raster_pair(out: &mut Vec<u8>, axis: Axis, x: i32, y: i32, pitch: i32) -> Result<(), LttError> {
     let x = x
         .checked_mul(pitch)
         .and_then(|x| u32::try_from(x).ok())
@@ -156,9 +159,7 @@ fn raster_pair(out: &mut Vec<u8>, axis: Axis, x: i32, y: i32, pitch: i32) -> Res
             dword(out, y);
             Ok(())
         }
-        _ => {
-            Err(tr("Gravur zu nahe am Bettrand; bitte Motiv weiter nach innen verschieben").into())
-        }
+        _ => Err(LttError::TooCloseToEdge),
     }
 }
 
@@ -209,12 +210,13 @@ struct Part {
 impl Part {
     /// Vector paths in mm: the contours, or with `outline` the boundary of
     /// the area the objects cover.
-    fn vector_paths(&self, source: &Project) -> Result<Vec<geometry::Contour>, String> {
-        if self.outline {
-            geometry::outline_contours(source)
+    fn vector_paths(&self, source: &Project) -> Result<Vec<geometry::Contour>, LttError> {
+        let paths = if self.outline {
+            geometry::outline_contours(source)?
         } else {
-            geometry::contours(source)
-        }
+            geometry::contours(source)?
+        };
+        Ok(paths)
     }
 }
 
@@ -238,7 +240,7 @@ fn overscan(operation: Operation, speed_percent: f32) -> f32 {
 /// Every project part on its own (shared settings plus that part), in list
 /// order, and the objects of each processing step; their steps are merged
 /// into one LTT job per operation.
-fn collect_parts(project: &Project) -> Result<(Vec<Project>, Vec<Part>), String> {
+fn collect_parts(project: &Project) -> Result<(Vec<Project>, Vec<Part>), LttError> {
     let views: Vec<Project> = project
         .all_parts()
         .iter()
@@ -246,11 +248,14 @@ fn collect_parts(project: &Project) -> Result<(Vec<Project>, Vec<Part>), String>
         .collect();
     let mut parts = Vec::new();
     for (source, view) in views.iter().enumerate() {
-        view.validate().map_err(|e| {
+        view.validate().map_err(|error| {
             if views.len() > 1 {
-                format!("{}: {e}", view.part_name)
+                LttError::InvalidPart {
+                    part: view.part_name.clone(),
+                    error,
+                }
             } else {
-                e
+                LttError::Other(error)
             }
         })?;
         if view.steps.is_empty() {
@@ -286,7 +291,7 @@ fn collect_parts(project: &Project) -> Result<(Vec<Project>, Vec<Part>), String>
         }
     }
     if parts.is_empty() {
-        return Err(tr("Keine Objekte zur Bearbeitung ausgewählt").into());
+        return Err(LttError::NothingSelected);
     }
     Ok((views, parts))
 }
@@ -295,7 +300,7 @@ fn collect_parts(project: &Project) -> Result<(Vec<Project>, Vec<Part>), String>
 /// job: cut and mark as outlines, engravings as drawn (what the raster
 /// burns). Shown on the canvas while assigning; covers `Project::bounds`
 /// like `preview_png`.
-pub fn processing_preview(project: &Project) -> Result<Vec<u8>, String> {
+pub fn processing_preview(project: &Project) -> Result<Vec<u8>, LttError> {
     processing_preview_sized(project, 1600.0, 2.0)
 }
 
@@ -306,7 +311,7 @@ pub fn processing_preview_sized(
     project: &Project,
     max_px: f32,
     min_line_px: f32,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, LttError> {
     let (views, parts) = collect_parts(project)?;
     let [x, y, width, height] = project.bounds();
     let frame = Frame {
@@ -320,7 +325,7 @@ pub fn processing_preview_sized(
         (frame.width * scale).ceil().max(1.0) as u32,
         (frame.height * scale).ceil().max(1.0) as u32,
     )
-    .ok_or(tr("Vorschau konnte nicht erstellt werden"))?;
+    .ok_or(LttError::PreviewFailed)?;
     // Areas first, outlines on top.
     let ordered = parts
         .iter()
@@ -348,7 +353,9 @@ pub fn processing_preview_sized(
             );
         }
     }
-    preview.encode_png().map_err(|e| e.to_string())
+    preview
+        .encode_png()
+        .map_err(|e| LttError::Other(e.to_string()))
 }
 
 /// What an engraving would burn, tinted in the operation colour: the darker
@@ -358,9 +365,9 @@ fn draw_area(
     frame: Frame,
     source: &Project,
     color: [u8; 3],
-) -> Result<(), String> {
-    let tree =
-        usvg::Tree::from_str(&source.svg, &crate::svg::options()).map_err(|e| e.to_string())?;
+) -> Result<(), LttError> {
+    let tree = usvg::Tree::from_str(&source.svg, &crate::svg::options())
+        .map_err(|e| LttError::Other(e.to_string()))?;
     let size = tree.size();
     let sx = preview.width() as f32 / frame.width;
     let sy = preview.height() as f32 / frame.height;
@@ -373,8 +380,8 @@ fn draw_area(
         (source.x_mm - frame.x) * sx,
         (source.y_mm - frame.y) * sy,
     );
-    let mut layer = tiny_skia::Pixmap::new(preview.width(), preview.height())
-        .ok_or(tr("Vorschau konnte nicht erstellt werden"))?;
+    let mut layer =
+        tiny_skia::Pixmap::new(preview.width(), preview.height()).ok_or(LttError::PreviewFailed)?;
     resvg::render(&tree, transform, &mut layer.as_mut());
     for pixel in layer.data_mut().chunks_exact_mut(4) {
         let a = u32::from(pixel[3]);
@@ -418,28 +425,25 @@ fn operation_name(operation: Operation) -> &'static str {
 
 /// Vor Vorschau, Export und Senden: Ohne gewähltes Material fehlen die
 /// Laserparameter; die Meldung sagt das statt einer Leistungsgrenze.
-pub fn require_material(project: &Project) -> Result<(), String> {
+pub fn require_material(project: &Project) -> Result<(), LttError> {
     if project.material.trim().is_empty() {
-        return Err(tr(
-            "Kein Material zum Lasern gewählt: unter „Material“ ein Material wählen (oder „Eigenes Material …“ mit eigener Leistung).",
-        )
-        .into());
+        return Err(LttError::MaterialMissing);
     }
     Ok(())
 }
 
-pub fn prepare(project: &Project) -> Result<PreparedJob, String> {
+pub fn prepare(project: &Project) -> Result<PreparedJob, LttError> {
     prepare_with(project, false)
 }
 
 /// Like `prepare`; with `single_job` all operations go into one LTT job
 /// (one file, one transfer) instead of one per operation.
-pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, String> {
+pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, LttError> {
     project.validate()?;
     if (project.bed_width_mm - BED_WIDTH as f32).abs() > 0.01
         || (project.bed_height_mm - BED_HEIGHT as f32).abs() > 0.01
     {
-        return Err(tr("Das FAU-LTT-Profil benötigt ein Arbeitsbett von 1000 × 600 mm").into());
+        return Err(LttError::WrongBed);
     }
     // All parts together: the preview covers their bounding box, rotary
     // limits apply to the whole layout.
@@ -453,11 +457,9 @@ pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, 
     if project.rotary_axis
         && frame.height > std::f32::consts::PI * project.rotary_diameter_mm + 0.001
     {
-        return Err(tr!(
-            "Motiv ist höher als der Umfang des Werkstücks ({circumference} mm bei {diameter} mm Durchmesser)",
-            circumference = format!("{:.1}", std::f32::consts::PI * project.rotary_diameter_mm),
-            diameter = format!("{:.1}", project.rotary_diameter_mm)
-        ));
+        return Err(LttError::TallerThanCircumference {
+            diameter_mm: project.rotary_diameter_mm,
+        });
     }
     let (views, parts) = collect_parts(project)?;
     let mut jobs = Vec::new();
@@ -467,7 +469,7 @@ pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, 
         (frame.width * scale).ceil().max(1.0) as u32,
         (frame.height * scale).ceil().max(1.0) as u32,
     )
-    .ok_or(tr("Vorschau konnte nicht erstellt werden"))?;
+    .ok_or(LttError::PreviewFailed)?;
     let mut steps = Vec::new();
     let mut timeline = Timeline::default();
     let mut warnings = Vec::new();
@@ -549,10 +551,7 @@ pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, 
             .map(|p| p.raster.pitch())
             .collect();
         if pitches.len() > 1 {
-            return Err(tr(
-                "Gravuren in einem Auftrag brauchen dieselbe Auflösung; die DPI der Gravurschritte angleichen",
-            )
-            .into());
+            return Err(LttError::MixedResolutions);
         }
         let pitch = pitches.first().copied().unwrap_or(8);
         let overscan = group
@@ -586,7 +585,7 @@ pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, 
         finish(&mut out)?;
         total_bytes = total_bytes.saturating_add(out.len());
         if total_bytes > 256 * 1024 * 1024 {
-            return Err(tr("Gesamtauftrag ist größer als 256 MB").into());
+            return Err(LttError::OrderTooLarge);
         }
         jobs.push(OutputJob {
             name,
@@ -602,7 +601,9 @@ pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, 
             .collect::<Vec<_>>()
             .join(" · "),
         estimated_seconds: timeline.duration_seconds,
-        preview_png: preview.encode_png().map_err(|e| e.to_string())?,
+        preview_png: preview
+            .encode_png()
+            .map_err(|e| LttError::Other(e.to_string()))?,
         steps,
         timeline,
         warnings,
@@ -624,12 +625,12 @@ fn device_job_name(prefix: &str, name: &str) -> String {
         .collect()
 }
 
-fn finish(out: &mut Vec<u8>) -> Result<(), String> {
+fn finish(out: &mut Vec<u8>) -> Result<(), LttError> {
     out.extend([0x1b, 0x42, 0x59, 0x45]);
     let checksum = out
         .iter()
         .fold(0u16, |sum, byte| sum.wrapping_add(*byte as u16));
-    let length = u32::try_from(out.len() + 6).map_err(|_| tr("Job ist zu groß"))?;
+    let length = u32::try_from(out.len() + 6).map_err(|_| LttError::FileTooLarge)?;
     word(out, checksum);
     dword(out, length);
     Ok(())
@@ -701,7 +702,7 @@ fn append_part(
     project: &Project,
     part: &Part,
     name: &str,
-) -> Result<(PreparedStep, Bounds), String> {
+) -> Result<(PreparedStep, Bounds), LttError> {
     let frame = job.frame;
     let JobOutput {
         body: out,
@@ -712,10 +713,7 @@ fn append_part(
         ..
     } = job;
     if part.sets.iter().any(|s| s.power_percent <= 0.0) {
-        return Err(tr!(
-            "{operation}: Leistung ist 0 %; im Schritt eine Leistung eintragen (mindestens 0,1 %)",
-            operation = operation_name(part.operation)
-        ));
+        return Err(LttError::ZeroPower(part.operation));
     }
     // The cutter takes power in 0.1 % steps; like Java (at least 1 step)
     // smaller values such as the FAU profiles' 0.01 % for marking paper
@@ -754,9 +752,7 @@ fn append_part(
                 (paths, crate::overlap::Removed::default())
             };
             if paths.is_empty() {
-                return Err(
-                    tr("Nach dem Entfernen doppelter Linien bleibt nichts zu schneiden").into(),
-                );
+                return Err(LttError::NothingLeftAfterDuplicates);
             }
             let passes: usize = part.sets.iter().map(|s| s.passes as usize).sum();
             let estimated_bytes = paths
@@ -766,7 +762,7 @@ fn append_part(
                 .saturating_mul(passes)
                 .saturating_mul(12);
             if estimated_bytes > 256 * 1024 * 1024 {
-                return Err(tr("Vektorjob ist größer als 256 MB").into());
+                return Err(LttError::VectorJobTooLarge);
             }
             draw_contours(preview, frame, &paths, part.operation, 1.6);
             for point in paths.iter().flatten() {
@@ -777,9 +773,7 @@ fn append_part(
                     || point[0] > BED_WIDTH
                     || point[1] > BED_HEIGHT
                 {
-                    return Err(
-                        tr("SVG-Pfad liegt außerhalb des tatsächlichen LTT-Arbeitsbetts").into(),
-                    );
+                    return Err(LttError::OutsideBed);
                 }
             }
 
@@ -847,7 +841,7 @@ fn append_part(
                     .flat_map(|(_, e)| std::iter::once(&e.start).chain(&e.moves))
                     .map(|p| [p[0] / RASTER_DPI * 25.4, p[1] / RASTER_DPI * 25.4]),
             )
-            .ok_or(tr("Keine Vektorpfade zum Bearbeiten"))?;
+            .ok_or(LttError::NoVectorPaths)?;
             let ordered = match project.cut_order {
                 // VisiCut does not optimise a LaserScript.
                 _ if script.is_some() => elements,
@@ -977,7 +971,7 @@ fn append_part(
                 estimated += timeline.append(program, set.passes);
             }
             if lines == 0 {
-                return Err(tr("SVG enthält keine dunklen Gravurpixel").into());
+                return Err(LttError::NoDarkPixels);
             }
             description = tr!(
                 "{lines} Gravurzeilen · {dpi} DPI · {dithering} · {direction} · {passes} Durchgänge",
@@ -1067,9 +1061,9 @@ fn operation_color(operation: Operation) -> [u8; 3] {
 }
 
 /// Engraved pixels in the operation colour, opacity = laser power.
-fn raster_pixmap(raster: &Raster, color: [u8; 3]) -> Result<tiny_skia::Pixmap, String> {
+fn raster_pixmap(raster: &Raster, color: [u8; 3]) -> Result<tiny_skia::Pixmap, LttError> {
     let mut mask = tiny_skia::Pixmap::new(raster.width.max(1) as u32, raster.height.max(1) as u32)
-        .ok_or(tr("Gravurvorschau konnte nicht erstellt werden"))?;
+        .ok_or(LttError::RasterPreviewFailed)?;
     let width = raster.width;
     for (i, pixel) in mask.data_mut().chunks_exact_mut(4).enumerate() {
         let a = raster.intensity(i % width, i / width) as u32;
@@ -1117,14 +1111,14 @@ fn draw_raster(
 }
 
 /// Raster image for the timeline, at most 1600 pixels wide or high.
-fn raster_preview(raster: &Raster, color: [u8; 3]) -> Result<Vec<u8>, String> {
+fn raster_preview(raster: &Raster, color: [u8; 3]) -> Result<Vec<u8>, LttError> {
     let mask = raster_pixmap(raster, color)?;
     let scale = (1600.0 / mask.width().max(mask.height()) as f32).min(1.0);
     let mut small = tiny_skia::Pixmap::new(
         ((mask.width() as f32 * scale).ceil() as u32).max(1),
         ((mask.height() as f32 * scale).ceil() as u32).max(1),
     )
-    .ok_or(tr("Gravurvorschau konnte nicht erstellt werden"))?;
+    .ok_or(LttError::RasterPreviewFailed)?;
     let paint = tiny_skia::PixmapPaint {
         quality: tiny_skia::FilterQuality::Bilinear,
         ..Default::default()
@@ -1137,7 +1131,9 @@ fn raster_preview(raster: &Raster, color: [u8; 3]) -> Result<Vec<u8>, String> {
         tiny_skia::Transform::from_scale(scale, scale),
         None,
     );
-    small.encode_png().map_err(|e| e.to_string())
+    small
+        .encode_png()
+        .map_err(|e| LttError::Other(e.to_string()))
 }
 
 fn draw_contours(
@@ -1262,7 +1258,7 @@ fn render_raster(
     project: &Project,
     operation: Operation,
     pitch: i32,
-) -> Result<(tiny_skia::Pixmap, RasterArea), String> {
+) -> Result<(tiny_skia::Pixmap, RasterArea), LttError> {
     let smooth = operation == Operation::Engrave3d;
     let options = usvg::Options {
         shape_rendering: if smooth {
@@ -1279,14 +1275,15 @@ fn render_raster(
         image_rendering: usvg::ImageRendering::OptimizeSpeed,
         ..crate::svg::options()
     };
-    let tree = usvg::Tree::from_str(&project.svg, &options).map_err(|e| e.to_string())?;
+    let tree =
+        usvg::Tree::from_str(&project.svg, &options).map_err(|e| LttError::Other(e.to_string()))?;
     let size = tree.size();
     let sx = f64::from(project.width_mm) / f64::from(size.width());
     let sy = f64::from(project.height_mm) / f64::from(size.height());
     let f = MACHINE_DPI / pitch as f64 / 25.4;
     let to_px_x = |u: f32| (sx * f64::from(u) + f64::from(project.x_mm)) * f;
     let to_px_y = |u: f32| (sy * f64::from(u) + f64::from(project.y_mm)) * f;
-    let bbox = content_bounds(tree.root()).ok_or(tr("SVG enthält keine dunklen Gravurpixel"))?;
+    let bbox = content_bounds(tree.root()).ok_or(LttError::NoDarkPixels)?;
     let (x0, y0) = (to_px_x(bbox.left()), to_px_y(bbox.top()));
     let (x1, y1) = (to_px_x(bbox.right()), to_px_y(bbox.bottom()));
     let area = RasterArea {
@@ -1296,13 +1293,13 @@ fn render_raster(
     };
     let (width, height) = ((x1 - x0) as i32, (y1 - y0) as i32);
     if width <= 0 || height <= 0 {
-        return Err(tr("SVG enthält keine dunklen Gravurpixel").into());
+        return Err(LttError::NoDarkPixels);
     }
     if width as u64 * height as u64 > 40_000_000 {
-        return Err(tr("Gravur ist größer als 40 Millionen Pixel; Motiv verkleinern").into());
+        return Err(LttError::TooManyRasterPixels);
     }
-    let mut pixmap = tiny_skia::Pixmap::new(width as u32, height as u32)
-        .ok_or(tr("Gravur konnte nicht gerendert werden"))?;
+    let mut pixmap =
+        tiny_skia::Pixmap::new(width as u32, height as u32).ok_or(LttError::RenderFailed)?;
     pixmap.fill(tiny_skia::Color::WHITE);
     // translate(-bb) · mm2laserPx · (translate(x, y) · scale(document → mm))
     resvg::render(
@@ -1436,7 +1433,7 @@ fn raster_code(
     raster: &Raster,
     set: &ParameterSet,
     program: &mut Program,
-) -> Result<(Vec<u8>, usize), String> {
+) -> Result<(Vec<u8>, usize), LttError> {
     let (operation, options, extra_shift_px) = (part.operation, &part.raster, part.shift_px);
     let speed = set.speed_percent;
     let dpi = area.dpi();
@@ -1478,10 +1475,7 @@ fn raster_code(
         data.resize(data.len() + right_bytes, 0);
         let pixels = data.len() as i32 * per_byte;
         if start_x < spare || start_x + pixels > max_x - spare {
-            return Err(tr(
-                "Gravur zu nahe am Bettrand; bitte Motiv weiter nach innen verschieben",
-            )
-            .into());
+            return Err(LttError::TooCloseToEdge);
         }
         let row_mm = area.mm(origin_y + y as i32);
         let left_mm = area.mm(start_x);
@@ -1527,7 +1521,7 @@ fn raster_code(
         }
     }
     if encoded.len().saturating_mul(set.passes as usize) > 256 * 1024 * 1024 {
-        return Err(tr("Gravurjob ist größer als 256 MB").into());
+        return Err(LttError::RasterJobTooLarge);
     }
     Ok((encoded, count))
 }
@@ -1584,87 +1578,52 @@ fn compress(bytes: &[u8]) -> Vec<u8> {
     out
 }
 
-pub fn transmit_jobs(host: &str, port: u16, jobs: &[OutputJob]) -> Result<Vec<String>, String> {
+pub fn transmit_jobs(host: &str, port: u16, jobs: &[OutputJob]) -> Result<Vec<String>, LttError> {
     transmit_jobs_with(jobs, |bytes| transmit(host, port, bytes))
 }
 
 fn transmit_jobs_with(
     jobs: &[OutputJob],
-    mut send: impl FnMut(&[u8]) -> Result<(), String>,
-) -> Result<Vec<String>, String> {
+    mut send: impl FnMut(&[u8]) -> Result<(), LttError>,
+) -> Result<Vec<String>, LttError> {
     let mut sent = Vec::new();
     for job in jobs {
         if let Err(error) = send(&job.bytes) {
-            return Err(tr!(
-                "Übertragung von {job} fehlgeschlagen: {error}\nBereits übertragen: {sent}. Dieser Job kann teilweise am Gerät liegen. Weitere Aufträge wurden nicht gesendet; vor erneutem Senden Gerätespeicher prüfen.",
-                job = job.name,
-                error = error,
-                sent = if sent.is_empty() {
-                    tr("keine").to_string()
-                } else {
-                    sent.join(", ")
-                }
-            ));
+            return Err(LttError::PartlySent {
+                job: job.name.clone(),
+                error: Box::new(error),
+                sent,
+            });
         }
         sent.push(job.name.clone());
     }
     Ok(sent)
 }
 
-pub fn transmit(host: &str, port: u16, bytes: &[u8]) -> Result<(), String> {
+pub fn transmit(host: &str, port: u16, bytes: &[u8]) -> Result<(), LttError> {
     if host.trim().is_empty() || port == 0 {
-        return Err(tr("Hostname und Port müssen gesetzt sein").into());
+        return Err(LttError::MissingAddress);
     }
     let addresses: Vec<_> = (host, port)
         .to_socket_addrs()
-        .map_err(|e| tr!("Hostname nicht erreichbar: {error}", error = e))?
+        .map_err(LttError::HostLookup)?
         .collect();
-    let mut connection = Err(tr("Keine Verbindung zum LTT möglich").to_string());
+    let mut connection = Err(LttError::NoConnection);
     for address in addresses {
         match TcpStream::connect_timeout(&address, Duration::from_secs(3)) {
             Ok(stream) => {
                 connection = Ok(stream);
                 break;
             }
-            Err(error) => connection = Err(connect_error(address, &error)),
+            Err(error) => connection = Err(LttError::Connect { address, error }),
         }
     }
     let mut stream = connection?;
-    stream
-        .set_write_timeout(Some(Duration::from_secs(10)))
-        .map_err(|e| e.to_string())?;
-    stream.write_all(bytes).map_err(|e| {
-        tr!(
-            "Übertragung fehlgeschlagen; Teiljob könnte am Gerät liegen: {error}",
-            error = e
-        )
-    })?;
-    stream.flush().map_err(|e| e.to_string())?;
-    stream
-        .shutdown(Shutdown::Write)
-        .map_err(|e| e.to_string())?;
+    stream.set_write_timeout(Some(Duration::from_secs(10)))?;
+    stream.write_all(bytes).map_err(LttError::Transfer)?;
+    stream.flush()?;
+    stream.shutdown(Shutdown::Write)?;
     Ok(())
-}
-
-/// Names the address and the system error. macOS rejects connections into
-/// the local network with EHOSTUNREACH while the app lacks the "Local
-/// Network" privacy permission, even though the cutter answers.
-fn connect_error(address: SocketAddr, error: &io::Error) -> String {
-    let message = tr!(
-        "Keine Verbindung zu {address} möglich: {error}",
-        address = address,
-        error = error
-    );
-    if cfg!(target_os = "macos") && error.kind() == io::ErrorKind::HostUnreachable {
-        format!(
-            "{message}\n{}",
-            tr(
-                "Ist der Lasercutter eingeschaltet, blockiert macOS vermutlich den Zugriff auf das lokale Netzwerk. Unter Systemeinstellungen → Datenschutz & Sicherheit → Lokales Netzwerk VisiCutR erlauben und erneut senden."
-            )
-        )
-    } else {
-        message
-    }
 }
 
 #[cfg(test)]
@@ -1829,7 +1788,7 @@ mod tests {
         assert_eq!(prepare(&reloaded).unwrap().jobs[1].bytes, job.jobs[1].bytes);
         // A part outside the bed blocks sending and names the part.
         p.parts[0].x_mm = 990.0;
-        assert!(prepare(&p).err().unwrap().contains("rechteck"));
+        assert!(prepare(&p).err().unwrap().to_string().contains("rechteck"));
         p.remove_active_part();
         assert_eq!(p.part_name, "rechteck");
         assert!(p.parts.is_empty());
@@ -2268,12 +2227,13 @@ mod tests {
         let error = transmit_jobs_with(&job.jobs, |_| {
             calls += 1;
             if calls == 2 {
-                Err("Test-Verbindungsabbruch".into())
+                Err(LttError::Other("Test-Verbindungsabbruch".into()))
             } else {
                 Ok(())
             }
         })
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
         assert_eq!(calls, 2);
         assert!(error.contains(&job.jobs[0].name));
         assert!(error.contains(&job.jobs[1].name));
@@ -2390,7 +2350,7 @@ mod tests {
         let mut p = mixed();
         p.steps[0].objects.clear();
         p.steps[1].objects.clear();
-        assert!(prepare(&p).err().unwrap().contains("Keine Objekte"));
+        assert!(matches!(prepare(&p), Err(LttError::NothingSelected)));
         // As in VisiCut, one object may be processed by several steps.
         let mut p = mixed();
         p.steps[0].objects = vec![1];
@@ -2503,7 +2463,7 @@ mod tests {
         }
         };
         for (y_mm, rotary) in [(0.0, false), (590.0, false), (0.0, true)] {
-            let error = prepare(&stroked(y_mm, rotary)).err();
+            let error = prepare(&stroked(y_mm, rotary)).err().map(|e| e.to_string());
             assert!(
                 error.as_deref().is_some_and(|e| e.contains("Bettrand")),
                 "y = {y_mm} mm, rotary {rotary}: {error:?}"
@@ -2571,12 +2531,21 @@ mod tests {
             rotary_diameter_mm: 10.0,
             ..p.clone()
         };
-        assert!(prepare(&too_small).err().unwrap().contains("Umfang"));
+        assert!(matches!(
+            prepare(&too_small),
+            Err(LttError::TallerThanCircumference { .. })
+        ));
         let invalid = Project {
             rotary_diameter_mm: 4.0,
             ..p
         };
-        assert!(prepare(&invalid).err().unwrap().contains("Durchmesser"));
+        assert!(
+            prepare(&invalid)
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("Durchmesser")
+        );
     }
     fn has(bytes: &[u8], pattern: &[u8]) -> bool {
         bytes.windows(pattern.len()).any(|b| b == pattern)
@@ -2752,12 +2721,17 @@ mod tests {
     fn missing_material_and_zero_power_are_named() {
         let mut p = mixed();
         p.material.clear();
-        assert!(require_material(&p).unwrap_err().contains("Kein Material"));
+        assert!(matches!(
+            require_material(&p),
+            Err(LttError::MaterialMissing)
+        ));
         p.material = "Acryl".into();
         assert!(require_material(&p).is_ok());
         p.steps[1].power_percent = 0.0;
-        let error = prepare(&p).err().unwrap();
-        assert!(error.starts_with("Gravieren: Leistung ist 0 %"), "{error}");
+        assert!(matches!(
+            prepare(&p),
+            Err(LttError::ZeroPower(Operation::Engrave))
+        ));
         // The FAU mark profiles use 0.01 %: sent as the smallest step, 0.1 %.
         p.steps[1].power_percent = 0.01;
         let prepared = prepare(&p).unwrap();
@@ -2800,11 +2774,15 @@ mod tests {
             .local_addr()
             .unwrap()
             .port();
-        let refused = transmit("127.0.0.1", port, b"x").unwrap_err();
+        let refused = transmit("127.0.0.1", port, b"x").unwrap_err().to_string();
         assert!(refused.contains(&format!("127.0.0.1:{port}")), "{refused}");
         assert!(!refused.contains("Lokales Netzwerk"), "{refused}");
-        let address: SocketAddr = "10.188.64.39:9100".parse().unwrap();
-        let blocked = connect_error(address, &io::ErrorKind::HostUnreachable.into());
+        let address: std::net::SocketAddr = "10.188.64.39:9100".parse().unwrap();
+        let blocked = LttError::Connect {
+            address,
+            error: std::io::ErrorKind::HostUnreachable.into(),
+        }
+        .to_string();
         assert!(blocked.starts_with("Keine Verbindung zu 10.188.64.39:9100"));
         assert_eq!(
             blocked.contains("Lokales Netzwerk"),

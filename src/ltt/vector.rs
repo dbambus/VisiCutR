@@ -4,10 +4,9 @@
 // curveWithKnownSpeed, circle, reinterpolateWithMaximumDistance,
 // cuttingTimeForPxDistance) and LibLaserCut Circle.fromPointList.
 // LGPL-3.0-or-later; original author Maximilian Gaukler.
-use super::{Axis, NOMINAL_CUT_SPEED, RASTER_DPI, word};
+use super::{Axis, LttError, NOMINAL_CUT_SPEED, RASTER_DPI, word};
 use crate::project::LIBLASERCUT_CURVE_ACCELERATION;
 use crate::timeline::{MotionKind, Program};
-use crate::{i18n::tr, tr};
 
 /// Acceleration of the time estimate for straight moves: the FAU device's
 /// tangentCurveMaxAcceleration as in Java (the controller ramps start/stop
@@ -235,7 +234,7 @@ impl<'a> Encoder<'a> {
 
     /// curveOrLine: cut the polyline from the current point, split at corners,
     /// using circle commands or joint curves where possible.
-    pub fn polyline(&mut self, points: &[(f64, f64)]) -> Result<f64, String> {
+    pub fn polyline(&mut self, points: &[(f64, f64)]) -> Result<f64, LttError> {
         let mut time = 0.0;
         if points.is_empty() {
             return Ok(0.0);
@@ -328,7 +327,7 @@ impl<'a> Encoder<'a> {
 
     /// curve: plan speeds within the acceleration limit, then send the
     /// joint curve. Two points are sent as a plain line.
-    fn curve(&mut self, points: Vec<P>) -> Result<f64, String> {
+    fn curve(&mut self, points: Vec<P>) -> Result<f64, LttError> {
         if points.len() <= 1 {
             return Ok(0.0);
         }
@@ -358,7 +357,7 @@ impl<'a> Encoder<'a> {
         while changed || warmup > 0 {
             iterations += 1;
             if iterations > 100_000 {
-                return Err(tr("Kurvenplanung konvergiert nicht").into());
+                return Err(LttError::CurveNotConverging);
             }
             if warmup > 0 {
                 warmup -= 1;
@@ -392,13 +391,13 @@ impl<'a> Encoder<'a> {
                 let mut max_for_accel = a * cos + root;
                 let min_for_accel = a * cos - root;
                 if min_for_accel.is_nan() || max_for_accel.is_nan() {
-                    return Err(tr("Kurvenplanung: kein gültiger Geschwindigkeitsbereich").into());
+                    return Err(LttError::CurveNoSpeedRange);
                 }
                 if max_for_accel > max_speed {
                     if min_for_accel < max_speed {
                         max_for_accel = max_speed;
                     } else {
-                        return Err(tr("Kurvenplanung: Geschwindigkeitsbereich ungültig").into());
+                        return Err(LttError::CurveSpeedRangeInvalid);
                     }
                 }
                 if p.speed > max_for_accel {
@@ -412,7 +411,7 @@ impl<'a> Encoder<'a> {
                     let new_min = (b * cos - root).max(0.0);
                     let new_a = new_max * safety + new_min * (1.0 - safety);
                     if new_a.is_nan() {
-                        return Err(tr("Kurvenplanung: Bremsgeschwindigkeit ungültig").into());
+                        return Err(LttError::CurveBrakeSpeedInvalid);
                     }
                     points[i - 1].speed = new_a;
                     changed = true;
@@ -444,7 +443,7 @@ impl<'a> Encoder<'a> {
         self.curve_with_known_speed(&filtered)
     }
 
-    fn curve_with_known_speed(&mut self, points: &[P]) -> Result<f64, String> {
+    fn curve_with_known_speed(&mut self, points: &[P]) -> Result<f64, LttError> {
         self.set_laser(true);
         self.out.extend(b"PJ");
         let (mut vx, mut vy, mut v) = (0.0, 0.0, 0.0);
@@ -454,7 +453,7 @@ impl<'a> Encoder<'a> {
             let speed = points[i].speed;
             let before = points[i - 1].speed;
             if self.x == x && self.y == y {
-                return Err(tr("Kurve enthält einen doppelten Punkt").into());
+                return Err(LttError::CurveDuplicatePoint);
             }
             let dx = px_to_mm(x - self.x);
             let dy = px_to_mm(y - self.y);
@@ -469,10 +468,7 @@ impl<'a> Encoder<'a> {
             let tolerance = 1.00001;
             let limit = self.curve_acceleration * tolerance;
             if ax.is_nan() || ax > limit || ay.is_nan() || ay > limit || ax.hypot(ay) > limit {
-                return Err(tr!(
-                    "Beschleunigung im Kurvensegment {segment} zu hoch",
-                    segment = i
-                ));
+                return Err(LttError::CurveAcceleration { segment: i });
             }
             (vx, vy, v) = (new_vx, new_vy, new_v);
             self.out.extend(b"PE");

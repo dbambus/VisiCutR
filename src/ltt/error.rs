@@ -66,6 +66,7 @@ pub enum LttError {
         error: Box<LttError>,
         sent: Vec<String>,
     },
+    Selection(crate::selection::SelectionError),
     /// Errors from the drawing, the mapping or the project, already as text.
     Other(String),
 }
@@ -153,6 +154,7 @@ impl fmt::Display for LttError {
                     sent.join(", ")
                 }
             ),
+            Self::Selection(error) => error.to_string(),
             Self::Other(text) => text.clone(),
         };
         f.write_str(&text)
@@ -185,6 +187,12 @@ impl std::error::Error for LttError {}
 impl From<String> for LttError {
     fn from(text: String) -> Self {
         Self::Other(text)
+    }
+}
+
+impl From<crate::selection::SelectionError> for LttError {
+    fn from(error: crate::selection::SelectionError) -> Self {
+        Self::Selection(error)
     }
 }
 

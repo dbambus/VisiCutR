@@ -4,6 +4,39 @@
 use crate::{i18n::tr, tr};
 use resvg::tiny_skia;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+/// Engraving settings out of range.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RasterError {
+    ColorShift,
+    UnsupportedDpi(u32),
+    Shoulder,
+}
+
+impl fmt::Display for RasterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = match self {
+            Self::ColorShift => {
+                tr("Helligkeitsverschiebung muss zwischen −255 und 255 liegen").to_string()
+            }
+            Self::UnsupportedDpi(dpi) => tr!(
+                "Gravurauflösung {dpi} DPI wird nicht unterstützt (166, 200, 250, 333, 500 oder 1000 DPI)",
+                dpi = dpi
+            ),
+            Self::Shoulder => tr("Stempel-Schulter muss zwischen 0 und 3 mm liegen").to_string(),
+        };
+        f.write_str(&text)
+    }
+}
+
+impl std::error::Error for RasterError {}
+
+impl From<RasterError> for String {
+    fn from(error: RasterError) -> Self {
+        error.to_string()
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dithering {
@@ -95,18 +128,15 @@ impl RasterSettings {
         }
     }
 
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), RasterError> {
         if !(-255..=255).contains(&self.color_shift) {
-            return Err(tr("Helligkeitsverschiebung muss zwischen −255 und 255 liegen").into());
+            return Err(RasterError::ColorShift);
         }
         if !RASTER_DPIS.contains(&self.dpi) {
-            return Err(tr!(
-                "Gravurauflösung {dpi} DPI wird nicht unterstützt (166, 200, 250, 333, 500 oder 1000 DPI)",
-                dpi = self.dpi
-            ));
+            return Err(RasterError::UnsupportedDpi(self.dpi));
         }
         if !(0.0..=MAX_SHOULDER_MM).contains(&self.shoulder_mm) {
-            return Err(tr("Stempel-Schulter muss zwischen 0 und 3 mm liegen").into());
+            return Err(RasterError::Shoulder);
         }
         Ok(())
     }

@@ -684,7 +684,7 @@ impl Document {
                 })
                 .collect(),
             Err(e) => {
-                self.error = Some(e);
+                self.error = Some(e.to_string());
                 Vec::new()
             }
         };

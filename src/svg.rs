@@ -1,7 +1,42 @@
 use crate::{i18n::tr, tr};
 use resvg::usvg::fontdb;
 use resvg::{tiny_skia, usvg};
+use std::fmt;
 use std::sync::{Arc, OnceLock};
+
+#[derive(Debug)]
+pub enum SvgError {
+    /// Nested deeper than [`MAX_NESTING`].
+    TooDeep,
+    TooLarge,
+    Unreadable(usvg::Error),
+    PreviewTooLarge,
+}
+
+impl fmt::Display for SvgError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = match self {
+            Self::TooDeep => tr!(
+                "SVG ist tiefer als {depth} Ebenen verschachtelt",
+                depth = MAX_NESTING
+            ),
+            Self::TooLarge => tr("SVG ist größer als 20 MB").to_string(),
+            Self::Unreadable(error) => {
+                tr!("SVG konnte nicht gelesen werden: {error}", error = error)
+            }
+            Self::PreviewTooLarge => tr("Vorschau zu groß").to_string(),
+        };
+        f.write_str(&text)
+    }
+}
+
+impl std::error::Error for SvgError {}
+
+impl From<SvgError> for String {
+    fn from(error: SvgError) -> Self {
+        error.to_string()
+    }
+}
 
 /// Deepest element nesting accepted in XML from files. roxmltree and usvg
 /// walk the tree recursively; 256 levels need less than 384 KB of stack,
@@ -13,12 +48,9 @@ pub const MAX_NESTING: usize = 256;
 /// Refuses XML nested deeper than [`MAX_NESTING`]. Counts start and end
 /// tags without building a tree (and without recursion), skipping comments,
 /// CDATA, processing instructions, declarations and quoted attribute values.
-pub fn check_nesting(text: &str) -> Result<(), String> {
+pub fn check_nesting(text: &str) -> Result<(), SvgError> {
     if nesting_depth(text) > MAX_NESTING {
-        return Err(tr!(
-            "SVG ist tiefer als {depth} Ebenen verschachtelt",
-            depth = MAX_NESTING
-        ));
+        return Err(SvgError::TooDeep);
     }
     Ok(())
 }
@@ -307,18 +339,17 @@ fn measure_content(source: &str) -> Option<[f32; 4]> {
     .filter(|f| f.iter().all(|v| v.is_finite()))
 }
 
-pub fn render(source: &str) -> Result<Preview, String> {
+pub fn render(source: &str) -> Result<Preview, SvgError> {
     if source.len() > 20 * 1024 * 1024 {
-        return Err(tr("SVG ist größer als 20 MB").into());
+        return Err(SvgError::TooLarge);
     }
     check_nesting(source)?;
-    let tree = usvg::Tree::from_str(source, &options())
-        .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
+    let tree = usvg::Tree::from_str(source, &options()).map_err(SvgError::Unreadable)?;
     let size = tree.size();
     let scale = (1600.0 / size.width().max(size.height())).min(2.0);
     let width = (size.width() * scale).ceil().max(1.0) as u32;
     let height = (size.height() * scale).ceil().max(1.0) as u32;
-    let mut pixmap = tiny_skia::Pixmap::new(width, height).ok_or(tr("Vorschau zu groß"))?;
+    let mut pixmap = tiny_skia::Pixmap::new(width, height).ok_or(SvgError::PreviewTooLarge)?;
     resvg::render(
         &tree,
         tiny_skia::Transform::from_scale(scale, scale),
@@ -349,8 +380,10 @@ mod tests {
         assert!(super::check_nesting(&deep(super::MAX_NESTING - 1)).is_ok());
         assert!(super::check_nesting(&deep(super::MAX_NESTING)).is_err());
         // 100 000 levels ended the application in roxmltree.
-        let error = super::render(&deep(100_000)).err().expect("refused");
-        assert!(error.contains("verschachtelt"), "{error}");
+        assert!(matches!(
+            super::render(&deep(100_000)),
+            Err(super::SvgError::TooDeep)
+        ));
     }
 
     use super::*;

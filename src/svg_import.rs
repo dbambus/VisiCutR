@@ -167,10 +167,10 @@ pub fn embed_external_images(source: &str, base_dir: &Path) -> Imported {
         allow_dtd: true,
         ..Default::default()
     };
-    let parsed = crate::svg::check_nesting(source).and_then(|()| {
-        roxmltree::Document::parse_with_options(source, options).map_err(|e| e.to_string())
-    });
-    let Ok(document) = parsed else {
+    let parsed = crate::svg::check_nesting(source)
+        .ok()
+        .and_then(|()| roxmltree::Document::parse_with_options(source, options).ok());
+    let Some(document) = parsed else {
         return Imported {
             svg: source.to_owned(),
             warnings,

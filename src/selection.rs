@@ -2,6 +2,38 @@
 use crate::i18n::tr;
 use resvg::usvg::roxmltree::{Document, Node};
 use serde::Serialize;
+use std::fmt;
+
+#[derive(Debug)]
+pub enum SelectionError {
+    /// The drawing is no well-formed XML.
+    Xml(resvg::usvg::roxmltree::Error),
+    /// A selected object number is not in the drawing.
+    ObjectMissing,
+}
+
+impl fmt::Display for SelectionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Xml(error) => write!(f, "{error}"),
+            Self::ObjectMissing => f.write_str(tr("SVG-Objekt nicht vorhanden")),
+        }
+    }
+}
+
+impl std::error::Error for SelectionError {}
+
+impl From<resvg::usvg::roxmltree::Error> for SelectionError {
+    fn from(error: resvg::usvg::roxmltree::Error) -> Self {
+        Self::Xml(error)
+    }
+}
+
+impl From<SelectionError> for String {
+    fn from(error: SelectionError) -> Self {
+        error.to_string()
+    }
+}
 
 #[derive(Serialize)]
 pub struct Object {
@@ -41,11 +73,11 @@ pub(crate) fn selectable_nodes<'a, 'i>(doc: &'a Document<'i>) -> Vec<Node<'a, 'i
     doc.descendants().filter(|n| selectable(*n)).collect()
 }
 
-pub fn objects(svg: &str) -> Result<Vec<Object>, String> {
+pub fn objects(svg: &str) -> Result<Vec<Object>, SelectionError> {
     if svg.is_empty() {
         return Ok(Vec::new());
     }
-    let doc = Document::parse(svg).map_err(|e| e.to_string())?;
+    let doc = Document::parse(svg)?;
     Ok(doc
         .descendants()
         .filter(|n| selectable(*n))
@@ -68,11 +100,11 @@ pub fn objects(svg: &str) -> Result<Vec<Object>, String> {
         .collect())
 }
 
-pub fn filter(svg: &str, selected: &[usize]) -> Result<String, String> {
-    let doc = Document::parse(svg).map_err(|e| e.to_string())?;
+pub fn filter(svg: &str, selected: &[usize]) -> Result<String, SelectionError> {
+    let doc = Document::parse(svg)?;
     let nodes: Vec<_> = doc.descendants().filter(|n| selectable(*n)).collect();
     if selected.iter().any(|id| *id >= nodes.len()) {
-        return Err(tr("SVG-Objekt nicht vorhanden").into());
+        return Err(SelectionError::ObjectMissing);
     }
     // Keep excluded objects inside defs so local <use> references still resolve.
     // The drawing order and ancestor transforms of selected objects stay intact.

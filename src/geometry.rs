@@ -1,7 +1,172 @@
 use crate::project::Project;
 use crate::{i18n::tr, tr};
 use resvg::{tiny_skia, usvg};
+use std::fmt;
 use std::sync::{Arc, Mutex};
+
+/// Why a drawing cannot be turned into cut lines or outlines.
+#[derive(Debug)]
+pub enum GeometryError {
+    Svg(usvg::Error),
+    Xml(usvg::roxmltree::Error),
+    Selection(crate::selection::SelectionError),
+    Render(crate::svg::SvgError),
+    /// No installed font for the text; the families it asks for.
+    MissingFont(String),
+    /// A visible character no font contains.
+    MissingCharacter(char),
+    /// The font lookup failed (its lock was poisoned).
+    FontLookup(String),
+    NoArea,
+    RasterImages,
+    NoCuttablePaths,
+    TooManyPoints,
+    Mask,
+    Filter,
+    NestedClip,
+    EmptyClip,
+    ClipImage,
+    ClipText,
+    ClipTooComplex,
+    ClipMissing(String),
+    NotAClip(String),
+    ImageNotCuttable,
+    TextNotConverted,
+    TooManyDashes,
+}
+
+impl fmt::Display for GeometryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = match self {
+            Self::Svg(error) => error.to_string(),
+            Self::Xml(error) => error.to_string(),
+            Self::Selection(error) => error.to_string(),
+            Self::Render(error) => error.to_string(),
+            Self::MissingFont(fonts) => tr!(
+                "Schriftart für Text nicht gefunden ({fonts}); Schriftart installieren \
+                 oder Text in Pfade umwandeln",
+                fonts = fonts
+            ),
+            Self::MissingCharacter(c) => tr!(
+                "Zeichen „{character}“ (U+{code}) ist in keiner Schriftart enthalten; \
+                 Schriftart installieren oder Text in Pfade umwandeln",
+                character = c,
+                code = format!("{:04X}", *c as u32)
+            ),
+            Self::FontLookup(error) => error.clone(),
+            Self::NoArea => tr("Nur Umriss: Die Objekte umschließen keine Fläche").to_string(),
+            Self::RasterImages => {
+                tr("SVG enthält Rasterbilder; zuerst in Pfade umwandeln oder Gravieren wählen")
+                    .to_string()
+            }
+            Self::NoCuttablePaths => tr("Keine schneidbaren Vektorpfade in der SVG").to_string(),
+            Self::TooManyPoints => tr("Zu viele Vektorpunkte").to_string(),
+            // Masks and filters cannot be cut: a mask only sets transparency
+            // and a filter changes the picture, so neither defines a cut line.
+            Self::Mask => tr(
+                "Masken können nicht geschnitten werden, weil sie nur Transparenz festlegen und keine \
+                Schnittlinie ergeben; Maske entfernen oder Objekt vorher in Pfade umwandeln",
+            )
+            .to_string(),
+            Self::Filter => tr(
+                "Filter wie Weichzeichnen oder Schlagschatten verändern das Motiv nur als Pixelbild und \
+                ergeben keine Schnittlinie; Filter entfernen oder Objekt vorher in Pfade umwandeln",
+            )
+            .to_string(),
+            Self::NestedClip => tr(
+                "Verschachtelte Clip-Pfade (Clipping auf einem Clip-Pfad oder innerhalb eines \
+                Clip-Pfads) werden beim Schneiden nicht unterstützt",
+            )
+            .to_string(),
+            Self::EmptyClip => tr(
+                "Clip-Pfad ist leer, daher bliebe nichts zu schneiden; Clip-Pfad mit Formen füllen \
+                oder Clipping entfernen",
+            )
+            .to_string(),
+            Self::ClipImage => tr(
+                "Rasterbild im Clip-Pfad: Schneiden unterstützt keine Rasterbilder; Clip-Pfad nur mit \
+                Vektorformen verwenden",
+            )
+            .to_string(),
+            Self::ClipText => tr(
+                "Text im Clip-Pfad wird beim Schneiden nicht unterstützt; Text vorher in Pfade umwandeln",
+            )
+            .to_string(),
+            Self::ClipTooComplex => tr(
+                "Clip-Pfad ist zu komplex für die Schnittberechnung; \
+                       Clip vereinfachen oder Objekt in Pfade umwandeln",
+            )
+            .to_string(),
+            Self::ClipMissing(id) => tr!(
+                "Clip-Pfad „#{id}“ ist nicht vorhanden; Clipping entfernen oder Objekt \
+                     vorher in Pfade umwandeln",
+                id = id
+            ),
+            Self::NotAClip(id) => tr!("„#{id}“ ist kein Clip-Pfad", id = id),
+            Self::ImageNotCuttable => {
+                tr("Schneiden unterstützt keine Rasterbilder; bitte Gravieren wählen").to_string()
+            }
+            Self::TextNotConverted => {
+                tr("Text konnte nicht in Pfade umgewandelt werden").to_string()
+            }
+            Self::TooManyDashes => tr("Strichmuster erzeugt zu viele Vektorpunkte").to_string(),
+        };
+        f.write_str(&text)
+    }
+}
+
+impl std::error::Error for GeometryError {}
+
+impl From<usvg::Error> for GeometryError {
+    fn from(error: usvg::Error) -> Self {
+        Self::Svg(error)
+    }
+}
+
+impl From<crate::selection::SelectionError> for GeometryError {
+    fn from(error: crate::selection::SelectionError) -> Self {
+        Self::Selection(error)
+    }
+}
+
+impl From<crate::svg::SvgError> for GeometryError {
+    fn from(error: crate::svg::SvgError) -> Self {
+        Self::Render(error)
+    }
+}
+
+impl From<GeometryError> for String {
+    fn from(error: GeometryError) -> Self {
+        error.to_string()
+    }
+}
+
+/// A font problem found while usvg lays out text.
+#[derive(Clone)]
+enum FontProblem {
+    Font(String),
+    Character(char),
+}
+
+impl From<FontProblem> for GeometryError {
+    fn from(problem: FontProblem) -> Self {
+        match problem {
+            FontProblem::Font(fonts) => Self::MissingFont(fonts),
+            FontProblem::Character(c) => Self::MissingCharacter(c),
+        }
+    }
+}
+
+/// The first font problem usvg reported, if any.
+fn font_problem(missing: &Mutex<Vec<FontProblem>>) -> Result<(), GeometryError> {
+    let list = missing
+        .lock()
+        .map_err(|e| GeometryError::FontLookup(e.to_string()))?;
+    match list.first() {
+        Some(problem) => Err(problem.clone().into()),
+        None => Ok(()),
+    }
+}
 
 /// Point on the bed in mm. f64 like Java's geometry, so the driver's integer
 /// truncations see the same values (tests/java_parity).
@@ -167,7 +332,7 @@ fn keep_zero_width_strokes(svg: &str) -> String {
     out
 }
 
-pub fn contours(project: &Project) -> Result<Vec<Contour>, String> {
+pub fn contours(project: &Project) -> Result<Vec<Contour>, GeometryError> {
     contours_with_fonts(project, crate::svg::fonts())
 }
 
@@ -192,7 +357,7 @@ pub struct ScriptPath {
 /// that does not consist of LaserScript paths only. VisiCut runs the script
 /// again for the job; its `set` calls change power and speed there, and the
 /// lines keep the script's order.
-pub fn laser_script(project: &Project) -> Result<Option<Vec<ScriptPath>>, String> {
+pub fn laser_script(project: &Project) -> Result<Option<Vec<ScriptPath>>, GeometryError> {
     if !project.svg.contains("laserscript") {
         return Ok(None);
     }
@@ -228,8 +393,7 @@ pub fn laser_script(project: &Project) -> Result<Option<Vec<ScriptPath>>, String
             }
         }
     }
-    let tree =
-        usvg::Tree::from_str(&project.svg, &crate::svg::options()).map_err(|e| e.to_string())?;
+    let tree = usvg::Tree::from_str(&project.svg, &crate::svg::options())?;
     let (mut paths, mut other) = (Vec::new(), false);
     walk(tree.root(), project, tree.size(), &mut paths, &mut other);
     Ok((!other && !paths.is_empty()).then_some(paths))
@@ -273,7 +437,7 @@ fn script_settings(id: &str) -> Option<(Vec<ScriptSetting>, Vec<ScriptSetting>, 
 /// to the top left corner of the motif: its contours, or for images and
 /// other objects without contours their bounding rectangle. For highlighting
 /// the object under the mouse in the object list.
-pub fn object_outline(project: &Project, index: usize) -> Result<Vec<Contour>, String> {
+pub fn object_outline(project: &Project, index: usize) -> Result<Vec<Contour>, GeometryError> {
     let svg = crate::selection::filter(&project.svg, &[index])?;
     let alone = Project {
         svg,
@@ -317,7 +481,7 @@ pub fn object_outline(project: &Project, index: usize) -> Result<Vec<Contour>, S
 }
 
 /// Outlines of all objects (see `object_outline`), for hit testing.
-pub fn object_outlines(project: &Project) -> Result<Vec<Vec<Contour>>, String> {
+pub fn object_outlines(project: &Project) -> Result<Vec<Vec<Contour>>, GeometryError> {
     let count = crate::selection::objects(&project.svg)?.len();
     (0..count).map(|i| object_outline(project, i)).collect()
 }
@@ -384,7 +548,7 @@ pub fn object_at(outlines: &[Vec<Contour>], point: Point, tolerance: f64) -> Opt
 /// closed, so plain lines add nothing) and of the rectangles of images. The
 /// result are closed rings in mm, holes of the union included. Clip paths,
 /// masks and dashes do not change the area.
-pub fn outline_contours(project: &Project) -> Result<Vec<Contour>, String> {
+pub fn outline_contours(project: &Project) -> Result<Vec<Contour>, GeometryError> {
     use i_overlay::core::fill_rule::FillRule;
     use i_overlay::float::simplify::SimplifyShape;
     let missing = Mutex::new(Vec::new());
@@ -394,14 +558,12 @@ pub fn outline_contours(project: &Project) -> Result<Vec<Contour>, String> {
         ..crate::svg::options()
     };
     let source = with_ids(&project.svg).unwrap_or_else(|| project.svg.clone());
-    let mut tree = usvg::Tree::from_str(&source, &options).map_err(|e| e.to_string())?;
-    if let Some(problem) = missing.lock().map_err(|e| e.to_string())?.first() {
-        return Err(problem.clone());
-    }
+    let mut tree = usvg::Tree::from_str(&source, &options)?;
+    font_problem(&missing)?;
     let even_odd = even_odd_ids(&source, &options);
     if contains_text(tree.root()) {
         let flattened = tree.to_string(&usvg::WriteOptions::default());
-        tree = usvg::Tree::from_str(&flattened, &options).map_err(|e| e.to_string())?;
+        tree = usvg::Tree::from_str(&flattened, &options)?;
     }
     // Each object's own area, oriented consistently; together with the
     // non-zero rule their rings then form the union.
@@ -430,7 +592,7 @@ pub fn outline_contours(project: &Project) -> Result<Vec<Contour>, String> {
         })
         .collect();
     if result.is_empty() {
-        return Err(tr("Nur Umriss: Die Objekte umschließen keine Fläche").into());
+        return Err(GeometryError::NoArea);
     }
     // Outer rings first, from the top left, so the order does not depend on
     // the overlay library.
@@ -587,8 +749,8 @@ fn collect_areas(
 fn contours_with_fonts(
     project: &Project,
     fonts: Arc<usvg::fontdb::Database>,
-) -> Result<Vec<Contour>, String> {
-    let document = usvg::roxmltree::Document::parse(&project.svg).map_err(|e| e.to_string())?;
+) -> Result<Vec<Contour>, GeometryError> {
+    let document = usvg::roxmltree::Document::parse(&project.svg).map_err(GeometryError::Xml)?;
     for node in document.descendants().filter(|node| node.is_element()) {
         if node.tag_name().name() == "image"
             && !node.ancestors().any(|n| {
@@ -598,10 +760,7 @@ fn contours_with_fonts(
                 )
             })
         {
-            return Err(tr(
-                "SVG enthält Rasterbilder; zuerst in Pfade umwandeln oder Gravieren wählen",
-            )
-            .into());
+            return Err(GeometryError::RasterImages);
         }
     }
     check_clip_references(&document)?;
@@ -614,17 +773,15 @@ fn contours_with_fonts(
         ..crate::svg::options()
     };
     let source = keep_zero_width_strokes(&project.svg);
-    let mut tree = usvg::Tree::from_str(&source, &options).map_err(|e| e.to_string())?;
-    if let Some(problem) = missing.lock().map_err(|e| e.to_string())?.first() {
-        return Err(problem.clone());
-    }
+    let mut tree = usvg::Tree::from_str(&source, &options)?;
+    font_problem(&missing)?;
     let view_box = view_box_transform(&source, tree.size(), project);
     if contains_text(tree.root()) {
         // usvg keeps glyph outlines relative to their <text> element (the flattened
         // paths carry an identity transform); writing the tree back out places them
         // under their ancestors' transforms like ordinary paths.
         let flattened = tree.to_string(&usvg::WriteOptions::default());
-        tree = usvg::Tree::from_str(&flattened, &options).map_err(|e| e.to_string())?;
+        tree = usvg::Tree::from_str(&flattened, &options)?;
     }
     let mut result = Vec::new();
     visit(
@@ -637,18 +794,18 @@ fn contours_with_fonts(
         &mut result,
     )?;
     if result.is_empty() {
-        return Err(tr("Keine schneidbaren Vektorpfade in der SVG").into());
+        return Err(GeometryError::NoCuttablePaths);
     }
     if result.iter().map(Vec::len).sum::<usize>() > 1_000_000 {
-        return Err(tr("Zu viele Vektorpunkte").into());
+        return Err(GeometryError::TooManyPoints);
     }
     Ok(result)
 }
 
-fn outline_fonts(missing: &Mutex<Vec<String>>) -> usvg::FontResolver<'_> {
+fn outline_fonts(missing: &Mutex<Vec<FontProblem>>) -> usvg::FontResolver<'_> {
     let select = usvg::FontResolver::default_font_selector();
     let fallback = usvg::FontResolver::default_fallback_selector();
-    let report = move |problem: String| {
+    let report = move |problem: FontProblem| {
         if let Ok(mut list) = missing.lock() {
             list.push(problem);
         }
@@ -658,11 +815,7 @@ fn outline_fonts(missing: &Mutex<Vec<String>>) -> usvg::FontResolver<'_> {
             let id = select(font, db);
             if id.is_none() {
                 let families: Vec<String> = font.families().iter().map(|f| f.to_string()).collect();
-                report(tr!(
-                    "Schriftart für Text nicht gefunden ({fonts}); Schriftart installieren \
-                     oder Text in Pfade umwandeln",
-                    fonts = families.join(", ")
-                ));
+                report(FontProblem::Font(families.join(", ")));
             }
             id
         }),
@@ -672,12 +825,7 @@ fn outline_fonts(missing: &Mutex<Vec<String>>) -> usvg::FontResolver<'_> {
                 || c.is_control()
                 || matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FE00}'..='\u{FE0F}' | '\u{FEFF}');
             if id.is_none() && !invisible {
-                report(tr!(
-                    "Zeichen „{character}“ (U+{code}) ist in keiner Schriftart enthalten; \
-                     Schriftart installieren oder Text in Pfade umwandeln",
-                    character = c,
-                    code = format!("{:04X}", c as u32)
-                ));
+                report(FontProblem::Character(c));
             }
             id
         }),
@@ -692,48 +840,12 @@ fn contains_text(group: &usvg::Group) -> bool {
     })
 }
 
-/// Masks and filters cannot be cut: a mask only sets transparency and a filter
-/// changes the picture, so neither defines a cut line.
-fn mask_rejected() -> &'static str {
-    tr(
-        "Masken können nicht geschnitten werden, weil sie nur Transparenz festlegen und keine \
-        Schnittlinie ergeben; Maske entfernen oder Objekt vorher in Pfade umwandeln",
-    )
-}
-fn filter_rejected() -> &'static str {
-    tr(
-        "Filter wie Weichzeichnen oder Schlagschatten verändern das Motiv nur als Pixelbild und \
-        ergeben keine Schnittlinie; Filter entfernen oder Objekt vorher in Pfade umwandeln",
-    )
-}
-fn nested_clip() -> &'static str {
-    tr(
-        "Verschachtelte Clip-Pfade (Clipping auf einem Clip-Pfad oder innerhalb eines \
-        Clip-Pfads) werden beim Schneiden nicht unterstützt",
-    )
-}
-fn empty_clip() -> &'static str {
-    tr(
-        "Clip-Pfad ist leer, daher bliebe nichts zu schneiden; Clip-Pfad mit Formen füllen \
-        oder Clipping entfernen",
-    )
-}
-fn clip_image() -> &'static str {
-    tr(
-        "Rasterbild im Clip-Pfad: Schneiden unterstützt keine Rasterbilder; Clip-Pfad nur mit \
-        Vektorformen verwenden",
-    )
-}
-fn clip_text() -> &'static str {
-    tr("Text im Clip-Pfad wird beim Schneiden nicht unterstützt; Text vorher in Pfade umwandeln")
-}
-
-fn reject_effects(group: &usvg::Group) -> Result<(), String> {
+fn reject_effects(group: &usvg::Group) -> Result<(), GeometryError> {
     if group.mask().is_some() {
-        return Err(mask_rejected().into());
+        return Err(GeometryError::Mask);
     }
     if !group.filters().is_empty() {
-        return Err(filter_rejected().into());
+        return Err(GeometryError::Filter);
     }
     Ok(())
 }
@@ -843,7 +955,7 @@ const CLIP_WORK_LIMIT: usize = 100_000_000;
 /// splits are kept when their midpoint is inside. A closed contour that stays
 /// inside as a whole is returned unchanged; pieces that meet at the start point
 /// of a closed contour are joined again.
-fn clip_contour(contour: &Contour, clips: &[Clip]) -> Result<Vec<Contour>, String> {
+fn clip_contour(contour: &Contour, clips: &[Clip]) -> Result<Vec<Contour>, GeometryError> {
     let edges: Vec<(Point, Point)> = clips
         .iter()
         .flat_map(|clip| &clip.shapes)
@@ -851,9 +963,7 @@ fn clip_contour(contour: &Contour, clips: &[Clip]) -> Result<Vec<Contour>, Strin
         .flat_map(|ring| ring.windows(2).map(|w| (w[0], w[1])))
         .collect();
     if edges.len().saturating_mul(contour.len()) > CLIP_WORK_LIMIT {
-        return Err(tr("Clip-Pfad ist zu komplex für die Schnittberechnung; \
-                       Clip vereinfachen oder Objekt in Pfade umwandeln")
-        .into());
+        return Err(GeometryError::ClipTooComplex);
     }
     let inside = |p: Point| clips.iter().all(|clip| clip.contains(p));
     let mut pieces: Vec<Contour> = Vec::new();
@@ -899,7 +1009,7 @@ fn clip_contour(contour: &Contour, clips: &[Clip]) -> Result<Vec<Contour>, Strin
 /// Rejects a `clipPath` reference whose target is missing, is not a clipPath or
 /// has no children. usvg would drop such elements silently, so this is checked
 /// on the XML before the tree is built.
-fn check_clip_references(document: &usvg::roxmltree::Document) -> Result<(), String> {
+fn check_clip_references(document: &usvg::roxmltree::Document) -> Result<(), GeometryError> {
     for node in document.descendants().filter(|n| n.is_element()) {
         let Some(id) = clip_reference(node) else {
             continue;
@@ -909,17 +1019,13 @@ fn check_clip_references(document: &usvg::roxmltree::Document) -> Result<(), Str
             .find(|n| n.is_element() && n.attribute("id") == Some(id.as_str()));
         match target {
             None => {
-                return Err(tr!(
-                    "Clip-Pfad „#{id}“ ist nicht vorhanden; Clipping entfernen oder Objekt \
-                     vorher in Pfade umwandeln",
-                    id = id
-                ));
+                return Err(GeometryError::ClipMissing(id));
             }
             Some(target) if target.tag_name().name() != "clipPath" => {
-                return Err(tr!("„#{id}“ ist kein Clip-Pfad", id = id));
+                return Err(GeometryError::NotAClip(id));
             }
             Some(target) if !target.children().any(|child| child.is_element()) => {
-                return Err(empty_clip().into());
+                return Err(GeometryError::EmptyClip);
             }
             Some(_) => {}
         }
@@ -951,9 +1057,9 @@ fn clip_region(
     base: tiny_skia::Transform,
     project: &Project,
     size: usvg::Size,
-) -> Result<Clip, String> {
+) -> Result<Clip, GeometryError> {
     if clip.clip_path().is_some() {
-        return Err(nested_clip().into());
+        return Err(GeometryError::NestedClip);
     }
     let mut shapes = Vec::new();
     clip_shapes(
@@ -964,7 +1070,7 @@ fn clip_region(
         &mut shapes,
     )?;
     if shapes.is_empty() {
-        return Err(empty_clip().into());
+        return Err(GeometryError::EmptyClip);
     }
     Ok(Clip { shapes })
 }
@@ -975,10 +1081,10 @@ fn clip_shapes(
     project: &Project,
     size: usvg::Size,
     shapes: &mut Vec<ClipShape>,
-) -> Result<(), String> {
+) -> Result<(), GeometryError> {
     reject_effects(group)?;
     if group.clip_path().is_some() {
-        return Err(nested_clip().into());
+        return Err(GeometryError::NestedClip);
     }
     for node in group.children() {
         match node {
@@ -1009,8 +1115,8 @@ fn clip_shapes(
                     shapes.push(ClipShape::new(rings, even_odd));
                 }
             }
-            usvg::Node::Image(_) => return Err(clip_image().into()),
-            usvg::Node::Text(_) => return Err(clip_text().into()),
+            usvg::Node::Image(_) => return Err(GeometryError::ClipImage),
+            usvg::Node::Text(_) => return Err(GeometryError::ClipText),
             _ => {}
         }
     }
@@ -1025,7 +1131,7 @@ fn visit(
     transform: Affine,
     view_box: Option<Affine>,
     result: &mut Vec<Contour>,
-) -> Result<(), String> {
+) -> Result<(), GeometryError> {
     reject_effects(group)?;
     let stacked: Vec<Clip>;
     let clips = match group.clip_path() {
@@ -1094,13 +1200,11 @@ fn visit(
                 }
             }
             usvg::Node::Image(_) => {
-                return Err(
-                    tr("Schneiden unterstützt keine Rasterbilder; bitte Gravieren wählen").into(),
-                );
+                return Err(GeometryError::ImageNotCuttable);
             }
             // `contours` re-imports text as paths before visiting.
             usvg::Node::Text(_) => {
-                return Err(tr("Text konnte nicht in Pfade umgewandelt werden").into());
+                return Err(GeometryError::TextNotConverted);
             }
             _ => {}
         }
@@ -1242,7 +1346,7 @@ fn dash_contour(
     offset: f64,
     metric: &[f64; 4],
     result: &mut Vec<Contour>,
-) -> Result<(), String> {
+) -> Result<(), GeometryError> {
     let period: f64 = pattern.iter().sum();
     let lengths: Vec<f64> = contour
         .windows(2)
@@ -1254,7 +1358,7 @@ fn dash_contour(
     }
     let estimate = (total / period).ceil() * (pattern.len() / 2) as f64 + 1.0;
     if !estimate.is_finite() || result.len() as f64 + estimate > MAX_DASH_CONTOURS as f64 {
-        return Err(tr("Strichmuster erzeugt zu viele Vektorpunkte").into());
+        return Err(GeometryError::TooManyDashes);
     }
 
     let mut index = 0;
@@ -1400,11 +1504,11 @@ mod dash_tests {
     use super::*;
 
     /// Default project: 100×60 user units map to 100×60 mm at offset (10, 10).
-    fn cut(body: &str) -> Result<Vec<Contour>, String> {
+    fn cut(body: &str) -> Result<Vec<Contour>, GeometryError> {
         cut_with_viewbox("", body)
     }
 
-    fn cut_with_viewbox(view_box: &str, body: &str) -> Result<Vec<Contour>, String> {
+    fn cut_with_viewbox(view_box: &str, body: &str) -> Result<Vec<Contour>, GeometryError> {
         let svg = format!(
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="60" {view_box}>{body}</svg>"#
         );
@@ -1637,7 +1741,7 @@ mod tests {
         let project = Project { svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="60"><text x="10" y="20">Job</text><rect width="10" height="10"/></svg>"#.into(), ..Default::default() };
         let error =
             contours_with_fonts(&project, Arc::new(usvg::fontdb::Database::new())).unwrap_err();
-        assert!(error.contains("Schriftart"), "{error}");
+        assert!(matches!(error, GeometryError::MissingFont(_)), "{error}");
     }
 
     #[test]
@@ -1646,7 +1750,11 @@ mod tests {
         fonts.load_font_data(epaint_default_fonts::UBUNTU_LIGHT.to_vec());
         let project = Project { svg: "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"60\"><text x=\"10\" y=\"20\" font-family=\"Ubuntu\">A \u{10FFFD}</text></svg>".into(), ..Default::default() };
         let error = contours_with_fonts(&project, Arc::new(fonts)).unwrap_err();
-        assert!(error.contains("U+10FFFD"), "{error}");
+        assert!(
+            matches!(error, GeometryError::MissingCharacter('\u{10FFFD}')),
+            "{error}"
+        );
+        assert!(error.to_string().contains("U+10FFFD"), "{error}");
     }
 
     #[test]
@@ -1673,7 +1781,7 @@ mod clip_tests {
     use super::*;
 
     /// Default project: 100×60 user units at offset (10, 10) mm.
-    fn cut(body: &str) -> Result<Vec<Contour>, String> {
+    fn cut(body: &str) -> Result<Vec<Contour>, GeometryError> {
         contours(&Project {
             svg: format!(
                 r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="60">{body}</svg>"#
@@ -1729,7 +1837,7 @@ mod clip_tests {
             r#"{CLIP}<path d="M70 5H90" stroke="black" clip-path="url(#c)"/>"#
         ))
         .unwrap_err();
-        assert!(error.contains("Keine schneidbaren"), "{error}");
+        assert!(matches!(error, GeometryError::NoCuttablePaths), "{error}");
 
         // Inside the group, the outside path is dropped and the inside one kept.
         let paths = cut(&format!(
@@ -1746,13 +1854,16 @@ mod clip_tests {
             r#"<defs><clipPath id="c"/></defs><rect width="10" height="10" clip-path="url(#c)"/>"#,
         )
         .unwrap_err();
-        assert!(error.contains("leer"), "{error}");
+        assert!(matches!(error, GeometryError::EmptyClip), "{error}");
     }
 
     #[test]
     fn missing_clip_path_is_an_error() {
         let error = cut(r#"<rect width="10" height="10" clip-path="url(#missing)"/>"#).unwrap_err();
-        assert!(error.contains("nicht vorhanden"), "{error}");
+        assert!(
+            matches!(&error, GeometryError::ClipMissing(id) if id == "missing"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -1761,6 +1872,8 @@ mod clip_tests {
             r#"<defs><mask id="m"><rect width="50" height="50" fill="white"/></mask></defs><rect width="10" height="10" mask="url(#m)"/>"#,
         )
         .unwrap_err();
+        assert!(matches!(mask, GeometryError::Mask), "{mask}");
+        let mask = mask.to_string();
         assert!(
             mask.contains("Masken") && mask.contains("Transparenz"),
             "{mask}"
@@ -1770,6 +1883,8 @@ mod clip_tests {
             r#"<defs><filter id="f"><feGaussianBlur stdDeviation="2"/></filter></defs><rect width="10" height="10" filter="url(#f)"/>"#,
         )
         .unwrap_err();
+        assert!(matches!(filter, GeometryError::Filter), "{filter}");
+        let filter = filter.to_string();
         assert!(
             filter.contains("Filter") && filter.contains("Pixelbild"),
             "{filter}"
@@ -1811,7 +1926,7 @@ mod clip_tests {
         }
     }
 
-    fn outline_of(body: &str) -> Result<Vec<Contour>, String> {
+    fn outline_of(body: &str) -> Result<Vec<Contour>, GeometryError> {
         let project = Project {
             x_mm: 0.0,
             y_mm: 0.0,

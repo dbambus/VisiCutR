@@ -21,6 +21,7 @@ pub enum LttError {
         error: crate::project::ProjectError,
     },
     Project(crate::project::ProjectError),
+    Geometry(crate::geometry::GeometryError),
     NothingSelected,
     /// Engravings of one job with different DPI.
     MixedResolutions,
@@ -157,6 +158,7 @@ impl fmt::Display for LttError {
                 }
             ),
             Self::Project(error) => error.to_string(),
+            Self::Geometry(error) => error.to_string(),
             Self::Selection(error) => error.to_string(),
             Self::Mapping(error) => error.to_string(),
             Self::Other(text) => text.clone(),
@@ -203,6 +205,12 @@ impl From<crate::selection::SelectionError> for LttError {
 impl From<crate::project::ProjectError> for LttError {
     fn from(error: crate::project::ProjectError) -> Self {
         Self::Project(error)
+    }
+}
+
+impl From<crate::geometry::GeometryError> for LttError {
+    fn from(error: crate::geometry::GeometryError) -> Self {
+        Self::Geometry(error)
     }
 }
 

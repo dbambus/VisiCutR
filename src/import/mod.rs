@@ -177,7 +177,7 @@ fn read_file_within(path: &Path) -> Result<Imported, String> {
         return plf::read_parametric_svg(path);
     }
     match extension(path).as_deref() {
-        Some("svg") => crate::svg_import::read_svg_file(path),
+        Some("svg") => crate::svg_import::read_svg_file(path).map_err(String::from),
         Some("psvg") => plf::read_parametric_svg(path),
         Some("dxf") => dxf::read(path),
         Some("pdf") => pdf::read_pdf(path),

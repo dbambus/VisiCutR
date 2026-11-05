@@ -10,6 +10,7 @@
 use crate::{i18n::tr, tr};
 use base64::Engine;
 use std::collections::HashMap;
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 /// Largest single image file that is embedded.
@@ -20,6 +21,49 @@ pub const MAX_SVG_BYTES: usize = 20 * 1024 * 1024;
 const SVG_NS: &str = "http://www.w3.org/2000/svg";
 const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
 const SODIPODI_NS: &str = "http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd";
+
+#[derive(Debug)]
+pub enum SvgImportError {
+    Io(std::io::Error),
+    FileTooLarge,
+    Svg(crate::svg::SvgError),
+    ImageTooLarge,
+    UnsupportedImageFormat,
+}
+
+impl fmt::Display for SvgImportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(error) => write!(f, "{error}"),
+            Self::FileTooLarge => f.write_str(tr("Datei ist größer als 25 MB")),
+            Self::Svg(error) => write!(f, "{error}"),
+            Self::ImageTooLarge => f.write_str(tr("Die Datei ist größer als 10 MB")),
+            Self::UnsupportedImageFormat => f.write_str(tr(
+                "Format wird nicht unterstützt (nur PNG, JPEG, GIF, WebP oder SVG)",
+            )),
+        }
+    }
+}
+
+impl std::error::Error for SvgImportError {}
+
+impl From<std::io::Error> for SvgImportError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<crate::svg::SvgError> for SvgImportError {
+    fn from(error: crate::svg::SvgError) -> Self {
+        Self::Svg(error)
+    }
+}
+
+impl From<SvgImportError> for String {
+    fn from(error: SvgImportError) -> Self {
+        error.to_string()
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct Imported {
@@ -50,12 +94,12 @@ pub struct ExtraPart {
 }
 
 /// Reads an SVG file (≤ 25 MB) and embeds its external images.
-pub fn read_svg_file(path: &Path) -> Result<Imported, String> {
-    let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
+pub fn read_svg_file(path: &Path) -> Result<Imported, SvgImportError> {
+    let meta = std::fs::metadata(path)?;
     if meta.len() > 25 * 1024 * 1024 {
-        return Err(tr("Datei ist größer als 25 MB").into());
+        return Err(SvgImportError::FileTooLarge);
     }
-    let source = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let source = std::fs::read_to_string(path)?;
     crate::svg::check_nesting(&source)?;
     Ok(embed_external_images(
         &source,
@@ -229,7 +273,7 @@ pub fn embed_external_images(source: &str, base_dir: &Path) -> Imported {
             };
             let embedded = cache
                 .entry(path.clone())
-                .or_insert_with(|| data_uri(&path))
+                .or_insert_with(|| data_uri(&path).map_err(|e| e.to_string()))
                 .clone();
             let uri = match embedded {
                 Ok(uri) => uri,
@@ -416,18 +460,16 @@ fn percent_decode(text: &str) -> Option<PathBuf> {
     }
 }
 
-fn data_uri(path: &Path) -> Result<String, String> {
-    let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
+fn data_uri(path: &Path) -> Result<String, SvgImportError> {
+    let size = std::fs::metadata(path)?.len();
     if size > MAX_IMAGE_BYTES {
-        return Err(tr("Die Datei ist größer als 10 MB").into());
+        return Err(SvgImportError::ImageTooLarge);
     }
-    let data = std::fs::read(path).map_err(|e| e.to_string())?;
+    let data = std::fs::read(path)?;
     let svgz = path
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("svgz"));
-    let mime = mime_type(&data, svgz).ok_or(tr(
-        "Format wird nicht unterstützt (nur PNG, JPEG, GIF, WebP oder SVG)",
-    ))?;
+    let mime = mime_type(&data, svgz).ok_or(SvgImportError::UnsupportedImageFormat)?;
     Ok(format!(
         "data:{mime};base64,{}",
         base64::engine::general_purpose::STANDARD.encode(&data)
@@ -623,7 +665,10 @@ mod tests {
         let deep = format!("<svg>{}{}</svg>", "<g>".repeat(depth), "</g>".repeat(depth));
         std::fs::write(&path, &deep).unwrap();
         let error = read_svg_file(&path).err().expect("refused");
-        assert!(error.contains("verschachtelt"), "{error}");
+        assert!(
+            matches!(error, SvgImportError::Svg(crate::svg::SvgError::TooDeep)),
+            "{error}"
+        );
         assert_eq!(embed_external_images(&deep, &dir.0).svg, deep);
         assert!(fit_to_content(&deep).is_none());
     }

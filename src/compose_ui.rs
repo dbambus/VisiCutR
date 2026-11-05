@@ -59,7 +59,7 @@ struct ShapeForm {
 }
 
 /// Ergebnis eines Werkzeugs: neues Projekt und Hinweise.
-pub type Composed = Result<(Project, Vec<String>), String>;
+pub type Composed = Result<(Project, Vec<String>), compose::ComposeError>;
 
 pub struct ComposeUi {
     open: Option<Tool>,

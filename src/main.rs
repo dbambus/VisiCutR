@@ -1302,6 +1302,7 @@ impl VisiCutR {
         }
         let view = (!in_place).then_some(self.visible_mm);
         let pasted = visicut_core::compose::paste_part(&self.project, part, view)
+            .map_err(String::from)
             .and_then(|project| Ok((self.textures_for(ctx, &project)?, project)));
         match pasted {
             Ok(((texture, part_textures), project)) => {
@@ -1504,7 +1505,7 @@ impl VisiCutR {
                     notes.extend(more);
                     updated.push(file_name(&path));
                 }
-                Some(Err(e)) => notes.push(e),
+                Some(Err(e)) => notes.push(e.to_string()),
                 None => rest.push(path),
             }
         }
@@ -1642,7 +1643,7 @@ impl VisiCutR {
                         );
                     }
                 }
-                Err(e) => notes.push(e),
+                Err(e) => notes.push(e.to_string()),
             }
         }
         if !notes.is_empty() {
@@ -1858,7 +1859,7 @@ impl VisiCutR {
             Ok((project, notes)) => self.apply_composed(ctx, project, notes),
             Err(e) => {
                 self.parameters.reset();
-                self.report(e);
+                self.report(e.to_string());
             }
         }
     }
@@ -1934,10 +1935,14 @@ impl VisiCutR {
         }
     }
 
-    fn composed(&mut self, ctx: &egui::Context, result: Result<Project, String>) {
+    fn composed(
+        &mut self,
+        ctx: &egui::Context,
+        result: Result<Project, visicut_core::compose::ComposeError>,
+    ) {
         match result {
             Ok(project) => self.apply_composed(ctx, project, Vec::new()),
-            Err(e) => self.report(e),
+            Err(e) => self.report(e.to_string()),
         }
     }
 
@@ -5120,7 +5125,7 @@ impl eframe::App for VisiCutR {
                 }
                 self.apply_composed(ctx, project, notes)
             }
-            Some(Err(e)) => self.report(e),
+            Some(Err(e)) => self.report(e.to_string()),
             None => {}
         }
         // Die Rückfrage bei ungesicherten Änderungen stellt `request`.

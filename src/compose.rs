@@ -13,6 +13,167 @@ use resvg::{tiny_skia, usvg};
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 
+/// Why a text, shape, copy or nesting cannot be made.
+#[derive(Debug)]
+pub enum ComposeError {
+    NotText,
+    SignSize,
+    SignBorder,
+    SignHoles,
+    HolesDoNotFit,
+    NothingToPaste,
+    NoElements,
+    NoMotif,
+    AngleNotFinite,
+    ObjectMissing,
+    CopyCount,
+    GapNotFinite,
+    AreaSize,
+    NegativeGap,
+    NoParts,
+    TooManyParts,
+    NothingFits,
+    NoParameters,
+    GroupIncomplete,
+    RootIncomplete,
+    TooLarge,
+    NoArea,
+    Entities,
+    Rectangle,
+    Ellipse,
+    Polygon,
+    Star,
+    FontSize,
+    LineSpacing,
+    TextLength,
+    NoOutlines,
+    Tree(usvg::Error),
+    Xml(roxmltree::Error),
+    Svg(svg::SvgError),
+    Selection(selection::SelectionError),
+    Project(crate::project::ProjectError),
+    Mapping(crate::mapping::MappingError),
+    Import(crate::import::ImportError),
+    /// The error concerns the file or part `name`.
+    InFile {
+        name: String,
+        error: Box<ComposeError>,
+    },
+    /// No file could be added; one note per file.
+    NoneAdded(Vec<String>),
+}
+
+impl std::fmt::Display for ComposeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text = match self {
+            Self::NotText => tr("Das gewählte Teil ist kein Text"),
+            Self::SignSize => tr("Schild braucht Breite und Höhe"),
+            Self::SignBorder => tr("Rahmenabstand ist zu groß für das Schild"),
+            Self::SignHoles => tr("Ein Schild hat 0, 2 oder 4 Löcher"),
+            Self::HolesDoNotFit => tr("Löcher passen nicht auf das Schild"),
+            Self::NothingToPaste => tr("Nichts zum Einfügen"),
+            Self::NoElements => tr("Keine Elemente zum Einfügen"),
+            Self::NoMotif => tr("Zuerst ein Motiv öffnen"),
+            Self::AngleNotFinite => tr("Winkel muss endlich sein"),
+            Self::ObjectMissing => tr("SVG-Objekt nicht vorhanden"),
+            Self::CopyCount => {
+                return f.write_str(&tr!("2 bis {max} Exemplare sind möglich", max = MAX_COPIES));
+            }
+            Self::GapNotFinite => tr("Abstand muss endlich sein"),
+            Self::AreaSize => tr("Fläche braucht eine positive Breite und Höhe"),
+            Self::NegativeGap => tr("Abstand darf nicht negativ sein"),
+            Self::NoParts => tr("Keine Teile im Motiv"),
+            Self::TooManyParts => {
+                return f.write_str(&tr!("Höchstens {max} Teile sind möglich", max = MAX_COPIES));
+            }
+            Self::NothingFits => tr("Kein Teil passt in die Fläche"),
+            Self::NoParameters => tr("Das Teil hat keine Parameter"),
+            Self::GroupIncomplete => tr("SVG-Gruppe ist unvollständig"),
+            Self::RootIncomplete => tr("SVG-Wurzel ist unvollständig"),
+            Self::TooLarge => {
+                tr("Ergebnis wäre größer als 20 MB; weniger Kopien oder kleinere Bilder verwenden")
+            }
+            Self::NoArea => tr("Ergebnis hat keine Fläche"),
+            Self::Entities => tr(
+                "SVG mit DTD-Entitäten lässt sich nicht erweitern; bitte als normales SVG speichern",
+            ),
+            Self::Rectangle => tr("Rechteck braucht positive Maße"),
+            Self::Ellipse => tr("Ellipse braucht positive Maße"),
+            Self::Polygon => tr("Vieleck braucht 3 bis 100 Ecken und einen Durchmesser"),
+            Self::Star => tr("Stern braucht 3 bis 100 Zacken und 5–95 % Innenradius"),
+            Self::FontSize => tr("Schriftgröße muss zwischen 0,5 und 1000 mm liegen"),
+            Self::LineSpacing => tr("Zeilenabstand muss zwischen 0,5 und 5 liegen"),
+            Self::TextLength => tr("Text fehlt oder ist länger als 2000 Zeichen"),
+            Self::NoOutlines => {
+                tr("Der Text ergibt keine Umrisse (Schrift ohne passende Zeichen?)")
+            }
+            Self::Tree(error) => return write!(f, "{error}"),
+            Self::Xml(error) => return write!(f, "{error}"),
+            Self::Svg(error) => return write!(f, "{error}"),
+            Self::Selection(error) => return write!(f, "{error}"),
+            Self::Project(error) => return write!(f, "{error}"),
+            Self::Mapping(error) => return write!(f, "{error}"),
+            Self::Import(error) => return write!(f, "{error}"),
+            Self::InFile { name, error } => return write!(f, "{name}: {error}"),
+            Self::NoneAdded(notes) => return f.write_str(&notes.join("\n")),
+        };
+        f.write_str(text)
+    }
+}
+
+impl std::error::Error for ComposeError {}
+
+impl From<usvg::Error> for ComposeError {
+    fn from(error: usvg::Error) -> Self {
+        Self::Tree(error)
+    }
+}
+
+impl From<svg::SvgError> for ComposeError {
+    fn from(error: svg::SvgError) -> Self {
+        Self::Svg(error)
+    }
+}
+
+impl From<selection::SelectionError> for ComposeError {
+    fn from(error: selection::SelectionError) -> Self {
+        Self::Selection(error)
+    }
+}
+
+impl From<crate::project::ProjectError> for ComposeError {
+    fn from(error: crate::project::ProjectError) -> Self {
+        Self::Project(error)
+    }
+}
+
+impl From<crate::mapping::MappingError> for ComposeError {
+    fn from(error: crate::mapping::MappingError) -> Self {
+        Self::Mapping(error)
+    }
+}
+
+impl From<crate::import::ImportError> for ComposeError {
+    fn from(error: crate::import::ImportError) -> Self {
+        Self::Import(error)
+    }
+}
+
+impl From<ComposeError> for String {
+    fn from(error: ComposeError) -> Self {
+        error.to_string()
+    }
+}
+
+impl ComposeError {
+    fn in_file(name: &str) -> impl FnOnce(Self) -> Self + '_ {
+        move |error| Self::InFile {
+            name: name.into(),
+            error: Box::new(error),
+        }
+    }
+}
+
 /// Largest composed document, like [`crate::svg::render`].
 const MAX_SVG_BYTES: usize = 20 * 1024 * 1024;
 /// Most copies of one array or nesting run.
@@ -134,7 +295,11 @@ impl TextSource {
 
 /// Adds `source` as a text part of its own (see [`add_objects_as_part`]);
 /// the part keeps the text for editing. New text is never turned.
-pub fn add_text(project: &Project, source: &TextSource, view: [f32; 4]) -> Result<Project, String> {
+pub fn add_text(
+    project: &Project,
+    source: &TextSource,
+    view: [f32; 4],
+) -> Result<Project, ComposeError> {
     let source = TextSource {
         rotate_deg: 0.0,
         mirrored: false,
@@ -149,11 +314,8 @@ pub fn add_text(project: &Project, source: &TextSource, view: [f32; 4]) -> Resul
 /// scale and orientation (turned, mirrored) stay. With another operation the
 /// part loses its steps; the caller then sets the operation's laser values
 /// (as for a new part).
-pub fn set_text(project: &Project, source: &TextSource) -> Result<Project, String> {
-    let old = project
-        .part_text
-        .as_ref()
-        .ok_or_else(|| tr("Das gewählte Teil ist kein Text").to_string())?;
+pub fn set_text(project: &Project, source: &TextSource) -> Result<Project, ComposeError> {
+    let old = project.part_text.as_ref().ok_or(ComposeError::NotText)?;
     let source = TextSource {
         rotate_deg: old.rotate_deg,
         mirrored: old.mirrored,
@@ -396,9 +558,9 @@ pub fn font_sample(
 }
 
 /// The elements of a sign, ready for [`add_objects`].
-pub fn sign(sign: &Sign) -> Result<Vec<NewObject>, String> {
+pub fn sign(sign: &Sign) -> Result<Vec<NewObject>, ComposeError> {
     if !(sign.width_mm > 0.0 && sign.height_mm > 0.0) {
-        return Err(tr("Schild braucht Breite und Höhe").into());
+        return Err(ComposeError::SignSize);
     }
     let (x, y, w, h) = (sign.x_mm, sign.y_mm, sign.width_mm, sign.height_mm);
     let mut objects = vec![NewObject {
@@ -414,7 +576,7 @@ pub fn sign(sign: &Sign) -> Result<Vec<NewObject>, String> {
     if sign.frame_inset_mm > 0.0 {
         let inset = sign.frame_inset_mm;
         if 2.0 * inset >= w.min(h) {
-            return Err(tr("Rahmenabstand ist zu groß für das Schild").into());
+            return Err(ComposeError::SignBorder);
         }
         objects.push(NewObject {
             shape: Shape::Rectangle {
@@ -437,7 +599,7 @@ pub fn sign(sign: &Sign) -> Result<Vec<NewObject>, String> {
             (x + inset, y + h - inset),
             (x + w - inset, y + h - inset),
         ],
-        _ => return Err(tr("Ein Schild hat 0, 2 oder 4 Löcher").into()),
+        _ => return Err(ComposeError::SignHoles),
     };
     if !centres.is_empty()
         && (d <= 0.0
@@ -445,7 +607,7 @@ pub fn sign(sign: &Sign) -> Result<Vec<NewObject>, String> {
             || 2.0 * inset >= w
             || (sign.holes == 4 && 2.0 * inset >= h))
     {
-        return Err(tr("Löcher passen nicht auf das Schild").into());
+        return Err(ComposeError::HolesDoNotFit);
     }
     for (cx, cy) in centres {
         objects.push(NewObject {
@@ -491,7 +653,7 @@ pub fn add_objects_as_part(
     objects: &[NewObject],
     name: &str,
     view: [f32; 4],
-) -> Result<Project, String> {
+) -> Result<Project, ComposeError> {
     if !project.has_artwork() {
         let (mut result, _) = add_objects(project, objects)?;
         result.part_name = name.to_string();
@@ -542,9 +704,9 @@ pub fn paste_part(
     project: &Project,
     mut part: crate::project::Part,
     view: Option<[f32; 4]>,
-) -> Result<Project, String> {
+) -> Result<Project, ComposeError> {
     if part.svg.is_empty() {
-        return Err(tr("Nichts zum Einfügen").into());
+        return Err(ComposeError::NothingToPaste);
     }
     check_size(&part.svg)?;
     if let Some(view) = view {
@@ -615,9 +777,9 @@ fn place_in_view(project: &Project, width: f32, height: f32, view: [f32; 4]) -> 
 pub fn add_objects(
     project: &Project,
     objects: &[NewObject],
-) -> Result<(Project, Vec<usize>), String> {
+) -> Result<(Project, Vec<usize>), ComposeError> {
     if objects.is_empty() {
-        return Err(tr("Keine Elemente zum Einfügen").into());
+        return Err(ComposeError::NoElements);
     }
     let existing = selection::objects(&project.svg)?.len();
     let mut body = String::new();
@@ -680,12 +842,12 @@ pub fn transform(
     rotate_deg: f64,
     flip_horizontal: bool,
     flip_vertical: bool,
-) -> Result<Project, String> {
+) -> Result<Project, ComposeError> {
     if project.svg.is_empty() {
-        return Err(tr("Zuerst ein Motiv öffnen").into());
+        return Err(ComposeError::NoMotif);
     }
     if !rotate_deg.is_finite() {
-        return Err(tr("Winkel muss endlich sein").into());
+        return Err(ComposeError::AngleNotFinite);
     }
     let rotate = rotate_deg.rem_euclid(360.0);
     if rotate == 0.0 && !flip_horizontal && !flip_vertical {
@@ -765,11 +927,11 @@ fn content_mm(svg: &str, frame: [f64; 4]) -> Option<[f64; 4]> {
 
 /// Removes objects from the motif; the remaining objects keep their order
 /// and the assignments move with them. Removing everything clears the motif.
-pub fn remove_objects(project: &Project, remove: &[usize]) -> Result<Project, String> {
+pub fn remove_objects(project: &Project, remove: &[usize]) -> Result<Project, ComposeError> {
     let doc = parse(&project.svg)?;
     let nodes = selection::selectable_nodes(&doc);
     if remove.iter().any(|i| *i >= nodes.len()) {
-        return Err(tr("SVG-Objekt nicht vorhanden").into());
+        return Err(ComposeError::ObjectMissing);
     }
     let mut result = Project {
         part_text: None,
@@ -812,7 +974,7 @@ pub fn remove_objects(project: &Project, remove: &[usize]) -> Result<Project, St
 
 /// One copy of the motif next to it (to the right if it fits on the bed,
 /// otherwise below).
-pub fn duplicate(project: &Project, gap_mm: f64) -> Result<Project, String> {
+pub fn duplicate(project: &Project, gap_mm: f64) -> Result<Project, ComposeError> {
     let right = project.x_mm as f64 + 2.0 * project.width_mm as f64 + gap_mm;
     if right <= project.bed_width_mm as f64 {
         array(project, 2, 1, gap_mm, gap_mm)
@@ -829,16 +991,16 @@ pub fn array(
     rows: u32,
     gap_x_mm: f64,
     gap_y_mm: f64,
-) -> Result<Project, String> {
+) -> Result<Project, ComposeError> {
     if project.svg.is_empty() {
-        return Err(tr("Zuerst ein Motiv öffnen").into());
+        return Err(ComposeError::NoMotif);
     }
     let copies = columns as usize * rows as usize;
     if !(2..=MAX_COPIES).contains(&copies) {
-        return Err(tr!("2 bis {max} Exemplare sind möglich", max = MAX_COPIES));
+        return Err(ComposeError::CopyCount);
     }
     if !gap_x_mm.is_finite() || !gap_y_mm.is_finite() {
-        return Err(tr("Abstand muss endlich sein").into());
+        return Err(ComposeError::GapNotFinite);
     }
     let (w, h) = (project.width_mm as f64, project.height_mm as f64);
     let objects = selection::objects(&project.svg)?.len();
@@ -868,27 +1030,27 @@ pub fn array(
 /// Bounding-box nesting: copies of every part (top-level object, or object
 /// of a top-level layer) are placed into the sheet, largest first, with the
 /// free-rectangle method; parts may be turned as the settings allow.
-pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, String> {
+pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, ComposeError> {
     if project.svg.is_empty() {
-        return Err(tr("Zuerst ein Motiv öffnen").into());
+        return Err(ComposeError::NoMotif);
     }
     let [ax, ay, aw, ah] = settings.area_mm;
     if !settings.area_mm.iter().all(|v| v.is_finite()) || aw <= 0.0 || ah <= 0.0 {
-        return Err(tr("Fläche braucht eine positive Breite und Höhe").into());
+        return Err(ComposeError::AreaSize);
     }
     if !settings.gap_mm.is_finite() || settings.gap_mm < 0.0 {
-        return Err(tr("Abstand darf nicht negativ sein").into());
+        return Err(ComposeError::NegativeGap);
     }
     let shared = parts(project)?;
     let parts = &shared.parts;
     if parts.is_empty() {
-        return Err(tr("Keine Teile im Motiv").into());
+        return Err(ComposeError::NoParts);
     }
     let mut instances: Vec<usize> = (0..parts.len())
         .flat_map(|p| std::iter::repeat_n(p, settings.quantity.max(1) as usize))
         .collect();
     if instances.len() > MAX_COPIES {
-        return Err(tr!("Höchstens {max} Teile sind möglich", max = MAX_COPIES));
+        return Err(ComposeError::TooManyParts);
     }
     // Engraved parts first: the controller engraves line by line in X with an
     // overscan at both ends of every line, so they are lined up side by side
@@ -959,7 +1121,7 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, String
         split(&mut free, used);
     }
     if placements.is_empty() {
-        return Err(tr("Kein Teil passt in die Fläche").into());
+        return Err(ComposeError::NothingFits);
     }
     // Output in drawing order of the parts so object numbers stay ordered.
     placements.sort_by_key(|p| p.0);
@@ -968,7 +1130,7 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, String
     let mut new_ids: Vec<Vec<usize>> = vec![Vec::new(); selection::objects(&project.svg)?.len()];
     let mut next = 0;
     // The motif maps canvas pixels to the bed like `embed`.
-    let tree = usvg::Tree::from_str(&project.svg, &svg::options()).map_err(|e| e.to_string())?;
+    let tree = usvg::Tree::from_str(&project.svg, &svg::options())?;
     let size = tree.size();
     let motif = format!(
         "matrix({} 0 0 {} {} {})",
@@ -1038,13 +1200,12 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, String
 /// Adds another drawing beside the motif in its original size: to the right
 /// if it fits on the bed, otherwise below. Existing objects keep their
 /// numbers and assignments; the new ones follow. Returns German notes.
-pub fn append(project: &Project, source: &str) -> Result<(Project, Vec<String>), String> {
+pub fn append(project: &Project, source: &str) -> Result<(Project, Vec<String>), ComposeError> {
     if project.svg.is_empty() {
-        return Err(tr("Zuerst ein Motiv öffnen").into());
+        return Err(ComposeError::NoMotif);
     }
     let source = scope_names(&project.svg, source)?;
-    let tree = usvg::Tree::from_str(&source, &svg::options())
-        .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
+    let tree = usvg::Tree::from_str(&source, &svg::options()).map_err(svg::SvgError::Unreadable)?;
     let (w, h) = (
         tree.size().width() as f64 * 25.4 / 96.0,
         tree.size().height() as f64 * 25.4 / 96.0,
@@ -1102,9 +1263,8 @@ pub fn add_part(
     name: &str,
     source: &str,
     steps: Vec<crate::project::JobStep>,
-) -> Result<(Project, Vec<String>), String> {
-    let tree = usvg::Tree::from_str(source, &svg::options())
-        .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
+) -> Result<(Project, Vec<String>), ComposeError> {
+    let tree = usvg::Tree::from_str(source, &svg::options()).map_err(svg::SvgError::Unreadable)?;
     let (w, h) = (
         tree.size().width() as f64 * 25.4 / 96.0,
         tree.size().height() as f64 * 25.4 / 96.0,
@@ -1154,7 +1314,7 @@ pub fn add_files_as_parts(
     project: &Project,
     paths: &[std::path::PathBuf],
     whole_drawing: bool,
-) -> Result<(Project, Vec<String>), String> {
+) -> Result<(Project, Vec<String>), ComposeError> {
     let mut result = project.clone();
     let mut notes = Vec::new();
     let mut added = 0;
@@ -1162,7 +1322,7 @@ pub fn add_files_as_parts(
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         let stem = path.file_stem().unwrap_or_default().to_string_lossy();
         let appended = crate::import::read_file(path)
-            .map_err(String::from)
+            .map_err(ComposeError::from)
             .and_then(|imported| {
                 // Ragt die Zeichnung über die Zeichenfläche, wächst diese mit.
                 let svg = whole_drawing
@@ -1186,7 +1346,7 @@ pub fn add_files_as_parts(
         }
     }
     if added == 0 {
-        return Err(notes.join("\n"));
+        return Err(ComposeError::NoneAdded(notes));
     }
     Ok((result, notes))
 }
@@ -1210,7 +1370,7 @@ pub fn reload_parts(project: &Project, whole_drawing: bool) -> (Project, usize, 
                 notes.extend(warnings);
             }
             Ok((false, _)) => {}
-            Err(e) => notes.push(e),
+            Err(e) => notes.push(e.to_string()),
         }
     }
     let mut result = project.clone();
@@ -1226,7 +1386,7 @@ pub fn update_part(
     project: &Project,
     path: &std::path::Path,
     whole_drawing: bool,
-) -> Option<Result<(Project, Vec<String>), String>> {
+) -> Option<Result<(Project, Vec<String>), ComposeError>> {
     let stem = path.file_stem()?.to_string_lossy();
     let mut all = project.all_parts();
     let index = all.iter().position(|part| part.name == stem)?;
@@ -1248,16 +1408,19 @@ fn refresh_part(
     part: &mut crate::project::Part,
     path: &std::path::Path,
     whole_drawing: bool,
-) -> Result<(bool, Vec<String>), String> {
+) -> Result<(bool, Vec<String>), ComposeError> {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
-    let mut imported = crate::import::read_file(path).map_err(|e| format!("{name}: {e}"))?;
+    let mut imported = crate::import::read_file(path)
+        .map_err(ComposeError::from)
+        .map_err(ComposeError::in_file(&name))?;
     if let (Some(new), Some(old)) = (&imported.parametric, &part.parametric) {
         let parametric = crate::project::Parametric {
             values: old.values.clone(),
             ..new.clone()
         };
         imported = crate::import::render_parametric(&parametric)
-            .map_err(|e| format!("{name}: {e}"))?
+            .map_err(ComposeError::from)
+            .map_err(ComposeError::in_file(&name))?
             .0;
     }
     let svg = whole_drawing
@@ -1268,7 +1431,7 @@ fn refresh_part(
     if svg == part.svg {
         return Ok((false, Vec::new()));
     }
-    replace_drawing(part, svg).map_err(|e| format!("{name}: {e}"))?;
+    replace_drawing(part, svg).map_err(ComposeError::in_file(&name))?;
     let warnings = imported
         .warnings
         .into_iter()
@@ -1282,11 +1445,11 @@ fn refresh_part(
 pub fn set_parameters(
     project: &Project,
     values: Vec<(String, crate::import::ParameterValue)>,
-) -> Result<(Project, Vec<String>), String> {
+) -> Result<(Project, Vec<String>), ComposeError> {
     let parametric = project
         .part_parametric
         .as_ref()
-        .ok_or_else(|| tr("Das Teil hat keine Parameter").to_string())?;
+        .ok_or(ComposeError::NoParameters)?;
     let (imported, _) = crate::import::render_parametric(&crate::project::Parametric {
         values,
         ..parametric.clone()
@@ -1304,10 +1467,10 @@ pub fn set_parameters(
 
 /// Puts a new drawing into `part`: a scaled part keeps its scale, objects
 /// assigned one by one that no longer exist lose their assignment.
-fn replace_drawing(part: &mut crate::project::Part, svg: String) -> Result<(), String> {
+fn replace_drawing(part: &mut crate::project::Part, svg: String) -> Result<(), ComposeError> {
     let size_mm = |source: &str| {
         usvg::Tree::from_str(source, &svg::options())
-            .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))
+            .map_err(svg::SvgError::Unreadable)
             .map(|tree| {
                 let size = tree.size();
                 (size.width() * 25.4 / 96.0, size.height() * 25.4 / 96.0)
@@ -1335,15 +1498,15 @@ fn replace_drawing(part: &mut crate::project::Part, svg: String) -> Result<(), S
 pub fn add_extra_parts(
     project: &mut Project,
     extras: Vec<crate::svg_import::ExtraPart>,
-) -> Result<(), String> {
+) -> Result<(), ComposeError> {
     if extras.is_empty() {
         return Ok(());
     }
     let main = project.active_part;
     let (x, y) = (project.x_mm, project.y_mm);
     for extra in extras {
-        let tree = usvg::Tree::from_str(&extra.svg, &svg::options())
-            .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
+        let tree =
+            usvg::Tree::from_str(&extra.svg, &svg::options()).map_err(svg::SvgError::Unreadable)?;
         let part = crate::project::Part {
             name: extra.name,
             svg: extra.svg,
@@ -1370,14 +1533,14 @@ pub fn add_extra_parts(
 pub fn append_files(
     project: &Project,
     paths: &[std::path::PathBuf],
-) -> Result<(Project, Vec<String>), String> {
+) -> Result<(Project, Vec<String>), ComposeError> {
     let mut result = project.clone();
     let mut notes = Vec::new();
     let mut added = 0;
     for path in paths {
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         let appended = crate::import::read_file(path)
-            .map_err(String::from)
+            .map_err(ComposeError::from)
             .and_then(|imported| {
                 let (next, more) = append(&result, &imported.svg)?;
                 Ok((next, imported, more))
@@ -1404,7 +1567,7 @@ pub fn append_files(
         }
     }
     if added == 0 {
-        return Err(notes.join("\n"));
+        return Err(ComposeError::NoneAdded(notes));
     }
     Ok((result, notes))
 }
@@ -1412,7 +1575,7 @@ pub fn append_files(
 /// Renames ids and classes of `source` that also occur in `existing` (as
 /// attributes or in style sheets), including references and selectors, so
 /// both drawings keep their own definitions and styles in one document.
-fn scope_names(existing: &str, source: &str) -> Result<String, String> {
+fn scope_names(existing: &str, source: &str) -> Result<String, ComposeError> {
     use std::collections::{HashMap, HashSet};
     let old = parse(existing)?;
     let mut taken: HashSet<String> = HashSet::new();
@@ -1609,7 +1772,7 @@ impl Parts {
 }
 
 /// Objects processed by an engrave or 3D engrave step, by object index.
-fn raster_objects(project: &Project) -> Result<Vec<bool>, String> {
+fn raster_objects(project: &Project) -> Result<Vec<bool>, ComposeError> {
     let count = selection::objects(&project.svg)?.len();
     if project.steps.is_empty() {
         return Ok(vec![project.operation.is_raster(); count]);
@@ -1833,7 +1996,7 @@ fn content_bounds(group: &usvg::Group) -> Option<tiny_skia::Rect> {
     bounds
 }
 
-fn parts(project: &Project) -> Result<Parts, String> {
+fn parts(project: &Project) -> Result<Parts, ComposeError> {
     let source = &project.svg;
     let doc = parse(source)?;
     let selectable = selection::selectable_nodes(&doc);
@@ -1849,8 +2012,7 @@ fn parts(project: &Project) -> Result<Parts, String> {
             candidates.push(child);
         }
     }
-    let tree = usvg::Tree::from_str(source, &svg::options())
-        .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
+    let tree = usvg::Tree::from_str(source, &svg::options()).map_err(svg::SvgError::Unreadable)?;
     let size = tree.size();
     let root_start = root_start(source, root, size)?;
     let (sx, sy) = (
@@ -1879,8 +2041,7 @@ fn parts(project: &Project) -> Result<Parts, String> {
             .collect();
         for ancestor in ancestors.iter().rev() {
             let range = ancestor.range();
-            let end =
-                start_tag_end(source, range.start).ok_or(tr("SVG-Gruppe ist unvollständig"))?;
+            let end = start_tag_end(source, range.start).ok_or(ComposeError::GroupIncomplete)?;
             opening.push(range.start..end);
             let close = source[range.clone()].rfind("</").map(|i| range.start + i);
             closing.push(close.map_or(String::new(), |c| source[c..range.end].to_string()));
@@ -1920,7 +2081,7 @@ fn parts(project: &Project) -> Result<Parts, String> {
             result.globals,
             result.text(source, &part, None)
         );
-        let tree = usvg::Tree::from_str(&alone, &svg::options()).map_err(|e| e.to_string())?;
+        let tree = usvg::Tree::from_str(&alone, &svg::options())?;
         let Some(b) = content_bounds(tree.root()) else {
             continue;
         };
@@ -1945,9 +2106,13 @@ fn parts(project: &Project) -> Result<Parts, String> {
 }
 
 /// The root start tag with the canvas size in pixels and visible overflow.
-fn root_start(source: &str, root: roxmltree::Node, size: usvg::Size) -> Result<String, String> {
+fn root_start(
+    source: &str,
+    root: roxmltree::Node,
+    size: usvg::Size,
+) -> Result<String, ComposeError> {
     let range = root.range();
-    let end = start_tag_end(source, range.start).ok_or(tr("SVG-Wurzel ist unvollständig"))?;
+    let end = start_tag_end(source, range.start).ok_or(ComposeError::RootIncomplete)?;
     let mut text = String::new();
     let mut position = range.start;
     for attribute in root.attributes() {
@@ -2105,21 +2270,18 @@ fn motif_bounds(project: &Project) -> Option<[f64; 4]> {
     ])
 }
 
-fn check_size(body: &str) -> Result<(), String> {
+fn check_size(body: &str) -> Result<(), ComposeError> {
     if body.len() > MAX_SVG_BYTES {
-        return Err(tr(
-            "Ergebnis wäre größer als 20 MB; weniger Kopien oder kleinere Bilder verwenden",
-        )
-        .into());
+        return Err(ComposeError::TooLarge);
     }
     Ok(())
 }
 
 /// The project with a new document in bed millimetres covering `bounds`.
-fn with_document(project: &Project, body: &str, bounds: [f64; 4]) -> Result<Project, String> {
+fn with_document(project: &Project, body: &str, bounds: [f64; 4]) -> Result<Project, ComposeError> {
     let [x, y, w, h] = bounds;
     if !(w > 0.0 && h > 0.0) {
-        return Err(tr("Ergebnis hat keine Fläche").into());
+        return Err(ComposeError::NoArea);
     }
     let document = format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{}mm" height="{}mm" viewBox="{} {} {} {}">{body}</svg>"#,
@@ -2148,18 +2310,15 @@ fn with_document(project: &Project, body: &str, bounds: [f64; 4]) -> Result<Proj
     Ok(result)
 }
 
-fn parse(source: &str) -> Result<roxmltree::Document<'_>, String> {
+fn parse(source: &str) -> Result<roxmltree::Document<'_>, ComposeError> {
     if source.contains("<!ENTITY") {
-        return Err(tr(
-            "SVG mit DTD-Entitäten lässt sich nicht erweitern; bitte als normales SVG speichern",
-        )
-        .into());
+        return Err(ComposeError::Entities);
     }
     let options = roxmltree::ParsingOptions {
         allow_dtd: true,
         ..Default::default()
     };
-    roxmltree::Document::parse_with_options(source, options).map_err(|e| e.to_string())
+    roxmltree::Document::parse_with_options(source, options).map_err(ComposeError::Xml)
 }
 
 /// The motif as it lies on the bed: its root `<svg>` sized in canvas pixels
@@ -2170,9 +2329,9 @@ fn embed(
     project: &Project,
     suffix: Option<&str>,
     visible: Option<&[usize]>,
-) -> Result<String, String> {
-    let tree = usvg::Tree::from_str(&project.svg, &svg::options())
-        .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
+) -> Result<String, ComposeError> {
+    let tree =
+        usvg::Tree::from_str(&project.svg, &svg::options()).map_err(svg::SvgError::Unreadable)?;
     let size = tree.size();
     let source = match visible {
         Some(objects) => selection::filter(&project.svg, objects)?,
@@ -2181,8 +2340,7 @@ fn embed(
     let doc = parse(&source)?;
     let root = doc.root_element();
     let range = root.range();
-    let start_end =
-        start_tag_end(&source, range.start).ok_or(tr("SVG-Wurzel ist unvollständig"))?;
+    let start_end = start_tag_end(&source, range.start).ok_or(ComposeError::RootIncomplete)?;
     let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
     for attribute in root.attributes() {
         if attribute.namespace().is_none()
@@ -2272,7 +2430,7 @@ fn num(value: f64) -> String {
 }
 
 /// Path data of a shape at its own origin and its bounds `[x, y, w, h]`.
-fn outline(shape: &Shape) -> Result<(String, [f64; 4]), String> {
+fn outline(shape: &Shape) -> Result<(String, [f64; 4]), ComposeError> {
     let positive = |v: f64| v.is_finite() && v > 0.0 && v <= 10_000.0;
     match shape {
         Shape::Rectangle {
@@ -2281,7 +2439,7 @@ fn outline(shape: &Shape) -> Result<(String, [f64; 4]), String> {
             corner_mm: r,
         } => {
             if !positive(*w) || !positive(*h) || !r.is_finite() || *r < 0.0 {
-                return Err(tr("Rechteck braucht positive Maße").into());
+                return Err(ComposeError::Rectangle);
             }
             let r = r.min(w / 2.0).min(h / 2.0);
             let d = if r > 0.0 {
@@ -2302,7 +2460,7 @@ fn outline(shape: &Shape) -> Result<(String, [f64; 4]), String> {
             height_mm: h,
         } => {
             if !positive(*w) || !positive(*h) {
-                return Err(tr("Ellipse braucht positive Maße").into());
+                return Err(ComposeError::Ellipse);
             }
             let (rx, ry) = (w / 2.0, h / 2.0);
             Ok((
@@ -2312,7 +2470,7 @@ fn outline(shape: &Shape) -> Result<(String, [f64; 4]), String> {
         }
         Shape::Polygon { sides, diameter_mm } => {
             if !(3..=100).contains(sides) || !positive(*diameter_mm) {
-                return Err(tr("Vieleck braucht 3 bis 100 Ecken und einen Durchmesser").into());
+                return Err(ComposeError::Polygon);
             }
             Ok(polygon(
                 (0..*sides).map(|i| (diameter_mm / 2.0, i as f64 / *sides as f64)),
@@ -2327,7 +2485,7 @@ fn outline(shape: &Shape) -> Result<(String, [f64; 4]), String> {
                 || !positive(*diameter_mm)
                 || !(5.0..=95.0).contains(inner_percent)
             {
-                return Err(tr("Stern braucht 3 bis 100 Zacken und 5–95 % Innenradius").into());
+                return Err(ComposeError::Star);
             }
             let outer = diameter_mm / 2.0;
             let inner = outer * inner_percent / 100.0;
@@ -2377,7 +2535,7 @@ fn escape(text: &str) -> String {
 }
 
 /// Text converted to outlines with the application's fonts.
-fn text_outline(shape: &Shape) -> Result<(String, [f64; 4]), String> {
+fn text_outline(shape: &Shape) -> Result<(String, [f64; 4]), ComposeError> {
     let Shape::Text {
         text,
         font,
@@ -2391,14 +2549,14 @@ fn text_outline(shape: &Shape) -> Result<(String, [f64; 4]), String> {
         unreachable!()
     };
     if !size_mm.is_finite() || !(0.5..=1000.0).contains(size_mm) {
-        return Err(tr("Schriftgröße muss zwischen 0,5 und 1000 mm liegen").into());
+        return Err(ComposeError::FontSize);
     }
     if !line_spacing.is_finite() || !(0.5..=5.0).contains(line_spacing) {
-        return Err(tr("Zeilenabstand muss zwischen 0,5 und 5 liegen").into());
+        return Err(ComposeError::LineSpacing);
     }
     let lines: Vec<&str> = text.lines().collect();
     if lines.iter().all(|l| l.trim().is_empty()) || text.chars().count() > 2000 {
-        return Err(tr("Text fehlt oder ist länger als 2000 Zeichen").into());
+        return Err(ComposeError::TextLength);
     }
     let anchor = match align {
         Align::Left => "start",
@@ -2422,13 +2580,11 @@ fn text_outline(shape: &Shape) -> Result<(String, [f64; 4]), String> {
         if *bold { "bold" } else { "normal" },
         if *italic { "italic" } else { "normal" },
     );
-    let tree = usvg::Tree::from_str(&source, &svg::options()).map_err(|e| e.to_string())?;
+    let tree = usvg::Tree::from_str(&source, &svg::options())?;
     let mut d = String::new();
     let mut bounds: Option<tiny_skia::Rect> = None;
     collect(tree.root(), &mut d, &mut bounds);
-    let b = bounds.ok_or(tr(
-        "Der Text ergibt keine Umrisse (Schrift ohne passende Zeichen?)",
-    ))?;
+    let b = bounds.ok_or(ComposeError::NoOutlines)?;
     Ok((
         d,
         [

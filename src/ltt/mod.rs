@@ -565,24 +565,22 @@ pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, 
             .fold(0.0, f32::max);
         // The header holds the bounds of the actual content (LaserJob
         // .getBoundingBox in Java), so it is written after the parts.
-        let mut body = Vec::new();
         let mut bounds: Option<Bounds> = None;
-        let mut state = DeviceState::new(project);
-        timeline.start_job(HOME_MM);
+        let mut job = JobOutput {
+            body: Vec::new(),
+            state: DeviceState::new(project),
+            preview: &mut preview,
+            frame,
+            timeline: &mut timeline,
+            warnings: &mut warnings,
+        };
+        job.timeline.start_job(HOME_MM);
         for part in &group {
-            let (step, part_bounds) = append_part(
-                &mut body,
-                &mut state,
-                &mut warnings,
-                &views[part.source],
-                part,
-                &name,
-                (&mut preview, frame),
-                &mut timeline,
-            )?;
+            let (step, part_bounds) = append_part(&mut job, &views[part.source], part, &name)?;
             steps.push(step);
             bounds = Some(bounds.map_or(part_bounds, |b| b.union(part_bounds)));
         }
+        let body = job.body;
         let mut out = header(project, overscan, &name, bounds.unwrap_or_default(), pitch);
         out.extend(body);
         finish(&mut out)?;
@@ -686,17 +684,33 @@ impl DeviceState {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// What the parts of one LTT file write to: its body and the device state
+/// sent so far, plus the preview, timeline and warnings of the whole order.
+struct JobOutput<'a> {
+    body: Vec<u8>,
+    state: DeviceState,
+    preview: &'a mut tiny_skia::Pixmap,
+    /// Area of the bed `preview` covers.
+    frame: Frame,
+    timeline: &'a mut Timeline,
+    warnings: &'a mut Vec<String>,
+}
+
 fn append_part(
-    out: &mut Vec<u8>,
-    state: &mut DeviceState,
-    warnings: &mut Vec<String>,
+    job: &mut JobOutput,
     project: &Project,
     part: &Part,
     name: &str,
-    (preview, frame): (&mut tiny_skia::Pixmap, Frame),
-    timeline: &mut Timeline,
 ) -> Result<(PreparedStep, Bounds), String> {
+    let frame = job.frame;
+    let JobOutput {
+        body: out,
+        state,
+        preview,
+        timeline,
+        warnings,
+        ..
+    } = job;
     if part.sets.iter().any(|s| s.power_percent <= 0.0) {
         return Err(tr!(
             "{operation}: Leistung ist 0 %; im Schritt eine Leistung eintragen (mindestens 0,1 %)",

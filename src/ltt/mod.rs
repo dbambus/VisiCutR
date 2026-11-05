@@ -255,7 +255,7 @@ fn collect_parts(project: &Project) -> Result<(Vec<Project>, Vec<Part>), LttErro
                     error,
                 }
             } else {
-                LttError::Other(error)
+                LttError::Project(error)
             }
         })?;
         if view.steps.is_empty() {
@@ -1788,7 +1788,11 @@ mod tests {
         assert_eq!(prepare(&reloaded).unwrap().jobs[1].bytes, job.jobs[1].bytes);
         // A part outside the bed blocks sending and names the part.
         p.parts[0].x_mm = 990.0;
-        assert!(prepare(&p).err().unwrap().to_string().contains("rechteck"));
+        assert!(matches!(
+            prepare(&p),
+            Err(LttError::Project(crate::project::ProjectError::PartOutsideBed(name)))
+                if name == "rechteck"
+        ));
         p.remove_active_part();
         assert_eq!(p.part_name, "rechteck");
         assert!(p.parts.is_empty());

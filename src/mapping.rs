@@ -6,7 +6,75 @@ use crate::{i18n::tr, tr};
 use resvg::usvg::{self, roxmltree};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::fmt;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug)]
+pub enum MappingError {
+    /// A stroke width filter whose value is no number.
+    StrokeWidthNotANumber(String),
+    Xml(roxmltree::Error),
+    Svg(usvg::Error),
+    Selection(crate::selection::SelectionError),
+    Io(std::io::Error),
+    Json(serde_json::Error),
+    /// The templates file cannot be read as templates.
+    TemplatesDamaged {
+        path: PathBuf,
+        error: serde_json::Error,
+    },
+    TemplateWithoutName,
+    TemplateWithoutRule,
+    TemplateExists(String),
+    TemplateMissing(String),
+}
+
+impl fmt::Display for MappingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = match self {
+            Self::StrokeWidthNotANumber(value) => {
+                tr!("Linienstärke „{value}“ ist keine Zahl", value = value)
+            }
+            Self::Xml(error) => error.to_string(),
+            Self::Svg(error) => error.to_string(),
+            Self::Selection(error) => error.to_string(),
+            Self::Io(error) => error.to_string(),
+            Self::Json(error) => error.to_string(),
+            Self::TemplatesDamaged { path, error } => tr!(
+                "Zuordnungsvorlagen {path} sind beschädigt: {error}",
+                path = path.display(),
+                error = error
+            ),
+            Self::TemplateWithoutName => tr("Die Vorlage braucht einen Namen").to_string(),
+            Self::TemplateWithoutRule => tr("Die Vorlage enthält keine Regel").to_string(),
+            Self::TemplateExists(name) => {
+                tr!("Es gibt schon eine Vorlage „{name}“", name = name)
+            }
+            Self::TemplateMissing(name) => tr!("Vorlage „{name}“ fehlt", name = name),
+        };
+        f.write_str(&text)
+    }
+}
+
+impl std::error::Error for MappingError {}
+
+impl From<crate::selection::SelectionError> for MappingError {
+    fn from(error: crate::selection::SelectionError) -> Self {
+        Self::Selection(error)
+    }
+}
+
+impl From<std::io::Error> for MappingError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<MappingError> for String {
+    fn from(error: MappingError) -> Self {
+        error.to_string()
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Attribute {
@@ -83,14 +151,11 @@ impl ObjectAttributes {
 }
 
 impl Filter {
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), MappingError> {
         if self.attribute == Attribute::StrokeWidth
             && !self.value.trim().parse::<f64>().is_ok_and(f64::is_finite)
         {
-            return Err(tr!(
-                "Linienstärke „{value}“ ist keine Zahl",
-                value = self.value
-            ));
+            return Err(MappingError::StrokeWidthNotANumber(self.value.clone()));
         }
         Ok(())
     }
@@ -222,11 +287,11 @@ fn svgtypes_color(value: &str) -> Option<String> {
 }
 
 /// Selectable objects (see selection.rs) with their mapping attributes.
-pub fn attributes(svg: &str) -> Result<Vec<ObjectAttributes>, String> {
+pub fn attributes(svg: &str) -> Result<Vec<ObjectAttributes>, MappingError> {
     if svg.is_empty() {
         return Ok(Vec::new());
     }
-    let doc = roxmltree::Document::parse(svg).map_err(|e| e.to_string())?;
+    let doc = roxmltree::Document::parse(svg).map_err(MappingError::Xml)?;
     let nodes = crate::selection::selectable_nodes(&doc);
     let mut result: Vec<ObjectAttributes> = nodes
         .iter()
@@ -263,7 +328,7 @@ pub fn attributes(svg: &str) -> Result<Vec<ObjectAttributes>, String> {
                 .map_or(format!("__visicut_object_{i}"), str::to_string)
         })
         .collect();
-    let tree = usvg::Tree::from_str(&tagged, &crate::svg::options()).map_err(|e| e.to_string())?;
+    let tree = usvg::Tree::from_str(&tagged, &crate::svg::options()).map_err(MappingError::Svg)?;
     let mut widths: Vec<BTreeSet<String>> = vec![BTreeSet::new(); nodes.len()];
     collect(tree.root(), None, &ids, &mut result, &mut widths);
     for (object, widths) in result.iter_mut().zip(widths) {
@@ -341,7 +406,7 @@ fn collect(
 /// Indices of objects processed by every step. Manual steps list objects,
 /// rule steps match filters (an empty filter list matches everything), and
 /// rest steps take objects matched by no rule, ignore rule or manual step.
-pub fn resolve(project: &Project) -> Result<Vec<Vec<usize>>, String> {
+pub fn resolve(project: &Project) -> Result<Vec<Vec<usize>>, MappingError> {
     for filter in project
         .steps
         .iter()
@@ -405,7 +470,7 @@ pub fn resolve(project: &Project) -> Result<Vec<Vec<usize>>, String> {
 pub type ValueCounts = Vec<(String, usize)>;
 
 /// Distinct values per attribute in the document, for the mapping table.
-pub fn values(svg: &str) -> Result<Vec<(Attribute, ValueCounts)>, String> {
+pub fn values(svg: &str) -> Result<Vec<(Attribute, ValueCounts)>, MappingError> {
     let objects = attributes(svg)?;
     Ok(Attribute::ALL
         .iter()
@@ -556,27 +621,22 @@ pub struct Templates {
 
 impl Templates {
     /// Own templates in `dir`; none if the file is missing.
-    pub fn load(dir: &Path) -> Result<Self, String> {
+    pub fn load(dir: &Path) -> Result<Self, MappingError> {
         let path = dir.join(TEMPLATES_FILE);
         if !path.exists() {
             return Ok(Self::default());
         }
-        let source = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&source).map_err(|e| {
-            tr!(
-                "Zuordnungsvorlagen {path} sind beschädigt: {error}",
-                path = path.display(),
-                error = e
-            )
-        })
+        let source = std::fs::read_to_string(&path)?;
+        serde_json::from_str(&source)
+            .map_err(|error| MappingError::TemplatesDamaged { path, error })
     }
 
-    pub fn save(&self, dir: &Path) -> Result<(), String> {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    pub fn save(&self, dir: &Path) -> Result<(), MappingError> {
+        std::fs::create_dir_all(dir)?;
         let temporary = dir.join(format!("{TEMPLATES_FILE}.tmp"));
-        let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(&temporary, json).map_err(|e| e.to_string())?;
-        std::fs::rename(&temporary, dir.join(TEMPLATES_FILE)).map_err(|e| e.to_string())
+        let json = serde_json::to_string_pretty(self).map_err(MappingError::Json)?;
+        std::fs::write(&temporary, json)?;
+        Ok(std::fs::rename(&temporary, dir.join(TEMPLATES_FILE))?)
     }
 
     /// Built-in templates followed by the own ones.
@@ -616,9 +676,9 @@ impl Templates {
         }
     }
 
-    fn check_name(&self, name: &str) -> Result<(), String> {
+    fn check_name(&self, name: &str) -> Result<(), MappingError> {
         if name.trim().is_empty() {
-            return Err(tr("Die Vorlage braucht einen Namen").into());
+            return Err(MappingError::TemplateWithoutName);
         }
         Ok(())
     }
@@ -637,10 +697,10 @@ impl Templates {
     }
 
     /// Adds a template or replaces the own one with the same name.
-    pub fn store(&mut self, template: Predefined) -> Result<(), String> {
+    pub fn store(&mut self, template: Predefined) -> Result<(), MappingError> {
         self.check_name(&template.name)?;
         if template.rules.is_empty() {
-            return Err(tr("Die Vorlage enthält keine Regel").into());
+            return Err(MappingError::TemplateWithoutRule);
         }
         match self.own.iter_mut().find(|p| p.name == template.name) {
             Some(existing) => *existing = template,
@@ -649,20 +709,20 @@ impl Templates {
         Ok(())
     }
 
-    pub fn rename(&mut self, old: &str, new: &str) -> Result<(), String> {
+    pub fn rename(&mut self, old: &str, new: &str) -> Result<(), MappingError> {
         let new = new.trim();
         self.check_name(new)?;
         if new == old {
             return Ok(());
         }
         if self.own.iter().any(|p| p.name == new) {
-            return Err(tr!("Es gibt schon eine Vorlage „{name}“", name = new));
+            return Err(MappingError::TemplateExists(new.into()));
         }
         let template = self
             .own
             .iter_mut()
             .find(|p| p.name == old)
-            .ok_or_else(|| tr!("Vorlage „{name}“ fehlt", name = old))?;
+            .ok_or_else(|| MappingError::TemplateMissing(old.into()))?;
         template.name = new.into();
         if self.default == Some(TemplateRef::Own(old.into())) {
             self.default = Some(TemplateRef::Own(new.into()));

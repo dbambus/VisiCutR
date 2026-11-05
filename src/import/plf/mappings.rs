@@ -277,7 +277,10 @@ fn dithering_named(name: &str) -> Option<Dithering> {
 /// Übersetzt die Zuordnungen aller Teile. `composed` sind die Attribute des
 /// zusammengesetzten Motivs; die Objekte der Teile liegen darin in
 /// derselben Reihenfolge hintereinander.
-pub fn translate(parts: &[Placed], composed: Result<Vec<ObjectAttributes>, String>) -> Translation {
+pub fn translate(
+    parts: &[Placed],
+    composed: Result<Vec<ObjectAttributes>, crate::mapping::MappingError>,
+) -> Translation {
     // Called only when the PLF file has a mappings.xml somewhere.
     let mut out = Translation::default();
     let composed = match composed {

@@ -18,8 +18,9 @@ pub enum LttError {
     /// A part fails its own check; `error` names why.
     InvalidPart {
         part: String,
-        error: String,
+        error: crate::project::ProjectError,
     },
+    Project(crate::project::ProjectError),
     NothingSelected,
     /// Engravings of one job with different DPI.
     MixedResolutions,
@@ -67,6 +68,7 @@ pub enum LttError {
         sent: Vec<String>,
     },
     Selection(crate::selection::SelectionError),
+    Mapping(crate::mapping::MappingError),
     /// Errors from the drawing, the mapping or the project, already as text.
     Other(String),
 }
@@ -154,7 +156,9 @@ impl fmt::Display for LttError {
                     sent.join(", ")
                 }
             ),
+            Self::Project(error) => error.to_string(),
             Self::Selection(error) => error.to_string(),
+            Self::Mapping(error) => error.to_string(),
             Self::Other(text) => text.clone(),
         };
         f.write_str(&text)
@@ -193,6 +197,18 @@ impl From<String> for LttError {
 impl From<crate::selection::SelectionError> for LttError {
     fn from(error: crate::selection::SelectionError) -> Self {
         Self::Selection(error)
+    }
+}
+
+impl From<crate::project::ProjectError> for LttError {
+    fn from(error: crate::project::ProjectError) -> Self {
+        Self::Project(error)
+    }
+}
+
+impl From<crate::mapping::MappingError> for LttError {
+    fn from(error: crate::mapping::MappingError) -> Self {
+        Self::Mapping(error)
     }
 }
 

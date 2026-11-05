@@ -714,7 +714,7 @@ impl Document {
             self.resolved = Some((
                 project.steps.clone(),
                 project.ignore_filters.clone(),
-                mapping::resolve(project),
+                mapping::resolve(project).map_err(String::from),
             ));
         }
         self.resolved.as_ref().expect("just resolved").2.clone()
@@ -1053,13 +1053,13 @@ impl JobUi {
     pub fn load() -> (Self, Option<String>) {
         let (library, custom, mut error) = match Library::load(&device::config_dir()) {
             Ok((library, custom)) => (library, custom, None),
-            Err(e) => (Library::bundled(), false, Some(e)),
+            Err(e) => (Library::bundled(), false, Some(e.to_string())),
         };
         let templates = Templates::load(&device::config_dir()).unwrap_or_else(|e| {
             error = Some(
                 error
                     .take()
-                    .map_or(e.clone(), |first| format!("{first}; {e}")),
+                    .map_or(e.to_string(), |first| format!("{first}; {e}")),
             );
             Templates::default()
         });
@@ -1627,7 +1627,7 @@ impl JobUi {
                         template.name = self.templates.free_name(&template.name);
                         names.push(template.name.clone());
                         if let Err(e) = self.templates.store(template) {
-                            warnings.push(e);
+                            warnings.push(e.to_string());
                         }
                     }
                 }
@@ -1646,11 +1646,16 @@ impl JobUi {
     }
 
     /// Sichert die Vorlagen nach einer Änderung und zeigt das Ergebnis.
-    fn finish_template_change(&mut self, result: Result<(), String>, message: String) {
+    fn finish_template_change(
+        &mut self,
+        result: Result<(), mapping::MappingError>,
+        message: String,
+    ) {
         self.template_status = Some(
             result
                 .and_then(|()| self.templates.save(&device::config_dir()))
-                .map(|()| message),
+                .map(|()| message)
+                .map_err(String::from),
         );
     }
 
@@ -1946,7 +1951,7 @@ impl JobUi {
                         };
                         match std::fs::read(&path)
                             .map_err(|e| e.to_string())
-                            .and_then(|b| Library::import(&b))
+                            .and_then(|b| Library::import(&b).map_err(String::from))
                         {
                             Ok(other) => {
                                 let count = library.merge(other);
@@ -1969,7 +1974,7 @@ impl JobUi {
                         };
                         *status = match library.export(&path) {
                             Ok(()) => tr("Materialbibliothek exportiert").into(),
-                            Err(e) => e,
+                            Err(e) => e.to_string(),
                         };
                     }
                     if ui
@@ -1984,7 +1989,7 @@ impl JobUi {
                                 self.custom = false;
                                 *status = tr("FAU-Materialbibliothek wiederhergestellt").into();
                             }
-                            Err(e) => *status = e,
+                            Err(e) => *status = e.to_string(),
                         }
                     }
                     let origin = if !self.custom {
@@ -2018,7 +2023,7 @@ impl JobUi {
                                 self.custom = true;
                                 *status = tr("Materialbibliothek gesichert").into();
                             }
-                            Err(e) => *status = e,
+                            Err(e) => *status = e.to_string(),
                         }
                     }
                 });

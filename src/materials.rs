@@ -4,7 +4,91 @@
 use crate::project::{Operation, ParameterSet};
 use crate::{i18n::tr, tr};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::fmt;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug)]
+pub enum MaterialError {
+    Io(std::io::Error),
+    Json(serde_json::Error),
+    /// The library file cannot be read as a library.
+    Damaged {
+        path: PathBuf,
+        error: serde_json::Error,
+    },
+    TooMany,
+    NameMissing,
+    Duplicate(String),
+    /// `label` names material and thickness of the profile.
+    Thickness {
+        label: String,
+    },
+    Power {
+        label: String,
+    },
+    Speed {
+        label: String,
+    },
+    DuplicateProfile {
+        label: String,
+    },
+}
+
+impl fmt::Display for MaterialError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = match self {
+            Self::Io(error) => error.to_string(),
+            Self::Json(error) => error.to_string(),
+            Self::Damaged { path, error } => tr!(
+                "Materialbibliothek {path} ist beschädigt: {error}",
+                path = path.display(),
+                error = error
+            ),
+            Self::TooMany => tr("Zu viele Materialien").to_string(),
+            Self::NameMissing => tr("Materialname fehlt").to_string(),
+            Self::Duplicate(name) => {
+                tr!("Material „{name}“ ist doppelt vorhanden", name = name)
+            }
+            Self::Thickness { label } => tr!(
+                "{label}: Stärke muss zwischen 0 und 1000 mm liegen",
+                label = label
+            ),
+            Self::Power { label } => tr!(
+                "{label}: Leistung muss zwischen 0 und 100 % liegen",
+                label = label
+            ),
+            Self::Speed { label } => tr!(
+                "{label}: Geschwindigkeit muss zwischen 0 und 100 % liegen",
+                label = label
+            ),
+            Self::DuplicateProfile { label } => tr!(
+                "{label}: Profil für dieses Verfahren doppelt vorhanden",
+                label = label
+            ),
+        };
+        f.write_str(&text)
+    }
+}
+
+impl std::error::Error for MaterialError {}
+
+impl From<std::io::Error> for MaterialError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<serde_json::Error> for MaterialError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Json(error)
+    }
+}
+
+impl From<MaterialError> for String {
+    fn from(error: MaterialError) -> Self {
+        error.to_string()
+    }
+}
 
 const FILE: &str = "materials.json";
 /// `source` der mitgelieferten FAU-Bibliothek.
@@ -72,82 +156,62 @@ impl Library {
     }
 
     /// The user's library, or the bundled one; `true` if it is customised.
-    pub fn load(dir: &Path) -> Result<(Self, bool), String> {
+    pub fn load(dir: &Path) -> Result<(Self, bool), MaterialError> {
         let path = dir.join(FILE);
         if !path.exists() {
             return Ok((Self::bundled(), false));
         }
-        let source = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        let library: Self = serde_json::from_str(&source).map_err(|e| {
-            tr!(
-                "Materialbibliothek {path} ist beschädigt: {error}",
-                path = path.display(),
-                error = e
-            )
-        })?;
+        let source = std::fs::read_to_string(&path)?;
+        let library: Self = serde_json::from_str(&source)
+            .map_err(|error| MaterialError::Damaged { path, error })?;
         library.validate()?;
         Ok((library, true))
     }
 
-    pub fn save(&self, dir: &Path) -> Result<(), String> {
+    pub fn save(&self, dir: &Path) -> Result<(), MaterialError> {
         self.validate()?;
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(dir)?;
         let temporary = dir.join(format!("{FILE}.tmp"));
-        let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(&temporary, json).map_err(|e| e.to_string())?;
-        std::fs::rename(&temporary, dir.join(FILE)).map_err(|e| e.to_string())
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(&temporary, json)?;
+        Ok(std::fs::rename(&temporary, dir.join(FILE))?)
     }
 
     /// Back to the bundled FAU catalogue.
-    pub fn reset(dir: &Path) -> Result<Self, String> {
+    pub fn reset(dir: &Path) -> Result<Self, MaterialError> {
         let path = dir.join(FILE);
         if path.exists() {
-            std::fs::remove_file(path).map_err(|e| e.to_string())?;
+            std::fs::remove_file(path)?;
         }
         Ok(Self::bundled())
     }
 
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), MaterialError> {
         if self.materials.len() > 10_000 {
-            return Err(tr("Zu viele Materialien").into());
+            return Err(MaterialError::TooMany);
         }
         for (i, material) in self.materials.iter().enumerate() {
             if material.name.trim().is_empty() {
-                return Err(tr("Materialname fehlt").into());
+                return Err(MaterialError::NameMissing);
             }
             if self.materials[..i].iter().any(|m| m.name == material.name) {
-                return Err(tr!(
-                    "Material „{name}“ ist doppelt vorhanden",
-                    name = material.name
-                ));
+                return Err(MaterialError::Duplicate(material.name.clone()));
             }
             for (j, p) in material.profiles.iter().enumerate() {
                 let label = format!("{}, {} mm", material.name, p.thickness_mm);
                 if !p.thickness_mm.is_finite() || !(0.0..=1000.0).contains(&p.thickness_mm) {
-                    return Err(tr!(
-                        "{label}: Stärke muss zwischen 0 und 1000 mm liegen",
-                        label = label
-                    ));
+                    return Err(MaterialError::Thickness { label });
                 }
                 if !p.power_percent.is_finite() || !(0.0..=100.0).contains(&p.power_percent) {
-                    return Err(tr!(
-                        "{label}: Leistung muss zwischen 0 und 100 % liegen",
-                        label = label
-                    ));
+                    return Err(MaterialError::Power { label });
                 }
                 if !p.speed_percent.is_finite() || !(0.0..=100.0).contains(&p.speed_percent) {
-                    return Err(tr!(
-                        "{label}: Geschwindigkeit muss zwischen 0 und 100 % liegen",
-                        label = label
-                    ));
+                    return Err(MaterialError::Speed { label });
                 }
                 if material.profiles[..j].iter().any(|q| {
                     q.operation == p.operation && (q.thickness_mm - p.thickness_mm).abs() < 1e-4
                 }) {
-                    return Err(tr!(
-                        "{label}: Profil für dieses Verfahren doppelt vorhanden",
-                        label = label
-                    ));
+                    return Err(MaterialError::DuplicateProfile { label });
                 }
             }
         }
@@ -167,16 +231,16 @@ impl Library {
         count
     }
 
-    pub fn import(bytes: &[u8]) -> Result<Self, String> {
-        let library: Self = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+    pub fn import(bytes: &[u8]) -> Result<Self, MaterialError> {
+        let library: Self = serde_json::from_slice(bytes)?;
         library.validate()?;
         Ok(library)
     }
 
-    pub fn export(&self, path: &Path) -> Result<(), String> {
+    pub fn export(&self, path: &Path) -> Result<(), MaterialError> {
         self.validate()?;
-        let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(path, json).map_err(|e| e.to_string())
+        let json = serde_json::to_string_pretty(self)?;
+        Ok(std::fs::write(path, json)?)
     }
 }
 
@@ -228,7 +292,10 @@ mod tests {
         let mut duplicate = library.clone();
         let profile = duplicate.materials[0].profiles[0].clone();
         duplicate.materials[0].profiles.push(profile);
-        assert!(duplicate.save(&dir).unwrap_err().contains("doppelt"));
+        assert!(matches!(
+            duplicate.save(&dir),
+            Err(MaterialError::DuplicateProfile { .. })
+        ));
         assert_eq!(Library::reset(&dir).unwrap(), Library::bundled());
         assert!(!Library::load(&dir).unwrap().1);
         std::fs::remove_dir_all(dir).unwrap();

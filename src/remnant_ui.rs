@@ -252,188 +252,239 @@ impl RemnantUi {
             420.0,
             &mut open,
             |ui| {
-                ui.horizontal(|ui| {
-                    if devices.camera_loading() {
-                        ui.spinner();
-                        ui.label(tr("Kamerabild wird geladen …"));
-                    } else if image.is_none() {
-                        ui.label(tr("Noch kein Kamerabild"));
-                    }
-                    if ui
-                        .add_enabled(
-                            !devices.camera_loading(),
-                            egui::Button::new(tr("Kamerabild aktualisieren")),
-                        )
-                        .clicked()
-                    {
-                        devices.show_camera(project);
-                        devices.refresh_camera(project);
-                    }
-                });
+                Self::camera_row(ui, devices, project, image.as_ref());
                 ui.separator();
-                ui.label(tr("Material erkennen"));
-                ui.add_enabled_ui(self.reference.is_some(), |ui| {
-                    ui.radio_value(
-                        &mut self.method,
-                        Method::Reference,
-                        tr("Unterschied zum Foto des leeren Betts"),
-                    )
-                    .on_disabled_hover_text(tr("Zuerst das leere Bett als Referenz speichern"));
-                });
-                ui.radio_value(
-                    &mut self.method,
-                    Method::Lighter,
-                    tr("Material heller als das Bett"),
-                );
-                ui.radio_value(
-                    &mut self.method,
-                    Method::Darker,
-                    tr("Material dunkler als das Bett"),
-                );
-                ui.horizontal(|ui| {
-                    let save = ui
-                        .add_enabled(
-                            image.is_some(),
-                            egui::Button::new(tr("Leeres Bett als Referenz speichern")),
-                        )
-                        .on_hover_text(tr(
-                            "Bett vorher leer räumen. Die Erkennung vergleicht danach jedes Kamerabild mit diesem Foto und findet auch Material in der Farbe des Betts.",
-                        ));
-                    if save.clicked()
-                        && let Some(image) = &image
-                    {
-                        let name = devices.device().name.clone();
-                        let path = remnant::reference_path(&device::config_dir(), &name);
-                        match remnant::save_reference(&path, image) {
-                            Ok(()) => {
-                                self.reference = Some((name, Arc::new((**image).clone())));
-                                self.method = Method::Reference;
-                                *status = tr("Referenzbild des leeren Betts gespeichert").into();
-                            }
-                            Err(e) => {
-                                self.problem =
-                                    Some(tr!("Referenzbild nicht gespeichert: {error}", error = e));
-                            }
-                        }
-                    }
-                    if self.reference.is_some() && ui.button(tr("Referenz löschen")).clicked() {
-                        let path = remnant::reference_path(
-                            &device::config_dir(),
-                            &devices.device().name,
-                        );
-                        let _ = std::fs::remove_file(path);
-                        self.reference = None;
-                        if self.method == Method::Reference {
-                            self.method = Method::Lighter;
-                        }
-                    }
-                });
+                self.method_choice(ui, devices, image.as_ref(), status);
                 ui.separator();
-                ui.checkbox(&mut self.auto_threshold, tr("Schwellwert automatisch"));
-                ui.add_enabled(
-                    !self.auto_threshold,
-                    egui::Slider::new(&mut self.threshold, 0..=255).text(tr("Schwellwert")),
-                );
-                egui::Grid::new("remnant-options")
-                    .num_columns(2)
-                    .show(ui, |ui| {
-                        let row = |ui: &mut egui::Ui, label: &str, help: &str, value: &mut f64, range: std::ops::RangeInclusive<f64>, suffix: &str| {
-                            ui.label(label).on_hover_text(help);
-                            ui.add(
-                                egui::DragValue::new(value)
-                                    .range(range)
-                                    .speed(0.1)
-                                    .suffix(suffix),
-                            )
-                            .on_hover_text(help);
-                            ui.end_row();
-                        };
-                        row(
-                            ui,
-                            tr("Glättung"),
-                            tr("Gleicht Wabe, Lamellen und Kratzer aus; größere Werte runden Ecken ab."),
-                            &mut self.smoothing_mm,
-                            0.0..=20.0,
-                            " mm",
-                        );
-                        row(
-                            ui,
-                            tr("Sicherheitsabstand"),
-                            tr("Die Umrisse liegen um diesen Abstand innerhalb der erkannten Kante."),
-                            &mut self.margin_mm,
-                            0.0..=50.0,
-                            " mm",
-                        );
-                        row(
-                            ui,
-                            tr("Mindestfläche"),
-                            tr("Kleinere Reststücke werden ignoriert."),
-                            &mut self.min_area_cm2,
-                            0.0..=10000.0,
-                            " cm²",
-                        );
-                    });
+                self.detection_options(ui);
                 ui.separator();
-                match &self.result {
-                    Some((_, Ok(detection))) if !detection.remnants.is_empty() => {
-                        let largest = detection.remnants[0].bounds();
-                        ui.label(tr!(
-                            "{count} Reststück(e) · größtes etwa {width} × {height} mm",
-                            count = detection.remnants.len(),
-                            width = format!("{:.0}", largest[2]),
-                            height = format!("{:.0}", largest[3])
-                        ));
-                    }
-                    Some((_, Ok(_))) => {
-                        ui.label(tr("Kein Reststück gefunden; Einstellungen anpassen"));
-                    }
-                    Some((_, Err(error))) => {
-                        ui.colored_label(crate::WARNING, error);
-                    }
-                    None => {}
-                }
-                if self.pending.is_some() {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label(tr("Erkennung läuft …"));
-                    });
-                }
-                if let Some(problem) = &self.problem {
-                    ui.colored_label(crate::WARNING, problem);
-                }
-                crate::form::caption(
-                    ui,
-                    tr(
-                        "Die Umrisse stammen aus dem Kamerabild und sind nur so genau wie dessen Kalibrierung.",
-                    ),
-                );
-                let found = matches!(&self.result, Some((_, Ok(d))) if !d.remnants.is_empty());
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(found, egui::Button::new(tr("Auf dem Bett anzeigen")))
-                        .on_hover_text(tr("Umrisse bleiben nach dem Schließen sichtbar, bis sie verworfen werden."))
-                        .clicked()
-                    {
-                        self.keep = true;
-                        close = true;
-                    }
-                    if ui
-                        .add_enabled(found, egui::Button::new(tr("Als Teil einfügen")))
-                        .on_hover_text(tr("Fügt die Umrisse als Schneid-Teil an ihrer Stelle ein, z. B. zum Zuschneiden. Löschen, wenn es nicht gelasert werden soll."))
-                        .clicked()
-                        && let Some((_, Ok(detection))) = &self.result
-                    {
-                        action = Some(Action::InsertPart(detection.remnants.clone()));
-                        close = true;
-                    }
-                    if ui.button(tr("Verwerfen")).clicked() {
-                        self.keep = false;
-                        close = true;
-                    }
-                });
+                self.result_summary(ui);
+                self.closing_buttons(ui, &mut action, &mut close);
             },
         );
         self.open = open && !close;
         action
+    }
+
+    /// Zustand des Kamerabilds und Knopf zum Aktualisieren.
+    fn camera_row(
+        ui: &mut egui::Ui,
+        devices: &mut DeviceUi,
+        project: &Project,
+        image: Option<&Arc<RgbaImage>>,
+    ) {
+        ui.horizontal(|ui| {
+            if devices.camera_loading() {
+                ui.spinner();
+                ui.label(tr("Kamerabild wird geladen …"));
+            } else if image.is_none() {
+                ui.label(tr("Noch kein Kamerabild"));
+            }
+            if ui
+                .add_enabled(
+                    !devices.camera_loading(),
+                    egui::Button::new(tr("Kamerabild aktualisieren")),
+                )
+                .clicked()
+            {
+                devices.show_camera(project);
+                devices.refresh_camera(project);
+            }
+        });
+    }
+
+    /// Auswahl der Erkennungsart und Knöpfe für das Referenzbild.
+    fn method_choice(
+        &mut self,
+        ui: &mut egui::Ui,
+        devices: &DeviceUi,
+        image: Option<&Arc<RgbaImage>>,
+        status: &mut String,
+    ) {
+        ui.label(tr("Material erkennen"));
+        ui.add_enabled_ui(self.reference.is_some(), |ui| {
+            ui.radio_value(
+                &mut self.method,
+                Method::Reference,
+                tr("Unterschied zum Foto des leeren Betts"),
+            )
+            .on_disabled_hover_text(tr("Zuerst das leere Bett als Referenz speichern"));
+        });
+        ui.radio_value(
+            &mut self.method,
+            Method::Lighter,
+            tr("Material heller als das Bett"),
+        );
+        ui.radio_value(
+            &mut self.method,
+            Method::Darker,
+            tr("Material dunkler als das Bett"),
+        );
+        ui.horizontal(|ui| self.reference_buttons(ui, devices, image, status));
+    }
+
+    /// Speichert oder löscht das Referenzbild des leeren Betts.
+    fn reference_buttons(
+        &mut self,
+        ui: &mut egui::Ui,
+        devices: &DeviceUi,
+        image: Option<&Arc<RgbaImage>>,
+        status: &mut String,
+    ) {
+        let save = ui
+            .add_enabled(
+                image.is_some(),
+                egui::Button::new(tr("Leeres Bett als Referenz speichern")),
+            )
+            .on_hover_text(tr(
+                "Bett vorher leer räumen. Die Erkennung vergleicht danach jedes Kamerabild mit diesem Foto und findet auch Material in der Farbe des Betts.",
+            ));
+        if save.clicked()
+            && let Some(image) = image
+        {
+            let name = devices.device().name.clone();
+            let path = remnant::reference_path(&device::config_dir(), &name);
+            match remnant::save_reference(&path, image) {
+                Ok(()) => {
+                    self.reference = Some((name, Arc::new((**image).clone())));
+                    self.method = Method::Reference;
+                    *status = tr("Referenzbild des leeren Betts gespeichert").into();
+                }
+                Err(e) => {
+                    self.problem = Some(tr!("Referenzbild nicht gespeichert: {error}", error = e));
+                }
+            }
+        }
+        if self.reference.is_some() && ui.button(tr("Referenz löschen")).clicked() {
+            let path = remnant::reference_path(&device::config_dir(), &devices.device().name);
+            let _ = std::fs::remove_file(path);
+            self.reference = None;
+            if self.method == Method::Reference {
+                self.method = Method::Lighter;
+            }
+        }
+    }
+
+    /// Schwellwert, Glättung, Sicherheitsabstand und Mindestfläche.
+    fn detection_options(&mut self, ui: &mut egui::Ui) {
+        ui.checkbox(&mut self.auto_threshold, tr("Schwellwert automatisch"));
+        ui.add_enabled(
+            !self.auto_threshold,
+            egui::Slider::new(&mut self.threshold, 0..=255).text(tr("Schwellwert")),
+        );
+        egui::Grid::new("remnant-options")
+            .num_columns(2)
+            .show(ui, |ui| {
+                let row = |ui: &mut egui::Ui,
+                           label: &str,
+                           help: &str,
+                           value: &mut f64,
+                           range: std::ops::RangeInclusive<f64>,
+                           suffix: &str| {
+                    ui.label(label).on_hover_text(help);
+                    ui.add(
+                        egui::DragValue::new(value)
+                            .range(range)
+                            .speed(0.1)
+                            .suffix(suffix),
+                    )
+                    .on_hover_text(help);
+                    ui.end_row();
+                };
+                row(
+                    ui,
+                    tr("Glättung"),
+                    tr("Gleicht Wabe, Lamellen und Kratzer aus; größere Werte runden Ecken ab."),
+                    &mut self.smoothing_mm,
+                    0.0..=20.0,
+                    " mm",
+                );
+                row(
+                    ui,
+                    tr("Sicherheitsabstand"),
+                    tr("Die Umrisse liegen um diesen Abstand innerhalb der erkannten Kante."),
+                    &mut self.margin_mm,
+                    0.0..=50.0,
+                    " mm",
+                );
+                row(
+                    ui,
+                    tr("Mindestfläche"),
+                    tr("Kleinere Reststücke werden ignoriert."),
+                    &mut self.min_area_cm2,
+                    0.0..=10000.0,
+                    " cm²",
+                );
+            });
+    }
+
+    /// Ergebnis der Erkennung, laufende Erkennung und Probleme.
+    fn result_summary(&self, ui: &mut egui::Ui) {
+        match &self.result {
+            Some((_, Ok(detection))) if !detection.remnants.is_empty() => {
+                let largest = detection.remnants[0].bounds();
+                ui.label(tr!(
+                    "{count} Reststück(e) · größtes etwa {width} × {height} mm",
+                    count = detection.remnants.len(),
+                    width = format!("{:.0}", largest[2]),
+                    height = format!("{:.0}", largest[3])
+                ));
+            }
+            Some((_, Ok(_))) => {
+                ui.label(tr("Kein Reststück gefunden; Einstellungen anpassen"));
+            }
+            Some((_, Err(error))) => {
+                ui.colored_label(crate::WARNING, error);
+            }
+            None => {}
+        }
+        if self.pending.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(tr("Erkennung läuft …"));
+            });
+        }
+        if let Some(problem) = &self.problem {
+            ui.colored_label(crate::WARNING, problem);
+        }
+        crate::form::caption(
+            ui,
+            tr(
+                "Die Umrisse stammen aus dem Kamerabild und sind nur so genau wie dessen Kalibrierung.",
+            ),
+        );
+    }
+
+    /// Anzeigen, Einfügen oder Verwerfen; jeder Knopf schließt den Dialog.
+    fn closing_buttons(
+        &mut self,
+        ui: &mut egui::Ui,
+        action: &mut Option<Action>,
+        close: &mut bool,
+    ) {
+        let found = matches!(&self.result, Some((_, Ok(d))) if !d.remnants.is_empty());
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(found, egui::Button::new(tr("Auf dem Bett anzeigen")))
+                .on_hover_text(tr("Umrisse bleiben nach dem Schließen sichtbar, bis sie verworfen werden."))
+                .clicked()
+            {
+                self.keep = true;
+                *close = true;
+            }
+            if ui
+                .add_enabled(found, egui::Button::new(tr("Als Teil einfügen")))
+                .on_hover_text(tr("Fügt die Umrisse als Schneid-Teil an ihrer Stelle ein, z. B. zum Zuschneiden. Löschen, wenn es nicht gelasert werden soll."))
+                .clicked()
+                && let Some((_, Ok(detection))) = &self.result
+            {
+                *action = Some(Action::InsertPart(detection.remnants.clone()));
+                *close = true;
+            }
+            if ui.button(tr("Verwerfen")).clicked() {
+                self.keep = false;
+                *close = true;
+            }
+        });
     }
 }

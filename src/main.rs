@@ -407,6 +407,60 @@ fn push_limited<T>(stack: &mut Vec<T>, snapshot: T) {
     }
 }
 
+/// Widerrufen und Wiederholen.
+struct History<T> {
+    /// Stände vor den letzten Werkzeug- oder Löschaktionen, der jüngste
+    /// zuletzt (höchstens `UNDO_STEPS`).
+    undo: Vec<T>,
+    /// Stände vor dem Widerrufen; verfallen mit der nächsten Aktion.
+    redo: Vec<T>,
+}
+
+impl<T> Default for History<T> {
+    fn default() -> Self {
+        Self {
+            undo: Vec::new(),
+            redo: Vec::new(),
+        }
+    }
+}
+
+impl<T> History<T> {
+    fn clear(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
+    }
+
+    /// Merkt `before` für Widerrufen; widerrufene Schritte lassen sich danach
+    /// nicht mehr wiederholen.
+    fn record(&mut self, before: T) {
+        push_limited(&mut self.undo, before);
+        self.redo.clear();
+    }
+
+    /// Der Stand vor der letzten Aktion; `current` kommt auf den Wiederholen-Stapel.
+    fn undo(&mut self, current: T) -> Option<T> {
+        let snapshot = self.undo.pop()?;
+        push_limited(&mut self.redo, current);
+        Some(snapshot)
+    }
+
+    /// Der zuletzt widerrufene Stand; `current` kommt auf den Widerrufen-Stapel.
+    fn redo(&mut self, current: T) -> Option<T> {
+        let snapshot = self.redo.pop()?;
+        push_limited(&mut self.undo, current);
+        Some(snapshot)
+    }
+
+    fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+}
+
 /// Name eines Teils für Listen; ohne Namen „Teil 2“ (Position in der Liste).
 fn part_title(name: &str, index: usize) -> String {
     if name.trim().is_empty() {
@@ -525,11 +579,7 @@ struct VisiCutR {
     vectorize: vectorize_ui::VectorizeUi,
     remnants: remnant_ui::RemnantUi,
     compose: compose_ui::ComposeUi,
-    /// Stände vor den letzten Werkzeug- oder Löschaktionen, der jüngste
-    /// zuletzt (höchstens `UNDO_STEPS`).
-    undo: Vec<Snapshot>,
-    /// Stände vor dem Widerrufen; verfallen mit der nächsten Aktion.
-    redo: Vec<Snapshot>,
+    history: History<Snapshot>,
     /// Fenster mit den Tastenkürzeln.
     show_shortcuts: bool,
     /// Bezugspunkt für X/Y und Größenänderungen (0, ½ oder 1 je Achse).
@@ -647,8 +697,7 @@ impl VisiCutR {
             vectorize: vectorize_ui::VectorizeUi::default(),
             remnants: remnant_ui::RemnantUi::default(),
             compose: compose_ui::ComposeUi::default(),
-            undo: Vec::new(),
-            redo: Vec::new(),
+            history: History::default(),
             show_shortcuts: false,
             reference: [0.0, 0.0],
             rotate_deg: 0.0,
@@ -1167,8 +1216,7 @@ impl VisiCutR {
     /// Ein anderes Projekt ersetzt das bisherige: dessen Stände dürfen nicht
     /// mehr zurückkommen, sonst sicherte ⌘S sie unter dem neuen Dateinamen.
     fn forget_history(&mut self) {
-        self.undo.clear();
-        self.redo.clear();
+        self.history.clear();
     }
 
     fn snapshot(&self) -> Snapshot {
@@ -2003,8 +2051,7 @@ impl VisiCutR {
     /// widerrufene Schritte lassen sich danach nicht mehr wiederholen.
     fn checkpoint(&mut self) {
         let snapshot = self.snapshot();
-        push_limited(&mut self.undo, snapshot);
-        self.redo.clear();
+        self.history.record(snapshot);
     }
 
     fn restore(&mut self, snapshot: Snapshot) {
@@ -2015,18 +2062,14 @@ impl VisiCutR {
     }
 
     fn undo_last(&mut self) {
-        if let Some(snapshot) = self.undo.pop() {
-            let current = self.snapshot();
-            push_limited(&mut self.redo, current);
+        if let Some(snapshot) = self.history.undo(self.snapshot()) {
             self.restore(snapshot);
             self.status = tr("Letzte Änderung widerrufen").into();
         }
     }
 
     fn redo_last(&mut self) {
-        if let Some(snapshot) = self.redo.pop() {
-            let current = self.snapshot();
-            push_limited(&mut self.undo, current);
+        if let Some(snapshot) = self.history.redo(self.snapshot()) {
             self.restore(snapshot);
             self.status = tr("Änderung wiederhergestellt").into();
         }
@@ -2728,8 +2771,8 @@ impl VisiCutR {
             Command::ClearCache => !session::states(&session::dir()).is_empty(),
             Command::Device(_) => !self.busy(),
             Command::Paste | Command::PasteInPlace => self.copied.is_some() && !self.busy(),
-            Command::Undo => !self.undo.is_empty() && !self.busy(),
-            Command::Redo => !self.redo.is_empty() && !self.busy(),
+            Command::Undo => self.history.can_undo() && !self.busy(),
+            Command::Redo => self.history.can_redo() && !self.busy(),
             Command::ExportPlf => self.texture.is_some() && !self.busy(),
             Command::ToggleCamera => self.devices.has_camera(),
             Command::RefreshCamera => self.devices.camera_shown() && !self.devices.camera_loading(),
@@ -5333,6 +5376,22 @@ fn main() -> eframe::Result {
 mod tests {
     use super::*;
     use visicut_core::project::Part;
+
+    #[test]
+    fn history_undoes_redoes_and_drops_redo_after_a_new_step() {
+        let mut history = History::default();
+        history.record(1);
+        history.record(2);
+        assert_eq!(history.undo(3), Some(2));
+        assert_eq!(history.redo(2), Some(3));
+        assert_eq!(history.undo(3), Some(2));
+        history.record(2);
+        assert!(!history.can_redo());
+        for step in 0..UNDO_STEPS + 5 {
+            history.record(step);
+        }
+        assert_eq!(history.undo.len(), UNDO_STEPS);
+    }
 
     #[test]
     fn window_icon_is_the_visicutr_logo() {

@@ -187,7 +187,10 @@ fn add_point(command: char, x: f64, y: f64) -> JsResult<()> {
             state.split = false;
         }
         let last = state.last;
-        let current = state.segments.last_mut().unwrap();
+        let current = state
+            .segments
+            .last_mut()
+            .expect("ein Segment wurde eben angelegt, falls keines da war");
         if current.path.is_empty()
             && command == 'L'
             && let Some((lx, ly)) = last

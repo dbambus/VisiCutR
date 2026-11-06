@@ -133,6 +133,8 @@ pub enum ImportError {
 }
 
 impl fmt::Display for ImportError {
+    // One flat match with a text per variant; splitting it would not help.
+    #[allow(clippy::too_many_lines)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let text = match self {
             Self::Io(error) => error.to_string(),

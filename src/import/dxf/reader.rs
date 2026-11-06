@@ -245,6 +245,7 @@ fn value_kind(code: i32) -> Option<Kind> {
 
 fn binary_pairs(bytes: &[u8]) -> Result<Vec<Pair>, DxfError> {
     let broken = || DxfError::BinaryDamaged;
+    const EXACT: &str = "take liefert genau so viele Bytes wie verlangt";
     // Sentinel "AutoCAD Binary DXF\r\n\x1a\0"; tolerate a lost '\r'.
     let start = bytes
         .iter()
@@ -283,10 +284,12 @@ fn binary_pairs(bytes: &[u8]) -> Result<Vec<Pair>, DxfError> {
                 at += 1;
                 text
             }
-            Kind::Double => f64::from_le_bytes(take(&mut at, 8)?.try_into().unwrap()).to_string(),
-            Kind::I16 => i16::from_le_bytes(take(&mut at, 2)?.try_into().unwrap()).to_string(),
-            Kind::I32 => i32::from_le_bytes(take(&mut at, 4)?.try_into().unwrap()).to_string(),
-            Kind::I64 => i64::from_le_bytes(take(&mut at, 8)?.try_into().unwrap()).to_string(),
+            Kind::Double => {
+                f64::from_le_bytes(take(&mut at, 8)?.try_into().expect(EXACT)).to_string()
+            }
+            Kind::I16 => i16::from_le_bytes(take(&mut at, 2)?.try_into().expect(EXACT)).to_string(),
+            Kind::I32 => i32::from_le_bytes(take(&mut at, 4)?.try_into().expect(EXACT)).to_string(),
+            Kind::I64 => i64::from_le_bytes(take(&mut at, 8)?.try_into().expect(EXACT)).to_string(),
             Kind::Bool => take(&mut at, 1)?[0].to_string(),
             Kind::Binary => {
                 let len = take(&mut at, 1)?[0] as usize;

@@ -81,7 +81,12 @@ pub fn mtext_lines(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let mut lines = vec![String::new()];
     let mut i = 0;
-    let push = |lines: &mut Vec<String>, c: char| lines.last_mut().unwrap().push(c);
+    let push = |lines: &mut Vec<String>, c: char| {
+        lines
+            .last_mut()
+            .expect("lines ist nie leer: beginnt mit einer Zeile, wird nur verlängert")
+            .push(c)
+    };
     while i < chars.len() {
         let c = chars[i];
         match c {

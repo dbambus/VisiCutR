@@ -223,6 +223,16 @@ pub(crate) fn scope_names(existing: &str, source: &str) -> Result<String, Compos
     if renamed.is_empty() {
         return Ok(source.to_string());
     }
+    Ok(renamed_source(source, &doc, &renamed))
+}
+
+/// `source` with the names in `renamed` replaced: attribute values, style
+/// sheets and `url(#…)` references.
+fn renamed_source(
+    source: &str,
+    doc: &roxmltree::Document,
+    renamed: &std::collections::HashMap<String, String>,
+) -> String {
     let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
     for node in doc.descendants().filter(|n| n.is_element()) {
         for attribute in node.attributes() {
@@ -254,7 +264,7 @@ pub(crate) fn scope_names(existing: &str, source: &str) -> Result<String, Compos
                 && let Some(end) = source[range.clone()].rfind("</").map(|i| range.start + i)
                 && start <= end
             {
-                edits.push((start..end, rename_css(&source[start..end], &renamed)));
+                edits.push((start..end, rename_css(&source[start..end], renamed)));
             }
         }
     }
@@ -268,7 +278,7 @@ pub(crate) fn scope_names(existing: &str, source: &str) -> Result<String, Compos
     }
     text.push_str(&source[position..]);
     // References in presentation attributes and style attributes.
-    for (old, new) in &renamed {
+    for (old, new) in renamed {
         for quote in ["", "'", "\""] {
             text = text.replace(
                 &format!("url({quote}#{old}{quote})"),
@@ -276,7 +286,7 @@ pub(crate) fn scope_names(existing: &str, source: &str) -> Result<String, Compos
             );
         }
     }
-    Ok(text)
+    text
 }
 
 fn is_name_char(c: char) -> bool {

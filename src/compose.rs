@@ -1036,7 +1036,7 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, Compos
     if project.svg.is_empty() {
         return Err(ComposeError::NoMotif);
     }
-    let [ax, ay, aw, ah] = settings.area_mm;
+    let [_, _, aw, ah] = settings.area_mm;
     if !settings.area_mm.iter().all(|v| v.is_finite()) || aw <= 0.0 || ah <= 0.0 {
         return Err(ComposeError::AreaSize);
     }
@@ -1048,8 +1048,45 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, Compos
     if parts.is_empty() {
         return Err(ComposeError::NoParts);
     }
+    let (instances, raster) = nesting_order(project, parts, settings.quantity)?;
+    let (mut placements, missing) = place_instances(parts, &raster, instances, settings);
+    if placements.is_empty() {
+        return Err(ComposeError::NothingFits);
+    }
+    // Output in drawing order of the parts so object numbers stay ordered.
+    placements.sort_by_key(|p| p.0);
+    let NestedBody {
+        body,
+        bounds,
+        new_ids,
+    } = nested_body(project, &shared, &placements)?;
+    let mut result = with_document(project, &body, bounds)?;
+    remap(&mut result, |old| {
+        new_ids.get(old).cloned().unwrap_or_default()
+    });
+    // Without a gap neighbouring parts share their edges; cut them once.
+    if settings.gap_mm == 0.0 {
+        result.remove_duplicate_lines = true;
+    }
+    Ok(Nested {
+        project: result,
+        placed: placements.len(),
+        missing,
+    })
+}
+
+/// A placed copy: (part, x, y, orientation).
+type Placement = (usize, f64, f64, Orientation);
+
+/// The copies to place, `quantity` of every part, in the order they are
+/// placed, and for every part whether it is engraved.
+fn nesting_order(
+    project: &Project,
+    parts: &[Part],
+    quantity: u32,
+) -> Result<(Vec<usize>, Vec<bool>), ComposeError> {
     let mut instances: Vec<usize> = (0..parts.len())
-        .flat_map(|p| std::iter::repeat_n(p, settings.quantity.max(1) as usize))
+        .flat_map(|p| std::iter::repeat_n(p, quantity.max(1) as usize))
         .collect();
     if instances.len() > MAX_COPIES {
         return Err(ComposeError::TooManyParts);
@@ -1073,6 +1110,18 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, Compos
             .cmp(&raster[*a])
             .then(area(*b).total_cmp(&area(*a)))
     });
+    Ok((instances, raster))
+}
+
+/// Places the copies one after another into the free rectangles of the
+/// sheet. Returns the placements and how many copies did not fit.
+fn place_instances(
+    parts: &[Part],
+    raster: &[bool],
+    instances: Vec<usize>,
+    settings: &NestSettings,
+) -> (Vec<Placement>, usize) {
+    let [ax, ay, aw, ah] = settings.area_mm;
     // Y ranges already covered by engravings: lines the laser engraves anyway.
     let mut engraved_rows: Vec<[f64; 2]> = Vec::new();
     let gap = settings.gap_mm;
@@ -1081,35 +1130,16 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, Compos
         .iter()
         .map(|p| orientations(p, settings.rotation))
         .collect();
-    // (part, x, y, orientation)
-    let mut placements: Vec<(usize, f64, f64, Orientation)> = Vec::new();
+    let mut placements: Vec<Placement> = Vec::new();
     let mut missing = 0;
     for part in instances {
-        let mut best: Option<(f64, f64, usize, Orientation)> = None;
-        for (index, rect) in free.iter().enumerate() {
-            for orientation in &orientations[part] {
-                let [pw, ph] = orientation.size;
-                let (pw, ph) = (pw + gap, ph + gap);
-                if pw <= rect[2] + 1e-9 && ph <= rect[3] + 1e-9 {
-                    // Engravings: fewest additional engrave lines, then the
-                    // position nearest the top left. Others: best short side
-                    // fit, then lowest position.
-                    let score = if raster[part] {
-                        let rows = [rect[1], rect[1] + ph - gap];
-                        (
-                            covered(&engraved_rows, Some(rows)) - covered(&engraved_rows, None),
-                            rect[1] + rect[0] * 1e-6,
-                        )
-                    } else {
-                        ((rect[2] - pw).min(rect[3] - ph), rect[1] + rect[0] * 1e-6)
-                    };
-                    if best.is_none_or(|b| (score.0, score.1) < (b.0, b.1)) {
-                        best = Some((score.0, score.1, index, *orientation));
-                    }
-                }
-            }
-        }
-        let Some((_, _, index, orientation)) = best else {
+        let best = best_spot(
+            &free,
+            &orientations[part],
+            raster[part].then_some(engraved_rows.as_slice()),
+            gap,
+        );
+        let Some((index, orientation)) = best else {
             missing += 1;
             continue;
         };
@@ -1122,11 +1152,60 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, Compos
         placements.push((part, rect[0], rect[1], orientation));
         split(&mut free, used);
     }
-    if placements.is_empty() {
-        return Err(ComposeError::NothingFits);
+    (placements, missing)
+}
+
+/// The free rectangle (by index) and orientation for the next copy of a
+/// part; `engraved_rows` are the rows engraved so far when the part is
+/// engraved. `None` if it fits nowhere.
+fn best_spot(
+    free: &[[f64; 4]],
+    orientations: &[Orientation],
+    engraved_rows: Option<&[[f64; 2]]>,
+    gap: f64,
+) -> Option<(usize, Orientation)> {
+    let mut best: Option<(f64, f64, usize, Orientation)> = None;
+    for (index, rect) in free.iter().enumerate() {
+        for orientation in orientations {
+            let [pw, ph] = orientation.size;
+            let (pw, ph) = (pw + gap, ph + gap);
+            if pw <= rect[2] + 1e-9 && ph <= rect[3] + 1e-9 {
+                // Engravings: fewest additional engrave lines, then the
+                // position nearest the top left. Others: best short side
+                // fit, then lowest position.
+                let score = if let Some(engraved_rows) = engraved_rows {
+                    let rows = [rect[1], rect[1] + ph - gap];
+                    (
+                        covered(engraved_rows, Some(rows)) - covered(engraved_rows, None),
+                        rect[1] + rect[0] * 1e-6,
+                    )
+                } else {
+                    ((rect[2] - pw).min(rect[3] - ph), rect[1] + rect[0] * 1e-6)
+                };
+                if best.is_none_or(|b| (score.0, score.1) < (b.0, b.1)) {
+                    best = Some((score.0, score.1, index, *orientation));
+                }
+            }
+        }
     }
-    // Output in drawing order of the parts so object numbers stay ordered.
-    placements.sort_by_key(|p| p.0);
+    best.map(|(_, _, index, orientation)| (index, orientation))
+}
+
+/// The placed copies as document text.
+struct NestedBody {
+    body: String,
+    /// Bounds of all copies on the bed.
+    bounds: [f64; 4],
+    /// New object numbers of every old object.
+    new_ids: Vec<Vec<usize>>,
+}
+
+/// The placed copies as document body.
+fn nested_body(
+    project: &Project,
+    shared: &Parts,
+    placements: &[Placement],
+) -> Result<NestedBody, ComposeError> {
     let mut body = String::new();
     let mut bounds = None;
     let mut new_ids: Vec<Vec<usize>> = vec![Vec::new(); selection::objects(&project.svg)?.len()];
@@ -1143,7 +1222,7 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, Compos
     );
     let mut previous_part = None;
     for (copy, (index, x, y, orientation)) in placements.iter().enumerate() {
-        let part = &parts[*index];
+        let part = &shared.parts[*index];
         let [mx, my] = orientation.min;
         let transform = if orientation.degrees == 0 {
             format!("translate({} {})", x - mx, y - my)
@@ -1184,18 +1263,10 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, Compos
             next += 1;
         }
     }
-    let mut result = with_document(project, &body, bounds.unwrap())?;
-    remap(&mut result, |old| {
-        new_ids.get(old).cloned().unwrap_or_default()
-    });
-    // Without a gap neighbouring parts share their edges; cut them once.
-    if settings.gap_mm == 0.0 {
-        result.remove_duplicate_lines = true;
-    }
-    Ok(Nested {
-        project: result,
-        placed: placements.len(),
-        missing,
+    Ok(NestedBody {
+        body,
+        bounds: bounds.unwrap(),
+        new_ids,
     })
 }
 
@@ -1662,10 +1733,6 @@ fn covered(ranges: &[[f64; 2]], extra: Option<[f64; 2]>) -> f64 {
     total + current.map_or(0.0, |[s, e]| e - s)
 }
 
-/// Bounds of the content without stroke width; empty groups do not count.
-/// The laser cuts along the centre line, so with a gap of 0 mm adjacent
-/// contours lie exactly on top of each other and "Doppelte Linien
-/// entfernen" cuts them once.
 /// A way to place a part: turned by `degrees` clockwise about the origin,
 /// its enclosing rectangle starts at `min` and has `size` (mm).
 #[derive(Clone, Copy, Debug)]
@@ -1829,6 +1896,10 @@ fn ink_bounds(group: &usvg::Group) -> Option<tiny_skia::Rect> {
     bounds
 }
 
+/// Bounds of the content without stroke width; empty groups do not count.
+/// The laser cuts along the centre line, so with a gap of 0 mm adjacent
+/// contours lie exactly on top of each other and "Doppelte Linien
+/// entfernen" cuts them once.
 fn content_bounds(group: &usvg::Group) -> Option<tiny_skia::Rect> {
     let mut bounds: Option<tiny_skia::Rect> = None;
     for node in group.children() {
@@ -1854,6 +1925,45 @@ fn parts(project: &Project) -> Result<Parts, ComposeError> {
     let doc = parse(source)?;
     let selectable = selection::selectable_nodes(&doc);
     let root = doc.root_element();
+    let tree = usvg::Tree::from_str(source, &svg::options()).map_err(svg::SvgError::Unreadable)?;
+    let size = tree.size();
+    let root_start = root_start(source, root, size)?;
+    let mut globals = String::new();
+    let mut parts = Vec::new();
+    for node in part_candidates(root) {
+        let objects: Vec<usize> = selectable
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| **n == node || n.ancestors().any(|a| a == node))
+            .map(|(i, _)| i)
+            .collect();
+        if objects.is_empty() {
+            globals.push_str(&source[node.range()]);
+            continue;
+        }
+        parts.push(source_part(source, root, node, objects)?);
+    }
+    let mut result = Parts {
+        root_start,
+        globals,
+        parts,
+    };
+    let scale = (
+        project.width_mm as f64 / size.width() as f64,
+        project.height_mm as f64 / size.height() as f64,
+    );
+    let mut kept = Vec::new();
+    for part in std::mem::take(&mut result.parts) {
+        kept.extend(measured(project, &result, part, scale)?);
+    }
+    result.parts = kept;
+    Ok(result)
+}
+
+/// Top-level elements and the elements of top-level layers.
+fn part_candidates<'a, 'input>(
+    root: roxmltree::Node<'a, 'input>,
+) -> Vec<roxmltree::Node<'a, 'input>> {
     let mut candidates = Vec::new();
     for child in root.children().filter(|n| n.is_element()) {
         let layer = child.tag_name().name() == "g"
@@ -1865,97 +1975,88 @@ fn parts(project: &Project) -> Result<Parts, ComposeError> {
             candidates.push(child);
         }
     }
-    let tree = usvg::Tree::from_str(source, &svg::options()).map_err(svg::SvgError::Unreadable)?;
-    let size = tree.size();
-    let root_start = root_start(source, root, size)?;
-    let (sx, sy) = (
-        project.width_mm as f64 / size.width() as f64,
-        project.height_mm as f64 / size.height() as f64,
-    );
-    let mut globals = String::new();
-    let mut parts = Vec::new();
-    for node in candidates {
-        let objects: Vec<usize> = selectable
-            .iter()
-            .enumerate()
-            .filter(|(_, n)| **n == node || n.ancestors().any(|a| a == node))
-            .map(|(i, _)| i)
-            .collect();
-        if objects.is_empty() {
-            globals.push_str(&source[node.range()]);
-            continue;
-        }
-        let mut opening = Vec::new();
-        let mut closing = Vec::new();
-        let ancestors: Vec<_> = node
-            .ancestors()
-            .skip(1)
-            .take_while(|a| *a != root)
-            .collect();
-        for ancestor in ancestors.iter().rev() {
-            let range = ancestor.range();
-            let end = start_tag_end(source, range.start).ok_or(ComposeError::GroupIncomplete)?;
-            opening.push(range.start..end);
-            let close = source[range.clone()].rfind("</").map(|i| range.start + i);
-            closing.push(close.map_or(String::new(), |c| source[c..range.end].to_string()));
-        }
-        let mut ids = Vec::new();
-        for n in ancestors.iter().copied().chain(node.descendants()) {
-            for attribute in n.attributes() {
-                if attribute.namespace().is_none()
-                    && attribute.name() == "id"
-                    && let Some(value) = value_range(source, attribute.range())
-                {
-                    ids.push(value.end);
-                }
+    candidates
+}
+
+/// Where the part `node` with its `objects` lies in the source; bounds and
+/// hull still empty.
+fn source_part(
+    source: &str,
+    root: roxmltree::Node,
+    node: roxmltree::Node,
+    objects: Vec<usize>,
+) -> Result<Part, ComposeError> {
+    let mut opening = Vec::new();
+    let mut closing = Vec::new();
+    let ancestors: Vec<_> = node
+        .ancestors()
+        .skip(1)
+        .take_while(|a| *a != root)
+        .collect();
+    for ancestor in ancestors.iter().rev() {
+        let range = ancestor.range();
+        let end = start_tag_end(source, range.start).ok_or(ComposeError::GroupIncomplete)?;
+        opening.push(range.start..end);
+        let close = source[range.clone()].rfind("</").map(|i| range.start + i);
+        closing.push(close.map_or(String::new(), |c| source[c..range.end].to_string()));
+    }
+    let mut ids = Vec::new();
+    for n in ancestors.iter().copied().chain(node.descendants()) {
+        for attribute in n.attributes() {
+            if attribute.namespace().is_none()
+                && attribute.name() == "id"
+                && let Some(value) = value_range(source, attribute.range())
+            {
+                ids.push(value.end);
             }
         }
-        ids.sort_unstable();
-        parts.push(Part {
-            objects,
-            bounds: [0.0; 4],
-            hull: Vec::new(),
-            opening,
-            closing,
-            body: node.range(),
-            ids,
-        });
     }
-    let mut result = Parts {
-        root_start,
-        globals,
-        parts,
+    ids.sort_unstable();
+    Ok(Part {
+        objects,
+        bounds: [0.0; 4],
+        hull: Vec::new(),
+        opening,
+        closing,
+        body: node.range(),
+        ids,
+    })
+}
+
+/// The part with its bounds and hull on the bed, measured alone with the
+/// shared definitions; `scale` is mm per canvas pixel. `None` if it draws
+/// nothing.
+fn measured(
+    project: &Project,
+    shared: &Parts,
+    mut part: Part,
+    (sx, sy): (f64, f64),
+) -> Result<Option<Part>, ComposeError> {
+    let alone = format!(
+        "{}{}{}</svg>",
+        shared.root_start,
+        shared.globals,
+        shared.text(&project.svg, &part, None)
+    );
+    let tree = usvg::Tree::from_str(&alone, &svg::options())?;
+    let Some(b) = content_bounds(tree.root()) else {
+        return Ok(None);
     };
-    let mut kept = Vec::new();
-    for mut part in std::mem::take(&mut result.parts) {
-        let alone = format!(
-            "{}{}{}</svg>",
-            result.root_start,
-            result.globals,
-            result.text(source, &part, None)
-        );
-        let tree = usvg::Tree::from_str(&alone, &svg::options())?;
-        let Some(b) = content_bounds(tree.root()) else {
-            continue;
-        };
-        part.bounds = [
-            project.x_mm as f64 + b.x() as f64 * sx,
-            project.y_mm as f64 + b.y() as f64 * sy,
-            b.width() as f64 * sx,
-            b.height() as f64 * sy,
-        ];
-        let mut points = Vec::new();
-        content_points(tree.root(), &mut points);
-        part.hull = convex_hull(
-            points
-                .into_iter()
-                .map(|[x, y]| [project.x_mm as f64 + x * sx, project.y_mm as f64 + y * sy])
-                .collect(),
-        );
-        kept.push(part);
-    }
-    result.parts = kept;
-    Ok(result)
+    part.bounds = [
+        project.x_mm as f64 + b.x() as f64 * sx,
+        project.y_mm as f64 + b.y() as f64 * sy,
+        b.width() as f64 * sx,
+        b.height() as f64 * sy,
+    ];
+    let mut points = Vec::new();
+    content_points(tree.root(), &mut points);
+    part.hull = convex_hull(
+        points
+            .into_iter()
+            .map(|[x, y]| [project.x_mm as f64 + x * sx, project.y_mm as f64 + y * sy])
+            .collect(),
+    );
+    Ok(Some(part))
 }
 
 /// Splits the free rectangles around a used one and drops contained ones.

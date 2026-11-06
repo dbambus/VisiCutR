@@ -17,6 +17,9 @@ const MAX_DEPTH: usize = 128;
 /// The thinnest line ("hairline") is 0.1 mm, as in the PDF import.
 const HAIRLINE_PT: f64 = 0.1 * 72.0 / 25.4;
 
+/// Runs the operator `name` if it belongs to the family; `Ok(false)` if not.
+type OperatorFamily = fn(&mut Machine, &str) -> Result<bool, EpsError>;
+
 /// Part of the graphics state that `gsave` and `grestore` save and restore.
 #[derive(Clone)]
 struct GState {
@@ -312,6 +315,26 @@ impl Machine {
 
     /// Runs one operator. Anything not listed here is unsupported.
     fn operator(&mut self, name: &str) -> Result<(), EpsError> {
+        let families: [OperatorFamily; 8] = [
+            Self::stack_op,
+            Self::dict_op,
+            Self::arithmetic_op,
+            Self::comparison_op,
+            Self::control_op,
+            Self::path_op,
+            Self::paint_op,
+            Self::state_op,
+        ];
+        for family in families {
+            if family(self, name)? {
+                return Ok(());
+            }
+        }
+        Err(EpsError::unsupported(name))
+    }
+
+    /// Operand stack operators. `Ok(false)` when `name` is not one of them.
+    fn stack_op(&mut self, name: &str) -> Result<bool, EpsError> {
         match name {
             // Operand stack
             "pop" => {
@@ -361,7 +384,14 @@ impl Machine {
                     self.operands[len - n..].rotate_right(k);
                 }
             }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
 
+    /// Dictionary operators. `Ok(false)` when `name` is not one of them.
+    fn dict_op(&mut self, name: &str) -> Result<bool, EpsError> {
+        match name {
             // Dictionaries
             "def" => {
                 let value = self.pop_any(name)?;
@@ -375,7 +405,14 @@ impl Machine {
                 let value = self.lookup(&key).cloned().ok_or(EpsError::Undefined(key))?;
                 self.operands.push(value);
             }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
 
+    /// Arithmetic operators. `Ok(false)` when `name` is not one of them.
+    fn arithmetic_op(&mut self, name: &str) -> Result<bool, EpsError> {
+        match name {
             // Arithmetic
             "add" | "sub" | "mul" | "div" => {
                 let b = self.pop_num(name)?;
@@ -416,7 +453,14 @@ impl Machine {
                 let degrees = self.pop_num(name)?;
                 self.push_num(degrees.to_radians().cos(), name)?;
             }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
 
+    /// Comparison and boolean operators. `Ok(false)` when `name` is not one of them.
+    fn comparison_op(&mut self, name: &str) -> Result<bool, EpsError> {
+        match name {
             // Comparison and booleans, for `if` and `ifelse`
             "eq" | "ne" => {
                 let b = self.pop_any(name)?;
@@ -441,7 +485,14 @@ impl Machine {
             }
             "true" => self.operands.push(Obj::Bool(true)),
             "false" => self.operands.push(Obj::Bool(false)),
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
 
+    /// Control operators. `Ok(false)` when `name` is not one of them.
+    fn control_op(&mut self, name: &str) -> Result<bool, EpsError> {
+        match name {
             // Control
             "if" => {
                 let body = self.pop_proc(name)?;
@@ -492,7 +543,14 @@ impl Machine {
             "showpage" => {}
             // Procedures are not bound to their operators; nothing to do.
             "bind" => {}
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
 
+    /// Path construction operators. `Ok(false)` when `name` is not one of them.
+    fn path_op(&mut self, name: &str) -> Result<bool, EpsError> {
+        match name {
             // Path construction
             "newpath" => self.path.clear(),
             "moveto" => {
@@ -550,7 +608,14 @@ impl Machine {
                 }
                 self.path.close();
             }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
 
+    /// Painting (the path is consumed), colour and line width. `Ok(false)` when `name` is not one of them.
+    fn paint_op(&mut self, name: &str) -> Result<bool, EpsError> {
+        match name {
             // Painting: the path is consumed
             "fill" => self.fill(false),
             "eofill" => self.fill(true),
@@ -576,7 +641,14 @@ impl Machine {
             "setlinewidth" => {
                 self.state.line_width = self.pop_num(name)?.abs();
             }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
 
+    /// Graphics state and transformation operators. `Ok(false)` when `name` is not one of them.
+    fn state_op(&mut self, name: &str) -> Result<bool, EpsError> {
+        match name {
             // Graphics state and transformations
             "gsave" => self.saved.push(self.state.clone()),
             "grestore" => {
@@ -604,10 +676,9 @@ impl Machine {
             "setmatrix" => {
                 self.state.ctm = self.pop_matrix(name)?;
             }
-
-            _ => return Err(EpsError::unsupported(name)),
+            _ => return Ok(false),
         }
-        Ok(())
+        Ok(true)
     }
 
     fn concat(&mut self, matrix: Matrix) {

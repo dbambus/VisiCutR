@@ -531,11 +531,7 @@ struct VisiCutR {
     /// Objekte in den Farben ihrer Bearbeitung (`ltt::processing_preview`)
     /// und der Stand, für den sie gilt.
     live: Option<(u64, Option<egui::TextureHandle>)>,
-    /// Umriss des Objekts unter der Maus in der Objektliste (mm relativ zur
-    /// Motivecke) mit dem Stand und Objekt, für das er gilt.
-    hover_outline: Option<(u64, usize, Vec<visicut_core::geometry::Contour>)>,
-    /// Umrisse aller Objekte für den Treffertest auf der Arbeitsfläche.
-    all_outlines: Option<(u64, Vec<Vec<visicut_core::geometry::Contour>>)>,
+    canvas: CanvasView,
     /// Nullpunkt des Geräts beim letzten Bild (unten links?); ein Wechsel
     /// setzt den Standard-Bezugspunkt.
     origin_bottom_left: Option<bool>,
@@ -557,15 +553,8 @@ struct VisiCutR {
     dirty: bool,
     proportional: bool,
     allow_close: bool,
-    zoom: f32,
-    /// Bildpunkte je mm auf dem Bildschirm, zuletzt in `bed` berechnet.
-    view_scale: f32,
-    /// Sichtbarer Teil des Betts (x, y, Breite, Höhe in mm), zuletzt in `bed`
-    /// bestimmt; leer, solange das Bett nicht gezeigt wurde.
-    visible_mm: [f32; 4],
     /// Zuletzt kopiertes Teil (für Einfügen aus dem Menü und ⌘F).
     copied: Option<visicut_core::project::Part>,
-    show_grid: bool,
     /// Projekt ist vollständig und passt aufs Bett (pro Bild neu bestimmt).
     sendable: bool,
     preview: preview_ui::PreviewUi,
@@ -585,8 +574,6 @@ struct VisiCutR {
     /// Bezugspunkt für X/Y und Größenänderungen (0, ½ oder 1 je Achse).
     reference: [f32; 2],
     rotate_deg: f32,
-    /// Ziehen an einem Anfasser des gewählten Teils.
-    handle_drag: Option<HandleDrag>,
     /// Sprache und zuletzt geöffnete Dateien.
     settings: settings::AppSettings,
     /// Laufende Update-Prüfung (`true`: von Hand gestartet) und gefundenes Release.
@@ -637,6 +624,24 @@ impl Pending {
     }
 }
 
+/// Ansicht der Arbeitsfläche: Zoom, sichtbarer Ausschnitt, Hervorhebung und Anfasser.
+struct CanvasView {
+    /// Umriss des Objekts unter der Maus in der Objektliste (mm relativ zur
+    /// Motivecke) mit dem Stand und Objekt, für das er gilt.
+    hover_outline: Option<(u64, usize, Vec<visicut_core::geometry::Contour>)>,
+    /// Umrisse aller Objekte für den Treffertest auf der Arbeitsfläche.
+    all_outlines: Option<(u64, Vec<Vec<visicut_core::geometry::Contour>>)>,
+    zoom: f32,
+    /// Bildpunkte je mm auf dem Bildschirm, zuletzt in `bed` berechnet.
+    view_scale: f32,
+    /// Sichtbarer Teil des Betts (x, y, Breite, Höhe in mm), zuletzt in `bed`
+    /// bestimmt; leer, solange das Bett nicht gezeigt wurde.
+    visible_mm: [f32; 4],
+    show_grid: bool,
+    /// Ziehen an einem Anfasser des gewählten Teils.
+    handle_drag: Option<HandleDrag>,
+}
+
 impl VisiCutR {
     fn new(cc: &eframe::CreationContext<'_>, launch: instance::Launch) -> Self {
         // Erster Start nach der Umbenennung: Einstellungen von VisiCutRust übernehmen.
@@ -665,8 +670,6 @@ impl VisiCutR {
             project: Project::default(),
             texture: None,
             live: None,
-            hover_outline: None,
-            all_outlines: None,
             part_textures: Vec::new(),
             origin_bottom_left: None,
             status: tr("Datei öffnen, hierher ziehen oder das Beispiel öffnen").into(),
@@ -679,11 +682,16 @@ impl VisiCutR {
             dirty: false,
             proportional: true,
             allow_close: false,
-            zoom: 1.0,
-            view_scale: 1.0,
-            visible_mm: [0.0; 4],
+            canvas: CanvasView {
+                zoom: 1.0,
+                view_scale: 1.0,
+                visible_mm: [0.0; 4],
+                show_grid: true,
+                hover_outline: None,
+                all_outlines: None,
+                handle_drag: None,
+            },
             copied: None,
-            show_grid: true,
             sendable: false,
             pending: Pending::default(),
             show_preview: false,
@@ -701,7 +709,6 @@ impl VisiCutR {
             show_shortcuts: false,
             reference: [0.0, 0.0],
             rotate_deg: 0.0,
-            handle_drag: None,
             settings,
             update_check: None,
             update_found: None,
@@ -1357,7 +1364,7 @@ impl VisiCutR {
         if self.busy() {
             return;
         }
-        let view = (!in_place).then_some(self.visible_mm);
+        let view = (!in_place).then_some(self.canvas.visible_mm);
         let pasted = visicut_core::compose::paste_part(&self.project, part, view)
             .map_err(String::from)
             .and_then(|project| Ok((self.textures_for(ctx, &project)?, project)));
@@ -2777,8 +2784,8 @@ impl VisiCutR {
             Command::ToggleCamera => self.devices.has_camera(),
             Command::RefreshCamera => self.devices.camera_shown() && !self.devices.camera_loading(),
             Command::Remnants => self.devices.has_camera() && !self.busy(),
-            Command::ZoomIn => self.zoom < workspace::ZOOM_MAX,
-            Command::ZoomOut => self.zoom > workspace::ZOOM_MIN,
+            Command::ZoomIn => self.canvas.zoom < workspace::ZOOM_MAX,
+            Command::ZoomOut => self.canvas.zoom > workspace::ZOOM_MIN,
             Command::Save
             | Command::SaveAs
             | Command::Quit
@@ -2813,15 +2820,16 @@ impl VisiCutR {
             Command::ExportPlf => self.export_plf(),
             Command::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Command::Devices => self.show_settings(SettingsPage::Devices),
-            Command::ToggleGrid => self.show_grid = !self.show_grid,
+            Command::ToggleGrid => self.canvas.show_grid = !self.canvas.show_grid,
             Command::ToggleCamera => self.devices.toggle_camera(&self.project),
             Command::RefreshCamera => self.devices.refresh_camera(&self.project),
             Command::Remnants => self.remnants.open(&mut self.devices, &self.project),
-            Command::ZoomIn => self.zoom = workspace::zoom_in(self.zoom),
-            Command::ZoomOut => self.zoom = workspace::zoom_out(self.zoom),
-            Command::ZoomFit => self.zoom = 1.0,
+            Command::ZoomIn => self.canvas.zoom = workspace::zoom_in(self.canvas.zoom),
+            Command::ZoomOut => self.canvas.zoom = workspace::zoom_out(self.canvas.zoom),
+            Command::ZoomFit => self.canvas.zoom = 1.0,
             Command::ZoomActual => {
-                self.zoom = workspace::actual_size_zoom(self.view_scale / self.zoom)
+                self.canvas.zoom =
+                    workspace::actual_size_zoom(self.canvas.view_scale / self.canvas.zoom)
             }
             Command::Manual => ctx.open_url(egui::OpenUrl::new_tab(format!(
                 "{}#readme",
@@ -2981,7 +2989,7 @@ impl VisiCutR {
             button = button.shortcut_text(ui.ctx().format_shortcut(&shortcut));
         }
         let checked = match command {
-            Command::ToggleGrid => Some(self.show_grid),
+            Command::ToggleGrid => Some(self.canvas.show_grid),
             Command::ToggleCamera => Some(self.devices.camera_shown()),
             _ => None,
         };
@@ -3433,7 +3441,7 @@ impl VisiCutR {
     /// Zuordnung geändert haben; reines Verschieben verschiebt das Bild.
     fn refresh_live(&mut self, ctx: &egui::Context) {
         // Während des Ziehens an einem Anfasser wird das Bild nur gestreckt.
-        if self.handle_drag.is_some() {
+        if self.canvas.handle_drag.is_some() {
             return;
         }
         use std::hash::{Hash, Hasher};
@@ -3444,7 +3452,7 @@ impl VisiCutR {
         // Texturgröße folgt der Anzeige (in groben Stufen, damit nicht jeder
         // Mausradschritt neu rechnet).
         let [_, _, bw, bh] = p.bounds();
-        let shown = (bw.max(bh) * self.view_scale * ctx.pixels_per_point()).max(1.0);
+        let shown = (bw.max(bh) * self.canvas.view_scale * ctx.pixels_per_point()).max(1.0);
         let shown = 2f32.powf((shown.log2() * 2.0).ceil() / 2.0);
         let max_px = (shown * 1.5).clamp(800.0, 4096.0);
         // Linien mindestens 1,5 Bildschirmpunkte breit, sonst verschwinden sie
@@ -3604,7 +3612,7 @@ impl VisiCutR {
             // Gruppen von links nach rechts; was nicht neben den Titel passt,
             // wandert von rechts beginnend in das Menü „…“.
             let camera = format!("📷 {}", tr("Kamera"));
-            let zoom = format!("{:.0} %", self.zoom * 100.0);
+            let zoom = format!("{:.0} %", self.canvas.zoom * 100.0);
             let has_camera = self.devices.has_camera();
             let mut groups: Vec<(ViewGroup, Vec<&str>)> = Vec::new();
             if has_camera {
@@ -3705,7 +3713,7 @@ impl VisiCutR {
                             ui,
                             Command::ToggleGrid,
                             tr("Raster"),
-                            self.show_grid,
+                            self.canvas.show_grid,
                         )),
                         ViewGroup::Camera => {
                             if self.devices.camera_loading() {
@@ -3867,9 +3875,9 @@ impl VisiCutR {
         let bed_mm = Vec2::new(self.project.bed_width_mm, self.project.bed_height_mm);
         let available = ui.available_size() - Vec2::splat(RULER + MARGIN);
         self.wheel_zoom(ui);
-        let scale =
-            workspace::fit_scale([available.x, available.y], [bed_mm.x, bed_mm.y]) * self.zoom;
-        self.view_scale = scale;
+        let scale = workspace::fit_scale([available.x, available.y], [bed_mm.x, bed_mm.y])
+            * self.canvas.zoom;
+        self.canvas.view_scale = scale;
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
             let size = bed_mm * scale + Vec2::splat(RULER + MARGIN);
             let (rect, response) = ui.allocate_exact_size(size, Sense::click());
@@ -3883,7 +3891,7 @@ impl VisiCutR {
             if shown.is_positive() {
                 let min = view.to_mm(shown.min);
                 let size = shown.size() / scale;
-                self.visible_mm = [min[0], min[1], size.x, size.y];
+                self.canvas.visible_mm = [min[0], min[1], size.x, size.y];
             }
             self.rulers(ui.painter(), view);
             let painter = ui.painter().with_clip_rect(shown);
@@ -3916,8 +3924,8 @@ impl VisiCutR {
         }
         let wheel = ui.input(|i| i.raw_scroll_delta.y);
         if wheel != 0.0 {
-            self.zoom =
-                (self.zoom * (wheel * 0.002).exp()).clamp(workspace::ZOOM_MIN, workspace::ZOOM_MAX);
+            self.canvas.zoom = (self.canvas.zoom * (wheel * 0.002).exp())
+                .clamp(workspace::ZOOM_MIN, workspace::ZOOM_MAX);
             ui.input_mut(|i| {
                 i.raw_scroll_delta = Vec2::ZERO;
                 i.smooth_scroll_delta = Vec2::ZERO;
@@ -3956,7 +3964,7 @@ impl VisiCutR {
         let BedView { rect: bed, scale } = view;
         painter.rect_filled(bed, 0.0, Color32::WHITE);
         let camera = self.devices.paint_camera(painter, bed);
-        if self.show_grid && !camera {
+        if self.canvas.show_grid && !camera {
             let step = workspace::grid_step_mm(scale);
             // Linien an den Linealzahlen kräftiger.
             let labels = workspace::ruler_step_mm(scale);
@@ -4159,18 +4167,23 @@ impl VisiCutR {
             .input(|i| i.pointer.hover_pos())
             .filter(|p| bed.contains(*p) && ui.rect_contains_pointer(bed));
         self.jobs.canvas_hover = match pointer {
-            Some(pos) if objects_mode && self.handle_drag.is_none() => {
-                if self.all_outlines.as_ref().is_none_or(|(k, _)| *k != key) {
+            Some(pos) if objects_mode && self.canvas.handle_drag.is_none() => {
+                if self
+                    .canvas
+                    .all_outlines
+                    .as_ref()
+                    .is_none_or(|(k, _)| *k != key)
+                {
                     let outlines =
                         visicut_core::geometry::object_outlines(&self.project).unwrap_or_default();
-                    self.all_outlines = Some((key, outlines));
+                    self.canvas.all_outlines = Some((key, outlines));
                 }
                 let [x, y] = view.to_mm(pos);
                 let mm = [
                     f64::from(x - self.project.x_mm),
                     f64::from(y - self.project.y_mm),
                 ];
-                self.all_outlines.as_ref().and_then(|(_, outlines)| {
+                self.canvas.all_outlines.as_ref().and_then(|(_, outlines)| {
                     visicut_core::geometry::object_at(outlines, mm, f64::from(4.0 / scale))
                 })
             }
@@ -4181,15 +4194,16 @@ impl VisiCutR {
             return;
         };
         if !self
+            .canvas
             .hover_outline
             .as_ref()
             .is_some_and(|(k, i, _)| *k == key && *i == index)
         {
             let outline =
                 visicut_core::geometry::object_outline(&self.project, index).unwrap_or_default();
-            self.hover_outline = Some((key, index, outline));
+            self.canvas.hover_outline = Some((key, index, outline));
         }
-        if let Some((_, _, outline)) = &self.hover_outline {
+        if let Some((_, _, outline)) = &self.canvas.hover_outline {
             let origin = [self.project.x_mm as f64, self.project.y_mm as f64];
             for contour in outline {
                 let points: Vec<Pos2> = contour
@@ -4299,11 +4313,11 @@ impl VisiCutR {
                 )
                 .on_hover_cursor(cursor);
             if response.drag_started() {
-                self.handle_drag = Some(HandleDrag::Resize(rect_mm));
+                self.canvas.handle_drag = Some(HandleDrag::Resize(rect_mm));
             }
             if response.dragged()
                 && let (Some(HandleDrag::Resize(start)), Some(pointer)) =
-                    (self.handle_drag, response.interact_pointer_pos())
+                    (self.canvas.handle_drag, response.interact_pointer_pos())
             {
                 let proportional = self.proportional != shift;
                 let [x, y, w, h] =
@@ -4313,7 +4327,7 @@ impl VisiCutR {
                 self.dirty = true;
             }
             if response.drag_stopped() {
-                self.handle_drag = None;
+                self.canvas.handle_drag = None;
             }
             painter.rect(
                 Rect::from_center_size(pos, Vec2::splat(7.0)),
@@ -4347,14 +4361,14 @@ impl VisiCutR {
         if response.drag_started()
             && let Some(start) = response.interact_pointer_pos()
         {
-            self.handle_drag = Some(HandleDrag::Rotate {
+            self.canvas.handle_drag = Some(HandleDrag::Rotate {
                 start,
                 degrees: 0.0,
             });
         }
         if response.dragged()
             && let (Some(HandleDrag::Rotate { start, .. }), Some(pointer)) =
-                (self.handle_drag, response.interact_pointer_pos())
+                (self.canvas.handle_drag, response.interact_pointer_pos())
         {
             let center = motif.center();
             let degrees = workspace::drag_rotation(
@@ -4365,23 +4379,23 @@ impl VisiCutR {
             )
             // Nur ganze Grad, wie im Eingabefeld.
             .round();
-            self.handle_drag = Some(HandleDrag::Rotate { start, degrees });
+            self.canvas.handle_drag = Some(HandleDrag::Rotate { start, degrees });
         }
         if response.drag_stopped() {
-            if let Some(HandleDrag::Rotate { degrees, .. }) = self.handle_drag
+            if let Some(HandleDrag::Rotate { degrees, .. }) = self.canvas.handle_drag
                 && degrees.abs() >= 0.1
             {
                 // Dreht wie „Drehen“ im Inspektor um die Mitte.
                 self.rotate_deg = degrees;
                 *clicked = Some(Command::RotateBy);
             }
-            self.handle_drag = None;
+            self.canvas.handle_drag = None;
         }
         let painter = ui.painter();
         painter.line_segment([edge, knob], handle_stroke);
         painter.circle(knob, 4.5, Color32::WHITE, handle_stroke);
         // Vorschau der Drehung: Motiv und Rahmen gedreht um die Mitte.
-        if let Some(HandleDrag::Rotate { degrees, .. }) = self.handle_drag {
+        if let Some(HandleDrag::Rotate { degrees, .. }) = self.canvas.handle_drag {
             let angle = degrees.to_radians();
             egui::Image::new((texture, motif.size()))
                 .rotate(angle, Vec2::splat(0.5))
@@ -5161,7 +5175,10 @@ impl eframe::App for VisiCutR {
         if let Some(object) = self.jobs.take_deleted_object() {
             self.delete_objects(ctx, &[object]);
         }
-        match self.compose.windows(ctx, &self.project, self.visible_mm) {
+        match self
+            .compose
+            .windows(ctx, &self.project, self.canvas.visible_mm)
+        {
             Some(Ok((mut project, notes))) => {
                 // Bearbeiteter Text mit anderer Bearbeitung: Laserwerte aus dem
                 // Profil, ohne Profil Markieren und Gravieren mit 0 %.

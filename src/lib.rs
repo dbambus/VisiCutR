@@ -24,6 +24,7 @@ pub mod selection;
 pub mod session;
 pub mod shift_calibration;
 pub mod svg;
+pub(crate) mod svg_edit;
 pub mod svg_import;
 pub mod timeline;
 pub mod update;

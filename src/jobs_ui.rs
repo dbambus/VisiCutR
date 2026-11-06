@@ -357,7 +357,7 @@ fn unique_id(materials: &[Material]) -> String {
     (materials.len()..)
         .map(|n| format!("eigen-{n}"))
         .find(|id| !materials.iter().any(|m| &m.id == id))
-        .expect("unbounded range")
+        .expect("unbegrenzter Bereich enthält immer eine freie Kennung")
 }
 
 pub fn new_material(materials: &mut Vec<Material>) -> usize {
@@ -405,90 +405,12 @@ fn profile_table(ui: &mut egui::Ui, material: &mut Material, drop: &mut Option<u
                     ui.add_space(6.0);
                     ui.end_row();
                 }
-                let mut value = *thickness;
-                let changed = ui
-                    .add_sized(
-                        [72.0, height],
-                        egui::DragValue::new(&mut value)
-                            .range(0.0..=1000.0)
-                            .suffix(" mm"),
-                    )
-                    .on_hover_text(tr("Stärke aller Profile dieser Zeile"))
-                    .changed();
-                if changed {
-                    for i in members {
-                        material.profiles[*i].thickness_mm = value;
-                    }
-                }
-                let complete = members.len() >= Operation::ALL.len();
-                if crate::object_bar::list_button(
-                    ui,
-                    crate::object_bar::Icon::Plus,
-                    !complete,
-                    tr("Verfahren für diese Stärke hinzufügen"),
-                ) {
+                if thickness_row(ui, &mut material.profiles, *thickness, members, height) {
                     add_to = Some(*thickness);
                 }
                 ui.end_row();
                 for &i in members {
-                    let profile = &mut material.profiles[i];
-                    ui.label("");
-                    ui.horizontal(|ui| {
-                        let color = crate::preview_ui::operation_color(profile.operation);
-                        let (bar, _) =
-                            ui.allocate_exact_size(egui::vec2(4.0, 20.0), egui::Sense::hover());
-                        ui.painter().rect_filled(bar, 2.0, color);
-                        crate::form::Dropdown::from_id_salt(("profile", i))
-                            .selected_text(
-                                egui::RichText::new(operation_title(profile.operation))
-                                    .color(color),
-                            )
-                            .show_ui(ui, |ui| {
-                                // Neutral hinterlegt: auf dem Orange der Auswahl
-                                // wären die Verfahrensfarben nicht lesbar.
-                                ui.visuals_mut().selection.bg_fill = egui::Color32::from_gray(222);
-                                for o in Operation::ALL {
-                                    let text = egui::RichText::new(operation_title(o))
-                                        .color(crate::preview_ui::operation_color(o));
-                                    ui.selectable_value(&mut profile.operation, o, text);
-                                }
-                            });
-                        if profile.is_multi() {
-                            // Die Felder zeigen den ersten Satz; die übrigen stehen im Hinweis.
-                            let sets: Vec<String> = std::iter::once(ParameterSet {
-                                power_percent: profile.power_percent,
-                                speed_percent: profile.speed_percent,
-                                passes: profile.passes,
-                            })
-                            .chain(profile.additional.iter().cloned())
-                            .map(|s| {
-                                format!(
-                                    "{} % · {} % · {}×",
-                                    s.power_percent, s.speed_percent, s.passes
-                                )
-                            })
-                            .collect();
-                            ui.weak(format!("×{}", sets.len()))
-                                .on_hover_text(sets.join("\n"));
-                        }
-                    });
-                    ui.add_sized(
-                        percent,
-                        egui::DragValue::new(&mut profile.power_percent)
-                            .range(0.0..=100.0)
-                            .suffix(" %"),
-                    );
-                    ui.add_sized(
-                        percent,
-                        egui::DragValue::new(&mut profile.speed_percent)
-                            .range(0.0..=100.0)
-                            .suffix(" %"),
-                    );
-                    if ui
-                        .add(egui::Button::new("🗑").frame(false))
-                        .on_hover_text(tr("Profil entfernen"))
-                        .clicked()
-                    {
+                    if profile_row(ui, &mut material.profiles[i], i, percent) {
                         *drop = Some(i);
                     }
                     ui.end_row();
@@ -498,6 +420,195 @@ fn profile_table(ui: &mut egui::Ui, material: &mut Material, drop: &mut Option<u
     if let Some(thickness) = add_to {
         add_operation(material, thickness);
     }
+}
+
+/// Kopfzeile einer Stärke: das Feld ändert die Stärke aller ihrer Profile;
+/// `true`, wenn „＋“ ein weiteres Verfahren verlangt.
+fn thickness_row(
+    ui: &mut egui::Ui,
+    profiles: &mut [MaterialProfile],
+    thickness: f32,
+    members: &[usize],
+    height: f32,
+) -> bool {
+    let mut value = thickness;
+    let changed = ui
+        .add_sized(
+            [72.0, height],
+            egui::DragValue::new(&mut value)
+                .range(0.0..=1000.0)
+                .suffix(" mm"),
+        )
+        .on_hover_text(tr("Stärke aller Profile dieser Zeile"))
+        .changed();
+    if changed {
+        for i in members {
+            profiles[*i].thickness_mm = value;
+        }
+    }
+    let complete = members.len() >= Operation::ALL.len();
+    crate::object_bar::list_button(
+        ui,
+        crate::object_bar::Icon::Plus,
+        !complete,
+        tr("Verfahren für diese Stärke hinzufügen"),
+    )
+}
+
+/// Zeile des Profils an Position `index`; `true`, wenn es entfernt werden soll.
+fn profile_row(
+    ui: &mut egui::Ui,
+    profile: &mut MaterialProfile,
+    index: usize,
+    percent: [f32; 2],
+) -> bool {
+    ui.label("");
+    ui.horizontal(|ui| {
+        profile_operation(ui, profile, index);
+        if profile.is_multi() {
+            parameter_sets_hint(ui, profile);
+        }
+    });
+    ui.add_sized(
+        percent,
+        egui::DragValue::new(&mut profile.power_percent)
+            .range(0.0..=100.0)
+            .suffix(" %"),
+    );
+    ui.add_sized(
+        percent,
+        egui::DragValue::new(&mut profile.speed_percent)
+            .range(0.0..=100.0)
+            .suffix(" %"),
+    );
+    ui.add(egui::Button::new("🗑").frame(false))
+        .on_hover_text(tr("Profil entfernen"))
+        .clicked()
+}
+
+/// Farbbalken und Auswahl des Verfahrens eines Profils.
+fn profile_operation(ui: &mut egui::Ui, profile: &mut MaterialProfile, index: usize) {
+    let color = crate::preview_ui::operation_color(profile.operation);
+    let (bar, _) = ui.allocate_exact_size(egui::vec2(4.0, 20.0), egui::Sense::hover());
+    ui.painter().rect_filled(bar, 2.0, color);
+    crate::form::Dropdown::from_id_salt(("profile", index))
+        .selected_text(egui::RichText::new(operation_title(profile.operation)).color(color))
+        .show_ui(ui, |ui| {
+            // Neutral hinterlegt: auf dem Orange der Auswahl
+            // wären die Verfahrensfarben nicht lesbar.
+            ui.visuals_mut().selection.bg_fill = egui::Color32::from_gray(222);
+            for o in Operation::ALL {
+                let text = egui::RichText::new(operation_title(o))
+                    .color(crate::preview_ui::operation_color(o));
+                ui.selectable_value(&mut profile.operation, o, text);
+            }
+        });
+}
+
+/// „×n“ für ein Profil mit mehreren Parametersätzen, die Sätze im Hinweis.
+fn parameter_sets_hint(ui: &mut egui::Ui, profile: &MaterialProfile) {
+    // Die Felder zeigen den ersten Satz; die übrigen stehen im Hinweis.
+    let sets: Vec<String> = std::iter::once(ParameterSet {
+        power_percent: profile.power_percent,
+        speed_percent: profile.speed_percent,
+        passes: profile.passes,
+    })
+    .chain(profile.additional.iter().cloned())
+    .map(|s| {
+        format!(
+            "{} % · {} % · {}×",
+            s.power_percent, s.speed_percent, s.passes
+        )
+    })
+    .collect();
+    ui.weak(format!("×{}", sets.len()))
+        .on_hover_text(sets.join("\n"));
+}
+
+/// Linke Spalte der Materialbibliothek: Liste der Materialien (`height`
+/// hoch), darunter Neu, Duplizieren und Entfernen.
+fn material_list(ui: &mut egui::Ui, draft: &mut Vec<Material>, selected: &mut usize, height: f32) {
+    ui.vertical(|ui| {
+        ui.set_width(190.0);
+        egui::ScrollArea::vertical()
+            .id_salt("materials")
+            .auto_shrink([false, false])
+            .max_height(height)
+            .show(ui, |ui| {
+                for (i, m) in draft.iter().enumerate() {
+                    ui.selectable_value(selected, i, &m.name);
+                }
+            });
+        use crate::object_bar::{Icon, list_button, list_footer};
+        let chosen = *selected < draft.len();
+        list_footer(ui, 190.0, |ui| {
+            if list_button(ui, Icon::Plus, true, tr("Neues Material")) {
+                *selected = new_material(draft);
+            }
+            if list_button(ui, Icon::Duplicate, chosen, tr("Material duplizieren")) {
+                *selected = duplicate_material(draft, *selected);
+            }
+            if list_button(ui, Icon::Minus, chosen, tr("Material entfernen")) {
+                *selected = remove_material(draft, *selected);
+            }
+        });
+    });
+}
+
+/// Senkrechter Strich zwischen den Spalten, `height` hoch.
+fn column_rule(ui: &mut egui::Ui, height: f32) {
+    // Trennstrich so hoch wie die Spalten; `separator()` nähme die
+    // ganze verfügbare Höhe und schöbe die Knopfzeile hinaus.
+    let (line, _) = ui.allocate_exact_size(egui::vec2(12.0, height), egui::Sense::hover());
+    ui.painter().vline(
+        line.center().x,
+        line.y_range(),
+        ui.visuals().widgets.noninteractive.bg_stroke,
+    );
+}
+
+/// Rechte Spalte der Materialbibliothek: Name und Profile des gewählten
+/// Materials; die Symbolleiste endet nach `height` wie die der Liste.
+fn material_details(ui: &mut egui::Ui, material: Option<&mut Material>, height: f32) {
+    ui.vertical(|ui| {
+        let Some(material) = material else {
+            ui.label(tr("Material auswählen"));
+            return;
+        };
+        let top = ui.cursor().top();
+        ui.horizontal(|ui| {
+            ui.label(tr("Name"));
+            ui.text_edit_singleline(&mut material.name);
+        });
+        ui.small(tr("\
+            Leistung und Geschwindigkeit in Prozent wie am LTT. Je Stärke ist \
+             ein Profil pro Verfahren möglich; 0 % Leistung gilt als \
+             „nicht übernehmbar“."));
+        let mut drop = None;
+        // Die Symbolleiste schließt unten mit der der Materialliste ab.
+        let used = ui.cursor().top() - top;
+        egui::ScrollArea::vertical()
+            .id_salt("profiles")
+            .auto_shrink([false, false])
+            .max_height((height - used).max(80.0))
+            .show(ui, |ui| {
+                profile_table(ui, material, &mut drop);
+            });
+        if let Some(j) = drop {
+            material.profiles.remove(j);
+        }
+        let add = crate::object_bar::list_footer(ui, 72.0, |ui| {
+            crate::object_bar::list_button(
+                ui,
+                crate::object_bar::Icon::Plus,
+                true,
+                tr("Stärke hinzufügen"),
+            )
+        });
+        if add {
+            add_profile(material);
+        }
+    });
 }
 
 /// Entfernt das Material `index`; liefert die danach gewählte Position
@@ -716,7 +827,7 @@ impl Document {
                 mapping::resolve(project).map_err(String::from),
             ));
         }
-        self.resolved.as_ref().expect("just resolved").2.clone()
+        self.resolved.as_ref().expect("eben berechnet").2.clone()
     }
 }
 
@@ -901,51 +1012,8 @@ fn filters(
     }
     for (i, filter) in filters.iter_mut().enumerate() {
         ui.horizontal(|ui| {
-            crate::form::Dropdown::from_id_salt(("attribute", id, i))
-                .width(120.0)
-                .selected_text(filter.attribute.title())
-                .show_ui(ui, |ui| {
-                    for a in Attribute::ALL {
-                        if ui
-                            .selectable_label(filter.attribute == a, a.title())
-                            .clicked()
-                            && filter.attribute != a
-                        {
-                            *filter = Filter {
-                                attribute: a,
-                                value: if a == Attribute::StrokeWidth {
-                                    "0.1".into()
-                                } else {
-                                    String::new()
-                                },
-                                compare: false,
-                                inverted: false,
-                            };
-                            changed = true;
-                        }
-                    }
-                });
-            let mut options = vec![(false, false), (false, true)];
-            if filter.attribute == Attribute::StrokeWidth {
-                options.extend([(true, false), (true, true)]);
-            }
-            crate::form::Dropdown::from_id_salt(("comparison", id, i))
-                .width(36.0)
-                .selected_text(comparison_title(filter.compare, filter.inverted))
-                .show_ui(ui, |ui| {
-                    for (compare, inverted) in options {
-                        if ui
-                            .selectable_label(
-                                (filter.compare, filter.inverted) == (compare, inverted),
-                                comparison_title(compare, inverted),
-                            )
-                            .clicked()
-                        {
-                            (filter.compare, filter.inverted) = (compare, inverted);
-                            changed = true;
-                        }
-                    }
-                });
+            changed |= filter_attribute(ui, id, i, filter);
+            changed |= filter_comparison(ui, id, i, filter);
             if ui
                 .button("🗑")
                 .on_hover_text(tr("Bedingung entfernen"))
@@ -955,39 +1023,7 @@ fn filters(
             }
         });
         ui.horizontal(|ui| {
-            if is_color(filter.attribute) {
-                swatch(ui, parse_color(&filter.value));
-            }
-            changed |= ui
-                .add(
-                    egui::TextEdit::singleline(&mut filter.value)
-                        .hint_text(tr("Wert"))
-                        .desired_width(110.0),
-                )
-                .changed();
-            let suggestions = document.suggestions(filter.attribute);
-            if !suggestions.is_empty() {
-                ui.menu_button(tr("Werte"), |ui| {
-                    egui::ScrollArea::vertical()
-                        .max_height(260.0)
-                        .show(ui, |ui| {
-                            for (value, count) in suggestions {
-                                ui.horizontal(|ui| {
-                                    if is_color(filter.attribute) {
-                                        swatch(ui, parse_color(value));
-                                    }
-                                    if ui.button(format!("{value} ({count})")).clicked() {
-                                        filter.value = value.clone();
-                                        changed = true;
-                                        ui.close();
-                                    }
-                                });
-                            }
-                        });
-                })
-                .response
-                .on_hover_text(tr("Werte aus der SVG"));
-            }
+            changed |= filter_value(ui, filter, document.suggestions(filter.attribute));
         });
     }
     if let Some(i) = remove {
@@ -1006,12 +1042,427 @@ fn filters(
     changed
 }
 
+/// Merkmal der Bedingung `index`; ein anderes setzt Wert und Vergleich zurück.
+fn filter_attribute(
+    ui: &mut egui::Ui,
+    id: impl std::hash::Hash,
+    index: usize,
+    filter: &mut Filter,
+) -> bool {
+    let mut changed = false;
+    crate::form::Dropdown::from_id_salt(("attribute", id, index))
+        .width(120.0)
+        .selected_text(filter.attribute.title())
+        .show_ui(ui, |ui| {
+            for a in Attribute::ALL {
+                if ui
+                    .selectable_label(filter.attribute == a, a.title())
+                    .clicked()
+                    && filter.attribute != a
+                {
+                    *filter = Filter {
+                        attribute: a,
+                        value: if a == Attribute::StrokeWidth {
+                            "0.1".into()
+                        } else {
+                            String::new()
+                        },
+                        compare: false,
+                        inverted: false,
+                    };
+                    changed = true;
+                }
+            }
+        });
+    changed
+}
+
+/// Vergleich der Bedingung `index`; „≤“ und „>“ nur bei der Linienstärke.
+fn filter_comparison(
+    ui: &mut egui::Ui,
+    id: impl std::hash::Hash,
+    index: usize,
+    filter: &mut Filter,
+) -> bool {
+    let mut changed = false;
+    let mut options = vec![(false, false), (false, true)];
+    if filter.attribute == Attribute::StrokeWidth {
+        options.extend([(true, false), (true, true)]);
+    }
+    crate::form::Dropdown::from_id_salt(("comparison", id, index))
+        .width(36.0)
+        .selected_text(comparison_title(filter.compare, filter.inverted))
+        .show_ui(ui, |ui| {
+            for (compare, inverted) in options {
+                if ui
+                    .selectable_label(
+                        (filter.compare, filter.inverted) == (compare, inverted),
+                        comparison_title(compare, inverted),
+                    )
+                    .clicked()
+                {
+                    (filter.compare, filter.inverted) = (compare, inverted);
+                    changed = true;
+                }
+            }
+        });
+    changed
+}
+
+/// Wertfeld einer Bedingung, daneben die Werte aus der SVG zur Auswahl.
+fn filter_value(ui: &mut egui::Ui, filter: &mut Filter, suggestions: &[(String, usize)]) -> bool {
+    if is_color(filter.attribute) {
+        swatch(ui, parse_color(&filter.value));
+    }
+    let mut changed = ui
+        .add(
+            egui::TextEdit::singleline(&mut filter.value)
+                .hint_text(tr("Wert"))
+                .desired_width(110.0),
+        )
+        .changed();
+    if !suggestions.is_empty() {
+        ui.menu_button(tr("Werte"), |ui| {
+            egui::ScrollArea::vertical()
+                .max_height(260.0)
+                .show(ui, |ui| {
+                    for (value, count) in suggestions {
+                        ui.horizontal(|ui| {
+                            if is_color(filter.attribute) {
+                                swatch(ui, parse_color(value));
+                            }
+                            if ui.button(format!("{value} ({count})")).clicked() {
+                                filter.value = value.clone();
+                                changed = true;
+                                ui.close();
+                            }
+                        });
+                    }
+                });
+        })
+        .response
+        .on_hover_text(tr("Werte aus der SVG"));
+    }
+    changed
+}
+
+/// Auswahl des Materials: keines, eines der Bibliothek oder ein eigenes
+/// (`own`); `own_material` merkt sich die Wahl „Eigenes Material …“.
+fn material_menu(
+    ui: &mut egui::Ui,
+    library: &Library,
+    project: &mut Project,
+    own: bool,
+    own_material: &mut bool,
+) -> bool {
+    let mut changed = false;
+    crate::form::Dropdown::from_id_salt("material")
+        .width(190.0)
+        .selected_text(if own {
+            tr("Eigenes Material …")
+        } else if project.material.is_empty() {
+            tr("Material wählen")
+        } else {
+            &project.material
+        })
+        .show_ui(ui, |ui| {
+            if ui
+                .selectable_label(!own && project.material.is_empty(), tr("Material wählen"))
+                .clicked()
+            {
+                project.material.clear();
+                *own_material = false;
+                changed = true;
+            }
+            ui.separator();
+            for m in &library.materials {
+                if ui
+                    .selectable_label(project.material == m.name, &m.name)
+                    .clicked()
+                {
+                    select_material(library, project, Some(&m.name));
+                    changed = true;
+                }
+            }
+            ui.separator();
+            if ui.selectable_label(own, tr("Eigenes Material …")).clicked() && !own {
+                select_material(library, project, None);
+                *own_material = true;
+                changed = true;
+            }
+        });
+    changed
+}
+
+/// Stärke aus den Profilen des Materials (`list`), ohne Profile frei.
+fn thickness_choice(ui: &mut egui::Ui, list: Vec<f32>, thickness: &mut f32) -> bool {
+    let mut changed = false;
+    // Nur Materialien mit echten Stärken zeigen die Auswahl; gibt es nur
+    // „Nicht festgelegt“ (z. B. Folien, Beschichtungen), entfällt sie.
+    if list.is_empty() {
+        changed |= crate::number(ui, tr("Stärke"), thickness, 0.0..=1000.0, " mm");
+    } else if list.iter().any(|&t| t > 0.0) {
+        let title = |t: f32| {
+            if t == 0.0 {
+                tr("Nicht festgelegt").to_string()
+            } else {
+                format!("{t} mm")
+            }
+        };
+        // Bis zu drei Stärken als eigene Knöpfe, mehr (Acryl …) im Menü.
+        if list.len() <= 3 {
+            crate::form::row(ui, tr("Stärke"), |ui| {
+                for &t in &list {
+                    if ui
+                        .selectable_label(same_thickness(t, *thickness), title(t))
+                        .clicked()
+                    {
+                        *thickness = t;
+                        changed = true;
+                    }
+                }
+            });
+        } else {
+            crate::form::row(ui, tr("Stärke"), |ui| {
+                crate::form::Dropdown::from_id_salt("thickness")
+                    .width(130.0)
+                    .selected_text(title(*thickness))
+                    .show_ui(ui, |ui| {
+                        for t in list {
+                            if ui
+                                .selectable_label(same_thickness(t, *thickness), title(t))
+                                .clicked()
+                            {
+                                *thickness = t;
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+        }
+    }
+    changed
+}
+
 /// Material library editor state: draft and selected material.
 enum TemplateAction {
     StartRename(String),
     CancelRename,
     Rename(String, String),
     Remove(String),
+}
+
+/// Was in der Vorlagenliste angeklickt wurde.
+#[derive(Default)]
+struct TemplateClicks {
+    action: Option<TemplateAction>,
+    /// „Übernehmen“: Regeln der Vorlage ins Projekt.
+    apply: Option<Predefined>,
+    /// Neue Standardvorlage.
+    default: Option<mapping::TemplateRef>,
+}
+
+/// Name einer Vorlage mit „Übernehmen“, beim Umbenennen einer eigenen
+/// (`own`) stattdessen das Namensfeld mit ✔ und ✖.
+fn template_name_cell(
+    ui: &mut egui::Ui,
+    template: &Predefined,
+    own: bool,
+    renaming: &mut Option<(String, String)>,
+    clicks: &mut TemplateClicks,
+) {
+    match renaming {
+        Some((old, new)) if own && *old == template.name => {
+            let edit = ui.add(egui::TextEdit::singleline(new).desired_width(260.0));
+            let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            ui.horizontal(|ui| {
+                if enter || ui.button("✔").on_hover_text(tr("Umbenennen")).clicked() {
+                    clicks.action = Some(TemplateAction::Rename(old.clone(), new.clone()));
+                }
+                if ui.button("✖").on_hover_text(tr("Abbrechen")).clicked() {
+                    clicks.action = Some(TemplateAction::CancelRename);
+                }
+            });
+        }
+        _ => {
+            ui.label(&template.name);
+            if ui
+                .button(tr("Übernehmen"))
+                .on_hover_text(tr("Regeln dieser Vorlage in das Projekt übernehmen"))
+                .clicked()
+            {
+                clicks.apply = Some(template.clone());
+            }
+        }
+    }
+}
+
+/// ✏ und 🗑 einer eigenen Vorlage.
+fn template_edit_buttons(ui: &mut egui::Ui, name: &str) -> Option<TemplateAction> {
+    let mut action = None;
+    if ui
+        .add(egui::Button::new("✏").frame(false))
+        .on_hover_text(tr("Vorlage umbenennen"))
+        .clicked()
+    {
+        action = Some(TemplateAction::StartRename(name.to_string()));
+    }
+    if ui
+        .add(egui::Button::new("🗑").frame(false))
+        .on_hover_text(tr("Vorlage löschen"))
+        .clicked()
+    {
+        action = Some(TemplateAction::Remove(name.to_string()));
+    }
+    action
+}
+
+/// „Ähnliche Farben zuordnen“ mit eingerückter Erklärung.
+fn similar_colors(ui: &mut egui::Ui, similar: &mut bool) -> bool {
+    let changed = ui
+        .checkbox(similar, tr("Ähnliche Farben zuordnen"))
+        .changed();
+    egui::Frame::new()
+        .inner_margin(egui::Margin {
+            left: 24,
+            ..Default::default()
+        })
+        .show(ui, |ui| {
+            crate::form::caption(
+                ui,
+                tr("\
+                    Farbregeln erfassen auch Farben mit fast gleichem Farbton, z. B. \
+                 #ed1c24 als Rot, #00a651 als Grün und #2e3192 als Blau nach einer \
+                 Umwandlung von CMYK nach RGB; Grautöne nach Helligkeit."),
+            );
+        });
+    changed
+}
+
+/// In den Schritten angeklickte Änderungen, ausgeführt nach der Liste.
+#[derive(Default)]
+struct StepEdits {
+    remove: Option<usize>,
+    insert_after: Option<usize>,
+    /// Schritt und seine neue Bearbeitung.
+    change: Option<(usize, Operation)>,
+}
+
+/// Kopfzeile des Schritts `index`: Bearbeitung und Anzahl der Objekte, bei
+/// Regeln mit Menü zum Umschalten, „Entfernen“ und „Einfügen“.
+fn step_header(
+    ui: &mut egui::Ui,
+    index: usize,
+    step: &JobStep,
+    objects: usize,
+    edits: &mut StepEdits,
+) {
+    let rule = is_rule(step);
+    ui.horizontal(|ui| {
+        let title = egui::RichText::new(operation_title(step.operation))
+            .strong()
+            .color(crate::preview_ui::operation_color(step.operation));
+        if rule {
+            // Bearbeitung umschaltbar; Bedingungen bleiben erhalten.
+            ui.menu_button(title, |ui| {
+                for operation in Operation::ALL {
+                    if ui.button(operation_title(operation)).clicked() {
+                        edits.change = Some((index, operation));
+                    }
+                }
+            })
+            .response
+            .on_hover_text(tr("Bearbeitung ändern"));
+        } else {
+            ui.label(title);
+        }
+        ui.weak(tr!("{count} Objekte", count = objects));
+        if rule {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(egui::Button::new("🗑").frame(false))
+                    .on_hover_text(tr("Schritt entfernen"))
+                    .clicked()
+                {
+                    edits.remove = Some(index);
+                }
+                if ui
+                    .add(egui::Button::new("➕").frame(false))
+                    .on_hover_text(tr("Schritt mit gleicher Bearbeitung darunter einfügen"))
+                    .clicked()
+                {
+                    edits.insert_after = Some(index);
+                }
+            });
+        }
+    });
+}
+
+/// „Rest“ und die Bedingungen eines Regel-Schritts.
+fn step_conditions(
+    ui: &mut egui::Ui,
+    index: usize,
+    step: &mut JobStep,
+    document: &Document,
+) -> bool {
+    let mut changed = false;
+    if ui
+        .checkbox(&mut step.rest, tr("Rest: alle übrigen Objekte"))
+        .changed()
+    {
+        step.filters = if step.rest { None } else { Some(Vec::new()) };
+        step.objects.clear();
+        changed = true;
+    }
+    if let Some(list) = &mut step.filters {
+        changed |= filters(ui, ("step", index), list, document);
+    }
+    changed
+}
+
+/// Weitere Parametersätze eines Schritts (bis 16 insgesamt), neue als Kopie
+/// des ersten.
+fn additional_parameter_sets(ui: &mut egui::Ui, step: &mut JobStep) -> bool {
+    let mut changed = false;
+    let first = ParameterSet {
+        power_percent: step.power_percent,
+        speed_percent: step.speed_percent,
+        passes: step.passes,
+    };
+    let mut drop = None;
+    for (j, set) in step.additional.iter_mut().enumerate() {
+        ui.label(tr!("Parametersatz {number}", number = j + 2));
+        changed |= parameters(
+            ui,
+            &mut set.power_percent,
+            &mut set.speed_percent,
+            &mut set.passes,
+            None,
+        );
+        if ui.button(tr("Parametersatz entfernen")).clicked() {
+            drop = Some(j);
+        }
+    }
+    if let Some(j) = drop {
+        step.additional.remove(j);
+        changed = true;
+    }
+    if step.additional.len() < 15 && ui.button(tr("Weiteren Parametersatz")).clicked() {
+        step.additional.push(first);
+        changed = true;
+    }
+    changed
+}
+
+/// Rasteroptionen eines Gravur-Schritts, sonst „Nur Umriss“.
+fn step_options(ui: &mut egui::Ui, index: usize, step: &mut JobStep) -> bool {
+    if step.operation.is_raster() {
+        raster_options(ui, ("step", index), &mut step.raster, step.operation)
+    } else {
+        ui.checkbox(&mut step.outline, tr("Nur Umriss"))
+            .on_hover_text(tr("Schneidet nur den Rand der Fläche, die alle Objekte dieses Schritts zusammen bedecken (VisiCut „Kontur“): Überlappungen und innere Linien entfallen, Bilder zählen als Rechteck."))
+            .changed()
+    }
 }
 
 struct Editor {
@@ -1095,44 +1546,7 @@ impl JobUi {
         }
         let own = !library_material && (self.own_material || !project.material.is_empty());
         crate::form::row(ui, tr("Material"), |ui| {
-            crate::form::Dropdown::from_id_salt("material")
-                .width(190.0)
-                .selected_text(if own {
-                    tr("Eigenes Material …")
-                } else if project.material.is_empty() {
-                    tr("Material wählen")
-                } else {
-                    &project.material
-                })
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_label(
-                            !own && project.material.is_empty(),
-                            tr("Material wählen"),
-                        )
-                        .clicked()
-                    {
-                        project.material.clear();
-                        self.own_material = false;
-                        *dirty = true;
-                    }
-                    ui.separator();
-                    for m in &library.materials {
-                        if ui
-                            .selectable_label(project.material == m.name, &m.name)
-                            .clicked()
-                        {
-                            select_material(library, project, Some(&m.name));
-                            *dirty = true;
-                        }
-                    }
-                    ui.separator();
-                    if ui.selectable_label(own, tr("Eigenes Material …")).clicked() && !own {
-                        select_material(library, project, None);
-                        self.own_material = true;
-                        *dirty = true;
-                    }
-                });
+            *dirty |= material_menu(ui, library, project, own, &mut self.own_material);
         });
         if own {
             crate::form::row(ui, tr("Bezeichnung"), |ui| {
@@ -1148,59 +1562,7 @@ impl JobUi {
         let list = find_material(library, &project.material)
             .map(thicknesses)
             .unwrap_or_default();
-        // Nur Materialien mit echten Stärken zeigen die Auswahl; gibt es nur
-        // „Nicht festgelegt“ (z. B. Folien, Beschichtungen), entfällt sie.
-        if list.is_empty() {
-            *dirty |= crate::number(
-                ui,
-                tr("Stärke"),
-                &mut project.thickness_mm,
-                0.0..=1000.0,
-                " mm",
-            );
-        } else if list.iter().any(|&t| t > 0.0) {
-            let title = |t: f32| {
-                if t == 0.0 {
-                    tr("Nicht festgelegt").to_string()
-                } else {
-                    format!("{t} mm")
-                }
-            };
-            // Bis zu drei Stärken als eigene Knöpfe, mehr (Acryl …) im Menü.
-            if list.len() <= 3 {
-                crate::form::row(ui, tr("Stärke"), |ui| {
-                    for &t in &list {
-                        if ui
-                            .selectable_label(same_thickness(t, project.thickness_mm), title(t))
-                            .clicked()
-                        {
-                            project.thickness_mm = t;
-                            *dirty = true;
-                        }
-                    }
-                });
-            } else {
-                crate::form::row(ui, tr("Stärke"), |ui| {
-                    crate::form::Dropdown::from_id_salt("thickness")
-                        .width(130.0)
-                        .selected_text(title(project.thickness_mm))
-                        .show_ui(ui, |ui| {
-                            for t in list {
-                                if ui
-                                    .selectable_label(
-                                        same_thickness(t, project.thickness_mm),
-                                        title(t),
-                                    )
-                                    .clicked()
-                                {
-                                    project.thickness_mm = t;
-                                    *dirty = true;
-                                }
-                            }
-                        });
-                });
-            }
-        }
+        *dirty |= thickness_choice(ui, list, &mut project.thickness_mm);
         if (project.material.clone(), project.thickness_mm) != before {
             // Das Materialprofil ist der Standard; Abweichungen zeigt die
             // Bearbeitung orange an.
@@ -1436,10 +1798,47 @@ impl JobUi {
              was sonst nicht bearbeitet oder ignoriert wird."),
         );
         ui.add_space(6.0);
+        let clicks = self.template_list(ui);
+        if let Some(template) = clicks.apply {
+            apply_predefined(self.active(), project, &template);
+            *dirty = true;
+        }
+        if let Some(reference) = clicks.default {
+            self.templates.default = Some(reference);
+            self.finish_template_change(Ok(()), tr("Standardvorlage gesichert").into());
+        }
+        if let Some(action) = clicks.action {
+            self.template_action(action);
+        }
+        ui.add_space(8.0);
+        let rules = assignment_mode(project) == AssignmentMode::Rules;
+        self.template_store_row(ui, project, rules);
+        crate::form::caption(
+            ui,
+            if rules {
+                tr("\
+                    Eine Vorlage enthält die Regel-Schritte mit Bedingungen und Verfahren sowie \
+                 die Ignorierregeln, aber keine Leistung oder Geschwindigkeit: Diese kommen \
+                 weiter aus dem Materialprofil.")
+            } else {
+                tr("Zum Sichern einer Vorlage unter „Vorbereiten“ die Zuordnung „Regeln“ wählen.")
+            },
+        );
+        match &self.template_status {
+            Some(Ok(message)) => crate::form::caption(ui, message.clone()),
+            Some(Err(error)) => {
+                ui.colored_label(WARNING, error);
+            }
+            None => {}
+        }
+        ui.add_space(8.0);
+        *dirty |= similar_colors(ui, &mut project.similar_colors);
+    }
+
+    /// Tabelle aller Vorlagen; liefert, was darin angeklickt wurde.
+    fn template_list(&mut self, ui: &mut egui::Ui) -> TemplateClicks {
         let templates = self.templates.all();
-        let mut action = None;
-        let mut apply = None;
-        let mut default = None;
+        let mut clicks = TemplateClicks::default();
         egui::Grid::new("templates")
             .num_columns(4)
             .spacing([12.0, 4.0])
@@ -1456,70 +1855,30 @@ impl JobUi {
                         .clicked()
                         && !selected
                     {
-                        default = Some(reference.clone());
+                        clicks.default = Some(reference.clone());
                     }
                     let own = matches!(reference, mapping::TemplateRef::Own(_));
-                    match &mut self.renaming {
-                        Some((old, new)) if own && *old == template.name => {
-                            let edit = ui.add(egui::TextEdit::singleline(new).desired_width(260.0));
-                            let enter =
-                                edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                            ui.horizontal(|ui| {
-                                if enter || ui.button("✔").on_hover_text(tr("Umbenennen")).clicked()
-                                {
-                                    action = Some(TemplateAction::Rename(old.clone(), new.clone()));
-                                }
-                                if ui.button("✖").on_hover_text(tr("Abbrechen")).clicked() {
-                                    action = Some(TemplateAction::CancelRename);
-                                }
-                            });
-                        }
-                        _ => {
-                            ui.label(&template.name);
-                            if ui
-                                .button(tr("Übernehmen"))
-                                .on_hover_text(tr(
-                                    "Regeln dieser Vorlage in das Projekt übernehmen",
-                                ))
-                                .clicked()
-                            {
-                                apply = Some(template.clone());
-                            }
-                        }
-                    }
+                    template_name_cell(ui, template, own, &mut self.renaming, &mut clicks);
                     ui.horizontal(|ui| {
-                        if own && self.renaming.is_none() {
-                            if ui
-                                .add(egui::Button::new("✏").frame(false))
-                                .on_hover_text(tr("Vorlage umbenennen"))
-                                .clicked()
-                            {
-                                action = Some(TemplateAction::StartRename(template.name.clone()));
-                            }
-                            if ui
-                                .add(egui::Button::new("🗑").frame(false))
-                                .on_hover_text(tr("Vorlage löschen"))
-                                .clicked()
-                            {
-                                action = Some(TemplateAction::Remove(template.name.clone()));
-                            }
+                        if own
+                            && self.renaming.is_none()
+                            && let Some(action) = template_edit_buttons(ui, &template.name)
+                        {
+                            clicks.action = Some(action);
                         }
                     });
                     ui.end_row();
                 }
             });
-        if let Some(template) = apply {
-            apply_predefined(self.active(), project, &template);
-            *dirty = true;
-        }
-        if let Some(reference) = default {
-            self.templates.default = Some(reference);
-            self.finish_template_change(Ok(()), tr("Standardvorlage gesichert").into());
-        }
+        clicks
+    }
+
+    /// Führt Umbenennen oder Löschen einer eigenen Vorlage aus.
+    fn template_action(&mut self, action: TemplateAction) {
         match action {
-            Some(TemplateAction::StartRename(name)) => self.renaming = Some((name.clone(), name)),
-            Some(TemplateAction::CancelRename) => self.renaming = None,
-            Some(TemplateAction::Rename(old, new)) => {
+            TemplateAction::StartRename(name) => self.renaming = Some((name.clone(), name)),
+            TemplateAction::CancelRename => self.renaming = None,
+            TemplateAction::Rename(old, new) => {
                 let result = self.templates.rename(&old, &new);
                 if result.is_ok() {
                     self.renaming = None;
@@ -1527,15 +1886,16 @@ impl JobUi {
                 let message = tr!("Vorlage „{name}“ umbenannt", name = new.trim());
                 self.finish_template_change(result, message);
             }
-            Some(TemplateAction::Remove(name)) => {
+            TemplateAction::Remove(name) => {
                 self.templates.remove(&name);
                 self.finish_template_change(Ok(()), tr!("Vorlage „{name}“ gelöscht", name = name));
             }
-            None => {}
         }
-        ui.add_space(8.0);
+    }
+
+    /// Namensfeld mit „Als Vorlage sichern“ (nur bei Regeln) und Import aus VisiCut.
+    fn template_store_row(&mut self, ui: &mut egui::Ui, project: &Project, rules: bool) {
         // Aktuelle Regeln als eigene Vorlage sichern oder aus VisiCut holen.
-        let rules = assignment_mode(project) == AssignmentMode::Rules;
         let name = self.template_name.trim().to_string();
         let exists = self.templates.own.iter().any(|p| p.name == name);
         ui.horizontal(|ui| {
@@ -1572,42 +1932,6 @@ impl JobUi {
                 self.import_templates(&paths);
             }
         });
-        crate::form::caption(
-            ui,
-            if rules {
-                tr("\
-                    Eine Vorlage enthält die Regel-Schritte mit Bedingungen und Verfahren sowie \
-                 die Ignorierregeln, aber keine Leistung oder Geschwindigkeit: Diese kommen \
-                 weiter aus dem Materialprofil.")
-            } else {
-                tr("Zum Sichern einer Vorlage unter „Vorbereiten“ die Zuordnung „Regeln“ wählen.")
-            },
-        );
-        match &self.template_status {
-            Some(Ok(message)) => crate::form::caption(ui, message.clone()),
-            Some(Err(error)) => {
-                ui.colored_label(WARNING, error);
-            }
-            None => {}
-        }
-        ui.add_space(8.0);
-        *dirty |= ui
-            .checkbox(&mut project.similar_colors, tr("Ähnliche Farben zuordnen"))
-            .changed();
-        egui::Frame::new()
-            .inner_margin(egui::Margin {
-                left: 24,
-                ..Default::default()
-            })
-            .show(ui, |ui| {
-                crate::form::caption(
-                    ui,
-                    tr("\
-                        Farbregeln erfassen auch Farben mit fast gleichem Farbton, z. B. \
-                     #ed1c24 als Rot, #00a651 als Grün und #2e3192 als Blau nach einer \
-                     Umwandlung von CMYK nach RGB; Grautöne nach Helligkeit."),
-                );
-            });
     }
 
     fn import_templates(&mut self, paths: &[std::path::PathBuf]) {
@@ -1665,9 +1989,7 @@ impl JobUi {
         if let Err(e) = &selections {
             ui.colored_label(WARNING, e);
         }
-        let mut remove = None;
-        let mut insert_after = None;
-        let mut change = None;
+        let mut edits = StepEdits::default();
         for i in 0..project.steps.len() {
             let objects = match &selections {
                 Ok(s) => s.get(i).map_or(0, Vec::len),
@@ -1682,59 +2004,9 @@ impl JobUi {
             let profile = preset(self.active(), project, project.steps[i].operation).cloned();
             let step = &mut project.steps[i];
             crate::form::section(ui, &tr!("Schritt {number}", number = i + 1), |ui| {
-                let rule = is_rule(step);
-                ui.horizontal(|ui| {
-                    let title = egui::RichText::new(operation_title(step.operation))
-                        .strong()
-                        .color(crate::preview_ui::operation_color(step.operation));
-                    if rule {
-                        // Bearbeitung umschaltbar; Bedingungen bleiben erhalten.
-                        ui.menu_button(title, |ui| {
-                            for operation in Operation::ALL {
-                                if ui.button(operation_title(operation)).clicked() {
-                                    change = Some((i, operation));
-                                }
-                            }
-                        })
-                        .response
-                        .on_hover_text(tr("Bearbeitung ändern"));
-                    } else {
-                        ui.label(title);
-                    }
-                    ui.weak(tr!("{count} Objekte", count = objects));
-                    if rule {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add(egui::Button::new("🗑").frame(false))
-                                .on_hover_text(tr("Schritt entfernen"))
-                                .clicked()
-                            {
-                                remove = Some(i);
-                            }
-                            if ui
-                                .add(egui::Button::new("➕").frame(false))
-                                .on_hover_text(tr(
-                                    "Schritt mit gleicher Bearbeitung darunter einfügen",
-                                ))
-                                .clicked()
-                            {
-                                insert_after = Some(i);
-                            }
-                        });
-                    }
-                });
-                if rule {
-                    if ui
-                        .checkbox(&mut step.rest, tr("Rest: alle übrigen Objekte"))
-                        .changed()
-                    {
-                        step.filters = if step.rest { None } else { Some(Vec::new()) };
-                        step.objects.clear();
-                        *dirty = true;
-                    }
-                    if let Some(list) = &mut step.filters {
-                        *dirty |= filters(ui, ("step", i), list, &self.document);
-                    }
+                step_header(ui, i, step, objects, &mut edits);
+                if is_rule(step) {
+                    *dirty |= step_conditions(ui, i, step, &self.document);
                 }
                 if step.operation == Operation::Mark && step.power_percent == 0.0 {
                     crate::form::caption(
@@ -1749,44 +2021,18 @@ impl JobUi {
                     &mut step.passes,
                     profile.as_ref(),
                 );
-                let first = ParameterSet {
-                    power_percent: step.power_percent,
-                    speed_percent: step.speed_percent,
-                    passes: step.passes,
-                };
-                let mut drop = None;
-                for (j, set) in step.additional.iter_mut().enumerate() {
-                    ui.label(tr!("Parametersatz {number}", number = j + 2));
-                    *dirty |= parameters(
-                        ui,
-                        &mut set.power_percent,
-                        &mut set.speed_percent,
-                        &mut set.passes,
-                        None,
-                    );
-                    if ui.button(tr("Parametersatz entfernen")).clicked() {
-                        drop = Some(j);
-                    }
-                }
-                if let Some(j) = drop {
-                    step.additional.remove(j);
-                    *dirty = true;
-                }
-                if step.additional.len() < 15 && ui.button(tr("Weiteren Parametersatz")).clicked() {
-                    step.additional.push(first);
-                    *dirty = true;
-                }
-                if step.operation.is_raster() {
-                    *dirty |= raster_options(ui, ("step", i), &mut step.raster, step.operation);
-                } else {
-                    *dirty |= ui
-                        .checkbox(&mut step.outline, tr("Nur Umriss"))
-                        .on_hover_text(tr("Schneidet nur den Rand der Fläche, die alle Objekte dieses Schritts zusammen bedecken (VisiCut „Kontur“): Überlappungen und innere Linien entfallen, Bilder zählen als Rechteck."))
-                        .changed();
-                }
+                *dirty |= additional_parameter_sets(ui, step);
+                *dirty |= step_options(ui, i, step);
             });
         }
-        if let Some((i, operation)) = change
+        *dirty |= self.apply_step_edits(project, edits);
+    }
+
+    /// Ändert, ergänzt oder entfernt die angeklickten Schritte; `true`, wenn
+    /// sich etwas geändert hat.
+    fn apply_step_edits(&self, project: &mut Project, edits: StepEdits) -> bool {
+        let mut changed = false;
+        if let Some((i, operation)) = edits.change
             && project.steps[i].operation != operation
         {
             // Bedingungen bleiben, Leistung und Tempo kommen aus dem Profil.
@@ -1796,20 +2042,21 @@ impl JobUi {
                 rest: old.rest,
                 ..default_step(self.active(), project, operation)
             };
-            *dirty = true;
+            changed = true;
         }
-        if let Some(i) = insert_after {
+        if let Some(i) = edits.insert_after {
             let step = JobStep {
                 filters: Some(Vec::new()),
                 ..default_step(self.active(), project, project.steps[i].operation)
             };
             project.steps.insert(i + 1, step);
-            *dirty = true;
+            changed = true;
         }
-        if let Some(i) = remove {
+        if let Some(i) = edits.remove {
             project.steps.remove(i);
-            *dirty = true;
+            changed = true;
         }
+        changed
     }
 
     /// Einstellungen → Job, „Ignorieren“: Objekte, die kein Schritt bearbeitet.
@@ -1863,173 +2110,122 @@ impl JobUi {
             .id_salt("material_library")
             .show(ui, |ui| {
                 ui.horizontal_top(|ui| {
-                    ui.vertical(|ui| {
-                        ui.set_width(190.0);
-                        egui::ScrollArea::vertical()
-                            .id_salt("materials")
-                            .auto_shrink([false, false])
-                            .max_height(columns - footer)
-                            .show(ui, |ui| {
-                                for (i, m) in draft.iter().enumerate() {
-                                    ui.selectable_value(&mut selected, i, &m.name);
-                                }
-                            });
-                        use crate::object_bar::{Icon, list_button, list_footer};
-                        let chosen = selected < draft.len();
-                        list_footer(ui, 190.0, |ui| {
-                            if list_button(ui, Icon::Plus, true, tr("Neues Material")) {
-                                selected = new_material(&mut draft);
-                            }
-                            if list_button(ui, Icon::Duplicate, chosen, tr("Material duplizieren"))
-                            {
-                                selected = duplicate_material(&mut draft, selected);
-                            }
-                            if list_button(ui, Icon::Minus, chosen, tr("Material entfernen")) {
-                                selected = remove_material(&mut draft, selected);
-                            }
-                        });
-                    });
-                    // Trennstrich so hoch wie die Spalten; `separator()` nähme die
-                    // ganze verfügbare Höhe und schöbe die Knopfzeile hinaus.
-                    let (line, _) =
-                        ui.allocate_exact_size(egui::vec2(12.0, columns), egui::Sense::hover());
-                    ui.painter().vline(
-                        line.center().x,
-                        line.y_range(),
-                        ui.visuals().widgets.noninteractive.bg_stroke,
-                    );
-                    ui.vertical(|ui| {
-                        let Some(material) = draft.get_mut(selected) else {
-                            ui.label(tr("Material auswählen"));
-                            return;
-                        };
-                        let top = ui.cursor().top();
-                        ui.horizontal(|ui| {
-                            ui.label(tr("Name"));
-                            ui.text_edit_singleline(&mut material.name);
-                        });
-                        ui.small(tr("\
-                            Leistung und Geschwindigkeit in Prozent wie am LTT. Je Stärke ist \
-                             ein Profil pro Verfahren möglich; 0 % Leistung gilt als \
-                             „nicht übernehmbar“."));
-                        let mut drop = None;
-                        // Die Symbolleiste schließt unten mit der der Materialliste ab.
-                        let used = ui.cursor().top() - top;
-                        egui::ScrollArea::vertical()
-                            .id_salt("profiles")
-                            .auto_shrink([false, false])
-                            .max_height((columns - footer - used).max(80.0))
-                            .show(ui, |ui| {
-                                profile_table(ui, material, &mut drop);
-                            });
-                        if let Some(j) = drop {
-                            material.profiles.remove(j);
-                        }
-                        let add = crate::object_bar::list_footer(ui, 72.0, |ui| {
-                            crate::object_bar::list_button(
-                                ui,
-                                crate::object_bar::Icon::Plus,
-                                true,
-                                tr("Stärke hinzufügen"),
-                            )
-                        });
-                        if add {
-                            add_profile(material);
-                        }
-                    });
+                    material_list(ui, &mut draft, &mut selected, columns - footer);
+                    column_rule(ui, columns);
+                    material_details(ui, draft.get_mut(selected), columns - footer);
                 });
                 ui.separator();
                 ui.horizontal(|ui| {
-                    if ui.button(tr("Importieren …")).clicked()
-                        && let Some(path) = rfd::FileDialog::new()
-                            .set_title(tr("Materialbibliothek importieren"))
-                            .add_filter("JSON", &["json"])
-                            .pick_file()
-                    {
-                        let mut library = Library {
-                            materials: draft.clone(),
-                            ..self.library.clone()
-                        };
-                        match std::fs::read(&path)
-                            .map_err(|e| e.to_string())
-                            .and_then(|b| Library::import(&b).map_err(String::from))
-                        {
-                            Ok(other) => {
-                                let count = library.merge(other);
-                                *status = tr!("{count} Materialien importiert", count = count);
-                                draft = library.materials;
-                            }
-                            Err(e) => *status = e,
-                        }
-                    }
-                    if ui.button(tr("Exportieren …")).clicked()
-                        && let Some(path) = rfd::FileDialog::new()
-                            .set_title(tr("Materialbibliothek exportieren"))
-                            .add_filter("JSON", &["json"])
-                            .set_file_name("Materialien.json")
-                            .save_file()
-                    {
-                        let library = Library {
-                            materials: draft.clone(),
-                            ..self.library.clone()
-                        };
-                        *status = match library.export(&path) {
-                            Ok(()) => tr("Materialbibliothek exportiert").into(),
-                            Err(e) => e.to_string(),
-                        };
-                    }
-                    if ui
-                        .add_enabled(self.custom, egui::Button::new(tr("FAU wiederherstellen")))
-                        .clicked()
-                    {
-                        match Library::reset(&device::config_dir()) {
-                            Ok(library) => {
-                                draft = library.materials.clone();
-                                selected = 0;
-                                self.library = library;
-                                self.custom = false;
-                                *status = tr("FAU-Materialbibliothek wiederhergestellt").into();
-                            }
-                            Err(e) => *status = e.to_string(),
-                        }
-                    }
-                    let origin = if !self.custom {
-                        tr("FAU-Bibliothek").to_string()
-                    } else if self.library.source != visicut_core::materials::BUNDLED_SOURCE {
-                        tr!("Bibliothek von „{lab}“", lab = self.library.source)
-                    } else {
-                        tr("Eigene Bibliothek").to_string()
-                    };
-                    ui.weak(origin);
-                    let changed = draft != self.library.materials;
-                    if ui
-                        .add_enabled(changed, egui::Button::new(tr("Verwerfen")))
-                        .on_hover_text(tr("Ungesicherte Änderungen verwerfen"))
-                        .clicked()
-                    {
-                        draft = self.library.materials.clone();
-                        selected = selected.min(draft.len().saturating_sub(1));
-                    }
-                    if ui
-                        .add_enabled(changed, egui::Button::new(tr("Sichern")))
-                        .clicked()
-                    {
-                        let library = Library {
-                            materials: draft.clone(),
-                            ..self.library.clone()
-                        };
-                        match library.save(&device::config_dir()) {
-                            Ok(()) => {
-                                self.library = library;
-                                self.custom = true;
-                                *status = tr("Materialbibliothek gesichert").into();
-                            }
-                            Err(e) => *status = e.to_string(),
-                        }
-                    }
+                    self.library_buttons(ui, &mut draft, &mut selected, status);
                 });
             });
         self.editor = Some(Editor { draft, selected });
+    }
+
+    /// Knopfzeile der Materialbibliothek: Importieren, Exportieren, FAU
+    /// wiederherstellen, Herkunft, Verwerfen und Sichern.
+    fn library_buttons(
+        &mut self,
+        ui: &mut egui::Ui,
+        draft: &mut Vec<Material>,
+        selected: &mut usize,
+        status: &mut String,
+    ) {
+        if ui.button(tr("Importieren …")).clicked()
+            && let Some(path) = rfd::FileDialog::new()
+                .set_title(tr("Materialbibliothek importieren"))
+                .add_filter("JSON", &["json"])
+                .pick_file()
+        {
+            *status = self.import_materials(&path, draft);
+        }
+        if ui.button(tr("Exportieren …")).clicked()
+            && let Some(path) = rfd::FileDialog::new()
+                .set_title(tr("Materialbibliothek exportieren"))
+                .add_filter("JSON", &["json"])
+                .set_file_name("Materialien.json")
+                .save_file()
+        {
+            *status = match self.with_materials(draft).export(&path) {
+                Ok(()) => tr("Materialbibliothek exportiert").into(),
+                Err(e) => e.to_string(),
+            };
+        }
+        if ui
+            .add_enabled(self.custom, egui::Button::new(tr("FAU wiederherstellen")))
+            .clicked()
+        {
+            match Library::reset(&device::config_dir()) {
+                Ok(library) => {
+                    *draft = library.materials.clone();
+                    *selected = 0;
+                    self.library = library;
+                    self.custom = false;
+                    *status = tr("FAU-Materialbibliothek wiederhergestellt").into();
+                }
+                Err(e) => *status = e.to_string(),
+            }
+        }
+        ui.weak(self.library_origin());
+        let changed = *draft != self.library.materials;
+        if ui
+            .add_enabled(changed, egui::Button::new(tr("Verwerfen")))
+            .on_hover_text(tr("Ungesicherte Änderungen verwerfen"))
+            .clicked()
+        {
+            *draft = self.library.materials.clone();
+            *selected = (*selected).min(draft.len().saturating_sub(1));
+        }
+        if ui
+            .add_enabled(changed, egui::Button::new(tr("Sichern")))
+            .clicked()
+        {
+            let library = self.with_materials(draft);
+            match library.save(&device::config_dir()) {
+                Ok(()) => {
+                    self.library = library;
+                    self.custom = true;
+                    *status = tr("Materialbibliothek gesichert").into();
+                }
+                Err(e) => *status = e.to_string(),
+            }
+        }
+    }
+
+    /// Die Bibliothek mit den Materialien des Entwurfs.
+    fn with_materials(&self, materials: &[Material]) -> Library {
+        Library {
+            materials: materials.to_vec(),
+            ..self.library.clone()
+        }
+    }
+
+    /// Fügt die Materialien der Datei `path` dem Entwurf hinzu; liefert die
+    /// Meldung dazu.
+    fn import_materials(&self, path: &std::path::Path, draft: &mut Vec<Material>) -> String {
+        let mut library = self.with_materials(draft);
+        match std::fs::read(path)
+            .map_err(|e| e.to_string())
+            .and_then(|b| Library::import(&b).map_err(String::from))
+        {
+            Ok(other) => {
+                let count = library.merge(other);
+                *draft = library.materials;
+                tr!("{count} Materialien importiert", count = count)
+            }
+            Err(e) => e,
+        }
+    }
+
+    /// Herkunft der gesicherten Bibliothek für die Knopfzeile.
+    fn library_origin(&self) -> String {
+        if !self.custom {
+            tr("FAU-Bibliothek").to_string()
+        } else if self.library.source != visicut_core::materials::BUNDLED_SOURCE {
+            tr!("Bibliothek von „{lab}“", lab = self.library.source)
+        } else {
+            tr("Eigene Bibliothek").to_string()
+        }
     }
 
     /// Ob die Materialbibliothek ungesicherte Änderungen hat.

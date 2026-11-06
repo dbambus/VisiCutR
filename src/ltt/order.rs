@@ -28,9 +28,9 @@ impl Element {
 
     /// Java `Element.invert`.
     fn invert(&mut self) {
-        if !self.moves.is_empty() {
+        if let Some(end) = self.moves.pop() {
             self.moves.insert(0, self.start);
-            self.start = self.moves.pop().unwrap();
+            self.start = end;
             self.moves.reverse();
         }
     }
@@ -105,10 +105,8 @@ pub fn inner_first(elements: Vec<Element>, keys: &[SetKey]) -> Vec<Element> {
     for group in java_groups(elements, keys) {
         result.extend(join_contiguous(group));
     }
-    let boxes: Vec<[f64; 4]> = result.iter().map(Element::bounds).collect();
-    let mut order: Vec<usize> = (0..result.len()).collect();
-    order.sort_by(|&i, &j| {
-        let (a, b) = (boxes[i], boxes[j]);
+    let mut boxed: Vec<([f64; 4], Element)> = result.into_iter().map(|e| (e.bounds(), e)).collect();
+    boxed.sort_by(|(a, _), (b, _)| {
         // Java sorts four times stably (xmin desc, ymin desc, xmax asc, ymax
         // asc), so the last sort has the highest priority.
         a[3].total_cmp(&b[3])
@@ -116,11 +114,7 @@ pub fn inner_first(elements: Vec<Element>, keys: &[SetKey]) -> Vec<Element> {
             .then((-a[1]).total_cmp(&-b[1]))
             .then((-a[0]).total_cmp(&-b[0]))
     });
-    let mut slots: Vec<Option<Element>> = result.into_iter().map(Some).collect();
-    order
-        .into_iter()
-        .map(|i| slots[i].take().unwrap())
-        .collect()
+    boxed.into_iter().map(|(_, e)| e).collect()
 }
 
 /// Java `NearestVectorOptimizer.sort`: joins open paths like
@@ -135,10 +129,11 @@ pub fn nearest(elements: Vec<Element>, keys: &[SetKey]) -> Vec<Element> {
     if rest.is_empty() {
         return rest;
     }
-    let mut result = vec![rest.remove(0)];
+    let first = rest.remove(0);
+    let mut end = first.end();
+    let mut result = vec![first];
     let distance = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]);
     while !rest.is_empty() {
-        let end = result.last().unwrap().end();
         let (mut next, mut invert, mut best) = (0, false, f64::INFINITY);
         for (i, e) in rest.iter().enumerate() {
             let d = distance(e.start, end);
@@ -159,6 +154,7 @@ pub fn nearest(elements: Vec<Element>, keys: &[SetKey]) -> Vec<Element> {
         if invert {
             element.invert();
         }
+        end = element.end();
         result.push(element);
     }
     result
@@ -252,148 +248,207 @@ fn num_left_of(xs: &[f64], x: f64) -> usize {
 /// first, then open paths merged wherever exactly one other end lies within
 /// the tolerance (forks stay apart).
 fn join_contiguous(group: Vec<Element>) -> Vec<Element> {
-    let (mut result, open): (Vec<Element>, Vec<Element>) =
-        group.into_iter().partition(Element::is_closed);
-    let mut points: Vec<Option<Directed>> = Vec::with_capacity(open.len() * 2);
-    for (i, element) in open.iter().enumerate() {
-        points.push(Some(Directed {
-            index: i,
-            start: element.start,
-            inverted: false,
-        }));
-        points.push(Some(Directed {
-            index: i,
-            start: element.end(),
-            inverted: true,
-        }));
-    }
-    // Collections.sort is stable.
-    points.sort_by(|a, b| a.unwrap().start[0].total_cmp(&b.unwrap().start[0]));
-    let xs: Vec<f64> = points.iter().map(|p| p.unwrap().start[0]).collect();
-    let mut elements: Vec<Option<Open>> = open
-        .into_iter()
-        .map(|element| {
-            Some(Open {
-                element,
-                start_index: 0,
-                end_index: 0,
-            })
-        })
-        .collect();
-    for (i, point) in points.iter().enumerate() {
-        let point = point.unwrap();
-        let open = elements[point.index].as_mut().unwrap();
-        if point.inverted {
-            open.end_index = i;
-        } else {
-            open.start_index = i;
-        }
-    }
-
+    let mut joiner = Joiner::new(group);
     let mut changed = true;
     while changed {
         changed = false;
-        for current in 0..elements.len() {
-            if elements[current].is_none() {
+        for current in 0..joiner.elements.len() {
+            if joiner.elements[current].is_none() {
                 continue;
             }
             let mut any_neighbours = false;
             for invert in [true, false] {
-                let open = elements[current].as_ref().unwrap();
+                // Still there: a merge ends this loop.
+                let Some(open) = joiner.elements[current].as_ref() else {
+                    break;
+                };
                 let head = if invert {
                     open.element.end()
                 } else {
                     open.element.start
                 };
-                let mut nearby = 0;
-                let mut start_near = None;
-                let mut end_near = None;
-                for e in points[num_left_of(&xs, head[0] - JOIN_TOLERANCE)..]
-                    .iter()
-                    .flatten()
-                {
-                    if e.index == current {
-                        continue;
-                    }
-                    if e.start[0] > head[0] + JOIN_TOLERANCE || nearby >= 2 {
-                        break;
-                    }
-                    if (e.start[0] - head[0]).abs() + (e.start[1] - head[1]).abs() < JOIN_TOLERANCE
-                    {
-                        nearby += 1;
-                        if e.inverted {
-                            end_near = Some(e.index);
-                        } else {
-                            start_near = Some(e.index);
-                        }
-                    }
-                }
-                if nearby >= 1 {
+                let neighbours = joiner.neighbours(current, head);
+                if neighbours.nearby >= 1 {
                     any_neighbours = true;
                 }
-                if nearby != 1 {
+                if neighbours.nearby != 1 {
                     continue;
                 }
-                let merged = if let Some(other) = start_near {
-                    let mut cur = elements[current].take().unwrap();
-                    let o = elements[other].take().unwrap();
-                    if invert {
-                        // current.end ---- other.start
-                        points[cur.end_index] = None;
-                    } else {
-                        // current.start ---- other.start, by reversing current
-                        points[cur.start_index] = None;
-                        cur.invert();
-                    }
-                    points[o.start_index] = None;
-                    cur.append(o);
-                    elements[current] = Some(cur);
-                    current
-                } else {
-                    let other = end_near.unwrap();
-                    let mut cur = elements[current].take().unwrap();
-                    let mut o = elements[other].take().unwrap();
-                    if invert {
-                        // current.end ---- other.end, by reversing other
-                        points[cur.end_index] = None;
-                        points[o.end_index] = None;
-                        o.invert();
-                        cur.append(o);
-                        elements[current] = Some(cur);
-                        current
-                    } else {
-                        // other.end ---- current.start
-                        points[o.end_index] = None;
-                        points[cur.start_index] = None;
-                        o.append(cur);
-                        elements[other] = Some(o);
-                        other
-                    }
-                };
-                let open = elements[merged].as_ref().unwrap();
-                let (start_index, end_index) = (open.start_index, open.end_index);
-                if open.element.is_closed() {
-                    result.push(elements[merged].take().unwrap().element);
-                    points[start_index] = None;
-                    points[end_index] = None;
-                } else {
-                    for (i, inverted) in [(start_index, false), (end_index, true)] {
-                        if let Some(p) = points[i].as_mut() {
-                            p.inverted = inverted;
-                            p.index = merged;
-                        }
-                    }
-                }
+                joiner.merge(current, invert, &neighbours);
                 changed = true;
                 break;
             }
-            if !any_neighbours {
-                result.push(elements[current].take().unwrap().element);
+            if !any_neighbours && let Some(open) = joiner.elements[current].take() {
+                joiner.result.push(open.element);
             }
         }
     }
+    let Joiner {
+        mut result,
+        elements,
+        ..
+    } = joiner;
     result.extend(elements.into_iter().flatten().map(|open| open.element));
     result
+}
+
+/// State of [`join_contiguous`]: the open paths and their end points sorted
+/// by x; merged paths and joined end points become `None`.
+struct Joiner {
+    points: Vec<Option<Directed>>,
+    /// x of each entry of `points`.
+    xs: Vec<f64>,
+    elements: Vec<Option<Open>>,
+    /// Finished paths: the closed ones and those without neighbours.
+    result: Vec<Element>,
+}
+
+/// Ends of other paths within the tolerance of a path's head.
+#[derive(Default)]
+struct Neighbours {
+    nearby: usize,
+    start_near: Option<usize>,
+    end_near: Option<usize>,
+}
+
+impl Joiner {
+    fn new(group: Vec<Element>) -> Self {
+        let (result, open): (Vec<Element>, Vec<Element>) =
+            group.into_iter().partition(Element::is_closed);
+        let mut points: Vec<Directed> = Vec::with_capacity(open.len() * 2);
+        for (i, element) in open.iter().enumerate() {
+            points.push(Directed {
+                index: i,
+                start: element.start,
+                inverted: false,
+            });
+            points.push(Directed {
+                index: i,
+                start: element.end(),
+                inverted: true,
+            });
+        }
+        // Collections.sort is stable.
+        points.sort_by(|a, b| a.start[0].total_cmp(&b.start[0]));
+        let xs: Vec<f64> = points.iter().map(|p| p.start[0]).collect();
+        let mut elements: Vec<Open> = open
+            .into_iter()
+            .map(|element| Open {
+                element,
+                start_index: 0,
+                end_index: 0,
+            })
+            .collect();
+        for (i, point) in points.iter().enumerate() {
+            let open = &mut elements[point.index];
+            if point.inverted {
+                open.end_index = i;
+            } else {
+                open.start_index = i;
+            }
+        }
+        Self {
+            points: points.into_iter().map(Some).collect(),
+            xs,
+            elements: elements.into_iter().map(Some).collect(),
+            result,
+        }
+    }
+
+    /// The ends near `head` of paths other than `current`; stops counting
+    /// at two.
+    fn neighbours(&self, current: usize, head: [f64; 2]) -> Neighbours {
+        let mut found = Neighbours::default();
+        for e in self.points[num_left_of(&self.xs, head[0] - JOIN_TOLERANCE)..]
+            .iter()
+            .flatten()
+        {
+            if e.index == current {
+                continue;
+            }
+            if e.start[0] > head[0] + JOIN_TOLERANCE || found.nearby >= 2 {
+                break;
+            }
+            if (e.start[0] - head[0]).abs() + (e.start[1] - head[1]).abs() < JOIN_TOLERANCE {
+                found.nearby += 1;
+                if e.inverted {
+                    found.end_near = Some(e.index);
+                } else {
+                    found.start_near = Some(e.index);
+                }
+            }
+        }
+        found
+    }
+
+    /// Takes out a path not yet joined: `current` or the owner of a live end
+    /// point.
+    fn take(&mut self, index: usize) -> Open {
+        self.elements[index]
+            .take()
+            .expect("Endpunkt gehört zu einem offenen Pfad")
+    }
+
+    /// Joins `current` at its end (`invert`) or start with its only neighbour.
+    fn merge(&mut self, current: usize, invert: bool, neighbours: &Neighbours) {
+        let (merged, open) = match (neighbours.start_near, neighbours.end_near) {
+            (Some(other), _) => {
+                let mut cur = self.take(current);
+                let o = self.take(other);
+                if invert {
+                    // current.end ---- other.start
+                    self.points[cur.end_index] = None;
+                } else {
+                    // current.start ---- other.start, by reversing current
+                    self.points[cur.start_index] = None;
+                    cur.invert();
+                }
+                self.points[o.start_index] = None;
+                cur.append(o);
+                (current, cur)
+            }
+            (None, Some(other)) => {
+                let mut cur = self.take(current);
+                let mut o = self.take(other);
+                if invert {
+                    // current.end ---- other.end, by reversing other
+                    self.points[cur.end_index] = None;
+                    self.points[o.end_index] = None;
+                    o.invert();
+                    cur.append(o);
+                    (current, cur)
+                } else {
+                    // other.end ---- current.start
+                    self.points[o.end_index] = None;
+                    self.points[cur.start_index] = None;
+                    o.append(cur);
+                    (other, o)
+                }
+            }
+            // Exactly one neighbour was found, so one of them is set.
+            (None, None) => return,
+        };
+        self.settle(merged, open);
+    }
+
+    /// A joined path: finished when it closed, otherwise its two remaining
+    /// end points now refer to it.
+    fn settle(&mut self, merged: usize, open: Open) {
+        let (start_index, end_index) = (open.start_index, open.end_index);
+        if open.element.is_closed() {
+            self.result.push(open.element);
+            self.points[start_index] = None;
+            self.points[end_index] = None;
+        } else {
+            for (i, inverted) in [(start_index, false), (end_index, true)] {
+                if let Some(p) = self.points[i].as_mut() {
+                    p.inverted = inverted;
+                    p.index = merged;
+                }
+            }
+            self.elements[merged] = Some(open);
+        }
+    }
 }
 
 /// Upper limits for [`shortest_travel`]: the search is quadratic, so larger
@@ -454,8 +509,8 @@ pub fn shortest_travel(
             }
         }
         // Some path is always free: the one with the smallest box.
-        let (_, i, start, reversed) = best.expect("a path without inner paths");
-        let mut e = slots[i].take().unwrap();
+        let (_, i, start, reversed) = best.expect("ein Pfad ohne innere Pfade ist frei");
+        let mut e = slots[i].take().expect("nur freie Pfade werden gewählt");
         if reversed {
             e.invert();
         } else if start > 0 {

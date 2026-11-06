@@ -522,8 +522,7 @@ impl SettingsPage {
 
 struct VisiCutR {
     project: Project,
-    page: Page,
-    settings_page: SettingsPage,
+    navigation: Navigation,
     textures: Textures,
     canvas: CanvasView,
     /// Nullpunkt des Geräts beim letzten Bild (unten links?); ein Wechsel
@@ -541,9 +540,6 @@ struct VisiCutR {
     /// Projekt ist vollständig und passt aufs Bett (pro Bild neu bestimmt).
     sendable: bool,
     preview: preview_ui::PreviewUi,
-    /// „Vorschau & Zeit“ (Menü, Reiterleiste) setzt dieses Feld; `update`
-    /// berechnet die Vorschau und wechselt in den Reiter „Vorschau“.
-    show_preview: bool,
     background: Background,
     devices: devices_ui::DeviceUi,
     jobs: jobs_ui::JobUi,
@@ -551,8 +547,6 @@ struct VisiCutR {
     remnants: remnant_ui::RemnantUi,
     compose: compose_ui::ComposeUi,
     history: History<Snapshot>,
-    /// Fenster mit den Tastenkürzeln.
-    show_shortcuts: bool,
     /// Sprache und zuletzt geöffnete Dateien.
     settings: settings::AppSettings,
     /// Felder für die Parameter eines parametrischen Teils.
@@ -668,6 +662,17 @@ struct Textures {
     live: Option<(u64, Option<egui::TextureHandle>)>,
 }
 
+/// Gezeigte Seite und offene Fenster.
+struct Navigation {
+    page: Page,
+    settings_page: SettingsPage,
+    /// „Vorschau & Zeit“ (Menü, Reiterleiste) setzt dieses Feld; `update`
+    /// berechnet die Vorschau und wechselt in den Reiter „Vorschau“.
+    show_preview: bool,
+    /// Fenster mit den Tastenkürzeln.
+    show_shortcuts: bool,
+}
+
 impl VisiCutR {
     fn new(cc: &eframe::CreationContext<'_>, launch: instance::Launch) -> Self {
         // Erster Start nach der Umbenennung: Einstellungen von VisiCutRust übernehmen.
@@ -730,9 +735,12 @@ impl VisiCutR {
             copied: None,
             sendable: false,
             pending: Pending::default(),
-            show_preview: false,
-            page: Page::Prepare,
-            settings_page: SettingsPage::Devices,
+            navigation: Navigation {
+                page: Page::Prepare,
+                settings_page: SettingsPage::Devices,
+                show_preview: false,
+                show_shortcuts: false,
+            },
             preview: preview_ui::PreviewUi::default(),
             background: Background {
                 send_result: None,
@@ -751,7 +759,6 @@ impl VisiCutR {
             remnants: remnant_ui::RemnantUi::default(),
             compose: compose_ui::ComposeUi::default(),
             history: History::default(),
-            show_shortcuts: false,
             settings,
             parameters: Default::default(),
             inkscape: None,
@@ -1917,7 +1924,7 @@ impl VisiCutR {
         self.project.rotary_axis = false;
         (self.project.x_mm, self.project.y_mm) = (0.0, 0.0);
         self.project.operation = Operation::Mark;
-        self.page = Page::Prepare;
+        self.navigation.page = Page::Prepare;
         self.messages.status = tr(
             "Kalibrierseite geöffnet: Material und Markier-Parameter prüfen, senden, danach Foto aufnehmen.",
         )
@@ -2284,13 +2291,13 @@ impl VisiCutR {
     }
 
     fn show_settings(&mut self, page: SettingsPage) {
-        self.page = Page::Settings;
-        self.settings_page = page;
+        self.navigation.page = Page::Settings;
+        self.navigation.settings_page = page;
     }
 
     /// Reiterwechsel; „Vorschau“ berechnet einen veralteten Auftrag neu.
     fn switch_page(&mut self, ctx: &egui::Context, page: Page) {
-        self.page = page;
+        self.navigation.page = page;
         if page == Page::Preview && self.preview.outdated() && !self.project.svg.is_empty() {
             self.preview
                 .request(ctx, &self.project, &mut self.messages.status);
@@ -2318,7 +2325,7 @@ impl VisiCutR {
                 (Page::Preview, format!("👁  {}", tr("Vorschau"))),
                 (Page::Settings, format!("⚙  {}", tr("Einstellungen"))),
             ] {
-                if form::top_tab(ui, self.page == page, &title).clicked() {
+                if form::top_tab(ui, self.navigation.page == page, &title).clicked() {
                     let ctx = ui.ctx().clone();
                     self.switch_page(&ctx, page);
                 }
@@ -2370,19 +2377,19 @@ impl VisiCutR {
                     if ui
                         .add_sized(
                             [ui.available_width(), 30.0],
-                            egui::Button::selectable(self.settings_page == page, text),
+                            egui::Button::selectable(self.navigation.settings_page == page, text),
                         )
                         .clicked()
                     {
-                        self.settings_page = page;
+                        self.navigation.settings_page = page;
                     }
                 }
             });
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(16.0))
             .show(ctx, |ui| {
-                form::page_heading(ui, self.settings_page.title());
-                match self.settings_page {
+                form::page_heading(ui, self.navigation.settings_page.title());
+                match self.navigation.settings_page {
                     SettingsPage::Devices => {
                         self.devices
                             .settings_page(ui, &mut self.project, &mut self.messages.status)
@@ -2891,10 +2898,10 @@ impl VisiCutR {
                 "{}/issues/new",
                 visicut_core::update::REPOSITORY
             ))),
-            Command::Shortcuts => self.show_shortcuts = true,
+            Command::Shortcuts => self.navigation.show_shortcuts = true,
             Command::About => self.show_settings(SettingsPage::General),
             Command::Materials => self.show_settings(SettingsPage::Materials),
-            Command::Preview => self.show_preview = true,
+            Command::Preview => self.navigation.show_preview = true,
             Command::Send => self.send(),
             Command::Text => self.compose.open(compose_ui::Tool::Text),
             Command::Shape => self.compose.open(compose_ui::Tool::Shape),
@@ -3113,7 +3120,7 @@ impl VisiCutR {
 
     /// Fenster mit allen Tastenkürzeln.
     fn shortcuts_window(&mut self, ctx: &egui::Context) {
-        if !self.show_shortcuts {
+        if !self.navigation.show_shortcuts {
             return;
         }
         let mut open = true;
@@ -3152,7 +3159,7 @@ impl VisiCutR {
                     });
             },
         );
-        self.show_shortcuts = open;
+        self.navigation.show_shortcuts = open;
     }
 
     /// Seitenleiste in der Reihenfolge der macOS-Oberfläche: Teile, Material,
@@ -5293,8 +5300,8 @@ impl eframe::App for VisiCutR {
             }
             None => {}
         }
-        if self.show_preview {
-            self.show_preview = false;
+        if self.navigation.show_preview {
+            self.navigation.show_preview = false;
             self.preview
                 .request(ctx, &self.project, &mut self.messages.status);
         }
@@ -5304,14 +5311,14 @@ impl eframe::App for VisiCutR {
             ctx,
             &self.project,
             &mut self.messages.status,
-            self.page == Page::Preview,
+            self.navigation.page == Page::Preview,
         );
         // Eine angeforderte Vorschau (Menü, Kürzel, Knopf) zeigt ihren Reiter.
         if self.preview.open {
             self.preview.open = false;
-            self.page = Page::Preview;
+            self.navigation.page = Page::Preview;
         }
-        if self.page != Page::Settings {
+        if self.navigation.page != Page::Settings {
             self.devices.close_manager_if_clean();
             self.jobs.close_library_if_clean();
         }
@@ -5351,7 +5358,7 @@ impl eframe::App for VisiCutR {
                     }
                 });
             });
-        match self.page {
+        match self.navigation.page {
             Page::Prepare => {
                 egui::SidePanel::left("settings")
                     .resizable(false)

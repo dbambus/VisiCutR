@@ -561,8 +561,7 @@ struct VisiCutR {
     /// „Vorschau & Zeit“ (Menü, Reiterleiste) setzt dieses Feld; `update`
     /// berechnet die Vorschau und wechselt in den Reiter „Vorschau“.
     show_preview: bool,
-    send_result: Option<std::sync::mpsc::Receiver<Result<Vec<String>, String>>>,
-    reading: Option<Reading>,
+    background: Background,
     devices: devices_ui::DeviceUi,
     jobs: jobs_ui::JobUi,
     vectorize: vectorize_ui::VectorizeUi,
@@ -576,20 +575,6 @@ struct VisiCutR {
     rotate_deg: f32,
     /// Sprache und zuletzt geöffnete Dateien.
     settings: settings::AppSettings,
-    /// Laufende Update-Prüfung (`true`: von Hand gestartet) und gefundenes Release.
-    update_check: Option<(bool, UpdateCheck)>,
-    update_found: Option<visicut_core::update::Release>,
-    /// Geladene FabLab-Einstellungen, die der Dialog zum Übernehmen anbietet.
-    lab_offer: Option<LabOffer>,
-    /// Laufende Prüfung der abonnierten FabLab-Einstellungen beim Start.
-    lab_check: Option<std::sync::mpsc::Receiver<Result<visicut_core::lab::LabSettings, String>>>,
-    /// Nimmt Dateien späterer Starts und der Inkscape-Erweiterung entgegen.
-    instance: Option<instance::Listener>,
-    /// Übergebene Dateien, die auf das Ende eines Dialogs warten.
-    handed_over: Option<instance::Request>,
-    /// Lasercutter, Material und Senden aus der Befehlszeile; warten, bis
-    /// die Dateien geöffnet sind.
-    launch_options: Option<instance::Options>,
     /// Felder für die Parameter eines parametrischen Teils.
     parameters: parameters_ui::ParametersUi,
     /// Stand der Inkscape-Erweiterung (Einstellungen), erst bei Bedarf geprüft.
@@ -640,6 +625,26 @@ struct CanvasView {
     show_grid: bool,
     /// Ziehen an einem Anfasser des gewählten Teils.
     handle_drag: Option<HandleDrag>,
+}
+
+/// Arbeiten in anderen Threads und Prozessen und ihre noch offenen Ergebnisse.
+struct Background {
+    send_result: Option<std::sync::mpsc::Receiver<Result<Vec<String>, String>>>,
+    reading: Option<Reading>,
+    /// Laufende Update-Prüfung (`true`: von Hand gestartet) und gefundenes Release.
+    update_check: Option<(bool, UpdateCheck)>,
+    update_found: Option<visicut_core::update::Release>,
+    /// Geladene FabLab-Einstellungen, die der Dialog zum Übernehmen anbietet.
+    lab_offer: Option<LabOffer>,
+    /// Laufende Prüfung der abonnierten FabLab-Einstellungen beim Start.
+    lab_check: Option<std::sync::mpsc::Receiver<Result<visicut_core::lab::LabSettings, String>>>,
+    /// Nimmt Dateien späterer Starts und der Inkscape-Erweiterung entgegen.
+    instance: Option<instance::Listener>,
+    /// Übergebene Dateien, die auf das Ende eines Dialogs warten.
+    handed_over: Option<instance::Request>,
+    /// Lasercutter, Material und Senden aus der Befehlszeile; warten, bis
+    /// die Dateien geöffnet sind.
+    launch_options: Option<instance::Options>,
 }
 
 impl VisiCutR {
@@ -698,8 +703,17 @@ impl VisiCutR {
             page: Page::Prepare,
             settings_page: SettingsPage::Devices,
             preview: preview_ui::PreviewUi::default(),
-            send_result: None,
-            reading: None,
+            background: Background {
+                send_result: None,
+                reading: None,
+                update_check: None,
+                update_found: None,
+                lab_offer: None,
+                lab_check: None,
+                instance: None,
+                handed_over: None,
+                launch_options: None,
+            },
             devices,
             jobs,
             vectorize: vectorize_ui::VectorizeUi::default(),
@@ -710,13 +724,6 @@ impl VisiCutR {
             reference: [0.0, 0.0],
             rotate_deg: 0.0,
             settings,
-            update_check: None,
-            update_found: None,
-            lab_offer: None,
-            lab_check: None,
-            instance: None,
-            handed_over: None,
-            launch_options: None,
             parameters: Default::default(),
             inkscape: None,
             #[cfg(feature = "screenshot")]
@@ -745,7 +752,7 @@ impl VisiCutR {
                 let _ =
                     tx.send(visicut_core::lab::download(&lab.name, &lab.url).map_err(String::from));
             });
-            app.lab_check = Some(rx);
+            app.background.lab_check = Some(rx);
         }
         if let Some(error) = device_error {
             app.report(tr!(
@@ -791,7 +798,7 @@ impl VisiCutR {
             match instance::Listener::start(&visicut_core::device::config_dir(), move || {
                 ctx.request_repaint()
             }) {
-                Ok(listener) => app.instance = Some(listener),
+                Ok(listener) => app.background.instance = Some(listener),
                 Err(e) => eprintln!("Einzelinstanz nicht verfügbar: {e}"),
             }
         }
@@ -815,14 +822,14 @@ impl VisiCutR {
     /// Sichert Sprache und Verlauf; ein Fehler steht nur in der Statuszeile.
     /// Fragt im Hintergrund bei GitHub nach einem neuen Release.
     fn start_update_check(&mut self, manual: bool) {
-        if self.update_check.is_some() {
+        if self.background.update_check.is_some() {
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let _ = tx.send(visicut_core::update::check().map_err(String::from));
         });
-        self.update_check = Some((manual, rx));
+        self.background.update_check = Some((manual, rx));
         if manual {
             self.status = tr("Suche nach Updates …").into();
         }
@@ -831,7 +838,7 @@ impl VisiCutR {
     /// Ergebnis der Update-Prüfung; Fehler der automatischen Prüfung stehen
     /// nur in der Statuszeile.
     fn poll_update(&mut self, ctx: &egui::Context) {
-        let Some((manual, receiver)) = &self.update_check else {
+        let Some((manual, receiver)) = &self.background.update_check else {
             return;
         };
         let manual = *manual;
@@ -845,13 +852,13 @@ impl VisiCutR {
                 Err(tr("Update-Prüfung abgebrochen").into())
             }
         };
-        self.update_check = None;
+        self.background.update_check = None;
         match result {
             Ok(found) => {
                 self.settings.last_update_check = visicut_core::update::now_secs();
                 self.save_settings();
                 match found {
-                    Some(release) => self.update_found = Some(release),
+                    Some(release) => self.background.update_found = Some(release),
                     None if manual => {
                         self.status = tr!(
                             "VisiCutR {version} ist aktuell",
@@ -870,9 +877,9 @@ impl VisiCutR {
     /// Start: Ist etwas neu, fragt ein Dialog, was übernommen wird.
     fn poll_lab(&mut self, ctx: &egui::Context) {
         if let Some((name, url, settings)) = self.devices.downloaded.take() {
-            self.lab_offer = Some(LabOffer::new(name, url, settings, false));
+            self.background.lab_offer = Some(LabOffer::new(name, url, settings, false));
         }
-        let Some(receiver) = &self.lab_check else {
+        let Some(receiver) = &self.background.lab_check else {
             return;
         };
         let result = match receiver.try_recv() {
@@ -881,17 +888,19 @@ impl VisiCutR {
                 ctx.request_repaint_after(std::time::Duration::from_millis(500));
                 return;
             }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => return self.lab_check = None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                return self.background.lab_check = None;
+            }
         };
-        self.lab_check = None;
+        self.background.lab_check = None;
         let Some(lab) = &mut self.settings.lab else {
             return;
         };
         match result {
             Ok(settings) => {
                 lab.last_check = visicut_core::update::now_secs();
-                if settings.fingerprint != lab.fingerprint && self.lab_offer.is_none() {
-                    self.lab_offer = Some(LabOffer::new(
+                if settings.fingerprint != lab.fingerprint && self.background.lab_offer.is_none() {
+                    self.background.lab_offer = Some(LabOffer::new(
                         lab.name.clone(),
                         lab.url.clone(),
                         settings,
@@ -913,7 +922,7 @@ impl VisiCutR {
 
     /// Fragt, welche Teile der FabLab-Einstellungen übernommen werden.
     fn lab_window(&mut self, ctx: &egui::Context) {
-        let Some(mut offer) = self.lab_offer.take() else {
+        let Some(mut offer) = self.background.lab_offer.take() else {
             return;
         };
         let mut apply = false;
@@ -1014,7 +1023,7 @@ impl VisiCutR {
         if apply {
             self.adopt_lab(offer);
         } else if !cancel && !modal.should_close() {
-            self.lab_offer = Some(offer);
+            self.background.lab_offer = Some(offer);
         }
     }
 
@@ -1071,7 +1080,7 @@ impl VisiCutR {
 
     /// Hinweis auf ein neues Release mit Link zur Download-Seite.
     fn update_window(&mut self, ctx: &egui::Context) {
-        let Some(release) = &self.update_found else {
+        let Some(release) = &self.background.update_found else {
             return;
         };
         let mut close = false;
@@ -1101,7 +1110,7 @@ impl VisiCutR {
                 });
             });
         if close {
-            self.update_found = None;
+            self.background.update_found = None;
         }
     }
 
@@ -1120,7 +1129,7 @@ impl VisiCutR {
     /// Fehler und Warnungen: Statuszeile und ein Hinweisdialog.
     fn report(&mut self, message: String) {
         // Nach einem Fehler (etwa beim Öffnen) nicht das falsche Projekt senden.
-        if let Some(options) = &mut self.launch_options {
+        if let Some(options) = &mut self.background.launch_options {
             options.execute = false;
         }
         self.status = message.lines().next().unwrap_or_default().to_owned();
@@ -1131,14 +1140,14 @@ impl VisiCutR {
     }
 
     fn busy(&self) -> bool {
-        self.send_result.is_some()
+        self.background.send_result.is_some()
     }
 
     fn modal_open(&self) -> bool {
-        self.reading.is_some()
+        self.background.reading.is_some()
             || self.alert.is_some()
             || self.pending.asking()
-            || self.lab_offer.is_some()
+            || self.background.lab_offer.is_some()
     }
 
     /// Liest die Grafiken unter `paths` im Hintergrund, falls das noch
@@ -1148,7 +1157,7 @@ impl VisiCutR {
         if import::is_prefetched(paths.iter().map(PathBuf::as_path)) {
             return false;
         }
-        if self.reading.is_some() {
+        if self.background.reading.is_some() {
             self.status = tr("Bitte warten, bis die Dateien gelesen sind").into();
             return true;
         }
@@ -1166,7 +1175,7 @@ impl VisiCutR {
             self.report(e.to_string());
             return true;
         }
-        self.reading = Some(Reading {
+        self.background.reading = Some(Reading {
             result,
             then,
             fit_policy: self.fit_policy,
@@ -1177,20 +1186,20 @@ impl VisiCutR {
 
     /// Setzt einen aufgeschobenen Import fort, sobald seine Dateien gelesen sind.
     fn poll_reading(&mut self, ctx: &egui::Context) {
-        let Some(reading) = &self.reading else {
+        let Some(reading) = &self.background.reading else {
             return;
         };
         let prefetched = match reading.result.try_recv() {
             Ok(prefetched) => prefetched,
             Err(std::sync::mpsc::TryRecvError::Empty) => return,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.reading = None;
+                self.background.reading = None;
                 return self.report(tr("Import ist unerwartet abgebrochen").into());
             }
         };
         let Some(Reading {
             then, fit_policy, ..
-        }) = self.reading.take()
+        }) = self.background.reading.take()
         else {
             return;
         };
@@ -1537,7 +1546,7 @@ impl VisiCutR {
         }
         let options = std::mem::take(&mut request.options);
         if !options.is_empty() {
-            self.launch_options = Some(options);
+            self.background.launch_options = Some(options);
         }
         if request.update && !self.busy() {
             request.files = self.update_parts(ctx, request.files);
@@ -2233,7 +2242,7 @@ impl VisiCutR {
         std::thread::spawn(move || {
             let _ = tx.send(ltt::transmit_jobs(&host, port, &prepared.jobs).map_err(String::from));
         });
-        self.send_result = Some(rx);
+        self.background.send_result = Some(rx);
         self.status = tr("Job wird an den Lasercutter übertragen …").into();
     }
 
@@ -2485,14 +2494,14 @@ impl VisiCutR {
                 ui.horizontal(|ui| {
                     if ui
                         .add_enabled(
-                            self.update_check.is_none(),
+                            self.background.update_check.is_none(),
                             egui::Button::new(tr("Jetzt nach Updates suchen")),
                         )
                         .clicked()
                     {
                         self.start_update_check(true);
                     }
-                    if self.update_check.is_some() {
+                    if self.background.update_check.is_some() {
                         ui.spinner();
                     }
                 });
@@ -4880,7 +4889,7 @@ impl VisiCutR {
     }
 
     fn poll_send(&mut self, ctx: &egui::Context) {
-        let Some(receiver) = &self.send_result else {
+        let Some(receiver) = &self.background.send_result else {
             return;
         };
         let result = match receiver.try_recv() {
@@ -4893,7 +4902,7 @@ impl VisiCutR {
                 return;
             }
         };
-        self.send_result = None;
+        self.background.send_result = None;
         match result {
             Ok(names) => {
                 self.status = tr!(
@@ -4917,7 +4926,7 @@ impl VisiCutR {
 
     #[cfg(feature = "screenshot")]
     fn capture(&mut self, ctx: &egui::Context) {
-        let computing = self.preview.computing() || self.reading.is_some();
+        let computing = self.preview.computing() || self.background.reading.is_some();
         let Some((path, frames)) = &mut self.capture else {
             return;
         };
@@ -5138,32 +5147,32 @@ impl eframe::App for VisiCutR {
                 .filter_map(|f| f.path.clone())
                 .collect()
         });
-        if !dropped.is_empty() && self.reading.is_some() {
+        if !dropped.is_empty() && self.background.reading.is_some() {
             self.status = tr("Bitte warten, bis die Dateien gelesen sind").into();
         } else if !dropped.is_empty() && !self.modal_open() {
             self.drop_files(ctx, dropped);
         }
         // Ein späterer Start hat Dateien übergeben: Fenster nach vorn holen.
         // Wartet ein Dialog, bleibt die Anfrage bis zu seinem Ende liegen.
-        if self.handed_over.is_none()
-            && let Some(request) = self.instance.as_ref().and_then(|i| i.try_recv())
+        if self.background.handed_over.is_none()
+            && let Some(request) = self.background.instance.as_ref().and_then(|i| i.try_recv())
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-            self.handed_over = Some(request);
+            self.background.handed_over = Some(request);
         }
         if !self.modal_open()
             && !self.busy()
             && self.pending.import.is_none()
-            && let Some(request) = self.handed_over.take()
+            && let Some(request) = self.background.handed_over.take()
         {
             self.open_request(ctx, request);
         }
         if !self.modal_open()
             && !self.busy()
             && self.pending.import.is_none()
-            && self.handed_over.is_none()
-            && let Some(options) = self.launch_options.take()
+            && self.background.handed_over.is_none()
+            && let Some(options) = self.background.launch_options.take()
         {
             self.apply_launch_options(options);
         }

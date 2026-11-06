@@ -142,7 +142,6 @@ mod tests {
             std::fs::read_to_string(dir.join(PATH_FILE)).unwrap(),
             program.to_string_lossy()
         );
-        // Verschobenes Programm: neu installieren.
         assert_eq!(
             status(&extensions, Path::new("/anderswo/visicutr")),
             Status::Outdated
@@ -209,7 +208,6 @@ assert v.inkscape_command("inkscape", (1, 0), "x.svg", [])[2] == "--batch-proces
             empty = dir.to_string_lossy(),
             svg = svg.to_string_lossy(),
         );
-        // Unter Windows kann `python3` ein Platzhalter des Stores sein.
         let python = std::process::Command::new("python3")
             .arg("--version")
             .output()

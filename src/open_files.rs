@@ -20,7 +20,6 @@ pub fn take() -> Vec<PathBuf> {
     std::mem::take(&mut *PENDING.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
-// Nur das macOS-Ereignis liefert Dateien nachträglich.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn deliver(paths: Vec<PathBuf>) {
     if paths.is_empty() {
@@ -90,7 +89,6 @@ mod apple {
                 let Some(files) = files else {
                     return;
                 };
-                // Meist eine Liste, bei einer Datei auch der Eintrag selbst.
                 let items: Vec<_> = match files.numberOfItems() {
                     0 => vec![files],
                     n => (1..=n).filter_map(|i| files.descriptorAtIndex(i)).collect(),
@@ -116,8 +114,6 @@ mod apple {
                 None,
             );
         }
-        // Mitteilungszentrale und Apple-Event-Manager halten keine starke
-        // Referenz; der Handler lebt bis zum Programmende.
         std::mem::forget(handler);
     }
 }

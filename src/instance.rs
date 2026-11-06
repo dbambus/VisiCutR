@@ -161,14 +161,11 @@ pub fn parse(
                 return Err(UsageError::MappingUnsupported);
             }
             "--demo" => launch.demo = true,
-            // Bildschirmaufnahmen (Feature `screenshot`) mit Wert.
             "--capture" | "--page" => {
                 launch.standalone = true;
                 arguments.next();
             }
             "-h" | "--help" => return Err(UsageError::Help),
-            // Ältere macOS-Versionen hängen beim Start aus dem Finder eine
-            // Prozessnummer an.
             other if other.starts_with("-psn_") => {}
             other => return Err(UsageError::UnknownOption(other.into())),
         }
@@ -278,7 +275,6 @@ impl Listener {
 
 impl Drop for Listener {
     fn drop(&mut self) {
-        // Nur die eigene Adresse entfernen, nicht die einer neueren Instanz.
         let own = std::fs::read(&self.file)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<Address>(&bytes).ok())
@@ -357,7 +353,6 @@ mod tests {
             launch.request.files,
             [PathBuf::from("/arbeit/a.svg"), PathBuf::from("/tmp/b.svg")]
         );
-        // Reihenfolge egal; nach `--` ist alles ein Dateiname.
         let launch = parse(args(&["x.vcr", "-psn_0_123", "--add", "--", "--demo"]), cwd).unwrap();
         assert!(launch.request.add && !launch.demo);
         assert_eq!(launch.request.files.len(), 2);
@@ -393,7 +388,6 @@ mod tests {
         let version = parse(args(&["--version"]), Path::new("/")).unwrap();
         assert!(!version.forwards());
         assert!(version.print.unwrap().starts_with("VisiCutR "));
-        // Ältere Instanzen schicken keine Optionen mit.
         let old: Request = serde_json::from_str(r#"{"add":false,"files":[]}"#).unwrap();
         assert!(old.options.is_empty() && !old.update);
         let inkscape = parse(args(&["--update", "--add", "--", "a.svg"]), Path::new("/t")).unwrap();
@@ -440,7 +434,6 @@ mod tests {
                 ..Options::default()
             },
         };
-        // Niemand läuft: selbst starten.
         assert!(!forward(&dir, &request));
         let (woken, wake) = std::sync::mpsc::channel();
         let listener = Listener::start(&dir, move || {
@@ -454,7 +447,6 @@ mod tests {
         wake.recv_timeout(REPLY_TIMEOUT).unwrap();
         assert_eq!(listener.try_recv(), Some(Request::default()));
         assert_eq!(listener.try_recv(), None);
-        // Beenden entfernt die Adresse; danach startet der nächste selbst.
         drop(listener);
         assert!(!dir.join(FILE).exists());
         assert!(!forward(&dir, &Request::default()));
@@ -473,7 +465,6 @@ mod tests {
         };
         assert!(send(&forged, &Request::default()).is_err());
         assert_eq!(listener.try_recv(), None);
-        // Eine neuere Instanz hat die Adresse überschrieben: nicht löschen.
         let (woken, wake) = std::sync::mpsc::channel();
         let newer = Listener::start(&dir, move || {
             let _ = woken.send(());
@@ -482,10 +473,8 @@ mod tests {
         drop(listener);
         assert!(dir.join(FILE).exists());
         assert!(forward(&dir, &Request::default()));
-        // Die Bestätigung kommt vor der Übergabe an die Oberfläche: warten.
         wake.recv_timeout(REPLY_TIMEOUT).unwrap();
         assert_eq!(newer.try_recv(), Some(Request::default()));
-        // Verwaiste Adresse (Absturz): Port ist zu, also selbst starten.
         drop(newer);
         let closed = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let stale = Address {

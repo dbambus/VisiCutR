@@ -45,7 +45,6 @@ pub fn family(ctx: &egui::Context, name: &str) -> Option<egui::FontFamily> {
     let cache = guard.get_or_insert_with(Cache::default);
     if let Some(family) = cache.families.get(name) {
         let family = family.clone()?;
-        // `add_font` wirkt erst im nächsten Durchgang; bis dahin Oberflächenschrift.
         let ready = ctx.fonts(|f| f.definitions().families.contains_key(&family));
         if !ready {
             return None;
@@ -89,8 +88,6 @@ fn load(ctx: &egui::Context, cache: &mut Cache, name: &str) -> Option<egui::Font
     let data = match cache.files.get(&key) {
         Some(data) => *data,
         None => {
-            // Bleibt bis zum Programmende: egui braucht `'static`, und eine
-            // einmal gezeigte Schrift wird beim Scrollen wieder gebraucht.
             let room = MAX_TOTAL.saturating_sub(cache.total).min(MAX_FILE);
             let data =
                 db.with_face_data(id, |data, _| (data.len() <= room).then(|| data.to_vec()))??;

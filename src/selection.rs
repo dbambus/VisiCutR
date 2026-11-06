@@ -106,8 +106,6 @@ pub fn filter(svg: &str, selected: &[usize]) -> Result<String, SelectionError> {
     if selected.iter().any(|id| *id >= nodes.len()) {
         return Err(SelectionError::ObjectMissing);
     }
-    // Keep excluded objects inside defs so local <use> references still resolve.
-    // The drawing order and ancestor transforms of selected objects stay intact.
     let mut result = svg.to_string();
     for (id, node) in nodes.iter().enumerate().rev() {
         if !selected.contains(&id) {

@@ -243,7 +243,6 @@ impl Converter {
         }
         let direction = if clockwise { -1.0 } else { 1.0 };
         self.pen_down();
-        // SVG arcs cannot describe full circles, so long arcs are split in two.
         let pieces = if sweep > PI { 2 } else { 1 };
         for piece in 1..=pieces {
             let point = if piece == pieces {
@@ -252,7 +251,6 @@ impl Converter {
                 let angle = start + direction * sweep * piece as f64 / pieces as f64;
                 (cx + radius * angle.cos(), cy + radius * angle.sin())
             };
-            // Angles grow towards +Y; SVG's sweep flag 1 is that direction too.
             let _ = write!(
                 self.data,
                 "A{} {} 0 0 {}",
@@ -424,20 +422,17 @@ mod tests {
 
     #[test]
     fn arcs_with_ij_follow_direction() {
-        // Counter-clockwise quarter from 0° to 90° around the origin.
         let ccw = contours("G0 X10 Y0\nG3 X0 Y10 I-10 J0\n", (0.0, 0.0));
         assert_eq!(ccw.len(), 1);
         assert_on_circle(&ccw[0], [0.0, 0.0], 10.0);
         assert!(ccw[0].iter().all(|p| p[0] > -0.01 && p[1] > -0.01));
         assert_points(&ccw[0], &[[10.0, 0.0], [0.0, 10.0]]);
 
-        // Clockwise the same endpoints take the 270° way round.
         let cw = contours("G0 X10 Y0\nG2 X0 Y10 I-10 J0\n", (-10.0, -10.0));
         assert_on_circle(&cw[0], [0.0, 0.0], 10.0);
         assert_points(&cw[0], &[[10.0, 0.0], [0.0, 10.0]]);
         assert_extent(&cw[0], [-10.0, -10.0], [10.0, 10.0]);
 
-        // Full circle when start and end coincide.
         let full = contours("G0 X20 Y10\nG2 X20 Y10 I-5\n", (0.0, 0.0));
         assert_on_circle(&full[0], [15.0, 10.0], 5.0);
         assert_extent(&full[0], [10.0, 5.0], [20.0, 15.0]);
@@ -445,14 +440,12 @@ mod tests {
 
     #[test]
     fn arcs_with_radius() {
-        // R > 0: short arc, centre (5, -8.66) for a clockwise move.
         let short = contours("G2 X10 Y0 R10\n", (0.0, 0.0));
         let centre = [5.0, -8.6603];
         assert_on_circle(&short[0], centre, 10.0);
         assert_points(&short[0], &[[0.0, 0.0], [10.0, 0.0]]);
         assert_extent(&short[0], [0.0, 0.0], [10.0, 1.3397]);
 
-        // R < 0: long counter-clockwise arc around (15, -8.66).
         let long = contours("G0 X10 Y0\nG3 X20 Y0 R-10\n", (0.0, -18.6603));
         assert_on_circle(&long[0], [15.0, -8.6603], 10.0);
         assert_points(&long[0], &[[10.0, 0.0], [20.0, 0.0]]);

@@ -48,8 +48,6 @@ fn from_bytes(data: Vec<u8>) -> Result<Imported, ImportError> {
         (DEFAULT_DPI, DEFAULT_DPI)
     });
 
-    // resvg ignores Exif orientation, cannot draw CMYK JPEGs and only decodes
-    // PNG, JPEG, GIF and WebP, so everything else is re-encoded.
     let (mime, bytes) = match format {
         ImageFormat::Png | ImageFormat::Gif | ImageFormat::Jpeg
             if orientation == Orientation::NoTransforms && !cmyk =>
@@ -124,7 +122,6 @@ fn number(value: f64) -> String {
 }
 
 fn valid(dpi_x: f64, dpi_y: f64) -> Option<(f64, f64)> {
-    // Files store whole pixels per metre: 2835 px/m means 72 DPI, not 72.009.
     let snap = |dpi: f64| {
         if (dpi - dpi.round()).abs() < 0.05 {
             dpi.round()
@@ -277,7 +274,6 @@ mod tests {
 
     #[test]
     fn rounds_stored_resolutions_to_whole_dpi() {
-        // 2835 px/m is how every tool stores 72 DPI.
         assert_eq!(valid(2835.0 * 0.0254, 2835.0 * 0.0254), Some((72.0, 72.0)));
         assert_eq!(
             valid(11811.0 * 0.0254, 3780.0 * 0.0254),
@@ -363,7 +359,6 @@ mod tests {
     fn jpeg_jfif_and_exif_density_are_read() {
         let mut jfif = vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 16];
         jfif.extend_from_slice(b"JFIF\0\x01\x02\x02\x00\x76\x00\x76\x00\x00");
-        // 118 dots per cm ≈ 299.72 DPI
         assert_eq!(jpeg_info(&jfif).0, Some((118.0 * 2.54, 118.0 * 2.54)));
 
         let mut exif = b"Exif\0\0MM\0*\0\0\0\x08\0\x02".to_vec();
@@ -392,7 +387,7 @@ mod tests {
     #[test]
     fn bmp_pixels_per_metre_set_size() {
         let mut bmp = encoded(checker(100, 50), ImageFormat::Bmp);
-        let ppm = 3937i32; // 100 DPI
+        let ppm = 3937i32;
         bmp[38..42].copy_from_slice(&ppm.to_le_bytes());
         bmp[42..46].copy_from_slice(&ppm.to_le_bytes());
         let imported = from_bytes(bmp).unwrap();

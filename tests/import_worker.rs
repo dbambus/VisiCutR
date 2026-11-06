@@ -25,8 +25,6 @@ fn scripts_run_in_the_worker_process() {
 
 #[test]
 fn work_inside_built_in_functions_is_stopped_at_the_time_limit() {
-    // Inside a built-in the engine does not check the clock: in-process
-    // this ran for over ten seconds and kept a thread busy afterwards.
     let path = laserscript(
         "fill.ls",
         "var a = []; for (var i = 0; i < 50; i++) { a.push(new Array(3e7).fill(1.5)); a.pop(); }",
@@ -44,8 +42,6 @@ fn work_inside_built_in_functions_is_stopped_at_the_time_limit() {
 #[cfg(target_os = "linux")]
 #[test]
 fn memory_bombs_end_only_the_worker() {
-    // In-process this aborted the application ("memory allocation of
-    // 17179869184 bytes failed").
     for (name, source) in [
         (
             "repeat.ls",
@@ -61,8 +57,6 @@ fn memory_bombs_end_only_the_worker() {
 
 #[test]
 fn pdf_pages_are_converted_in_the_worker_process() {
-    // hayro inflates streams without a size limit; in the worker a
-    // decompression bomb can only end that process.
     import::use_worker_executable(env!("CARGO_BIN_EXE_visicutr").into());
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/java_parity/import_pdf_flate/page.pdf");

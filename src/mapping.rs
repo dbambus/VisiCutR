@@ -270,8 +270,6 @@ fn hex(color: usvg::Color) -> String {
 
 /// Accepts `red`, `#f00`, `rgb(…)` etc. and returns `#rrggbb`.
 fn svgtypes_color(value: &str) -> Option<String> {
-    // Resolve through usvg by styling a tiny document; keeps the CSS colour
-    // grammar identical to the renderer's.
     let svg = format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" fill="{}"/></svg>"#,
         value.replace(['"', '<', '>'], "")
@@ -309,7 +307,6 @@ pub fn attributes(svg: &str) -> Result<Vec<ObjectAttributes>, MappingError> {
             a
         })
         .collect();
-    // Tag every object so usvg's resolved paints can be attributed to it.
     let mut tagged = svg.to_string();
     for (index, node) in nodes.iter().enumerate().rev() {
         let start = node.range().start;
@@ -364,7 +361,6 @@ fn type_name(tag: &str) -> &'static str {
 fn paint(paint: Option<&usvg::Paint>) -> Option<String> {
     match paint? {
         usvg::Paint::Color(c) => Some(hex(*c)),
-        // Gradients and patterns have no single colour.
         _ => Some("pattern".into()),
     }
 }
@@ -560,7 +556,6 @@ fn color(value: &str) -> Vec<Filter> {
 pub fn predefined() -> Vec<Predefined> {
     let rule = Rule::new;
     vec![
-        // Reine RGB-Farben wie in vielen Laser-Workflows.
         Predefined {
             name: tr("Farben: Rot schneiden, Blau gravieren, Grün markieren").into(),
             rules: vec![
@@ -570,7 +565,6 @@ pub fn predefined() -> Vec<Predefined> {
             ],
             ignore: vec![],
         },
-        // fau-fablab/visicut-settings/mappings
         Predefined {
             name: tr("FAU: rot schneiden, grün markieren, blau ignorieren, Rest gravieren").into(),
             rules: vec![
@@ -786,7 +780,6 @@ mod tests {
         assert!(
             thin.matches(&objects[0]) && thin.matches(&objects[2]) && !thin.matches(&objects[3])
         );
-        // Objects without a stroke have no width: they only match inverted filters.
         assert!(!thin.matches(&objects[1]));
         assert!(
             Filter {
@@ -835,7 +828,6 @@ mod tests {
         project.ignore_filters = fau.ignore.clone();
         let selections = resolve(&project).unwrap();
         assert_eq!(selections, [vec![2], vec![0], vec![1]]);
-        // A second rule may select the same object again (e.g. engrave and cut).
         project.steps.push(JobStep {
             filters: Some(vec![]),
             ..JobStep::new(Operation::Engrave3d)
@@ -871,7 +863,6 @@ mod tests {
         ] {
             assert!(!similar_colors(a, b), "{a} {b}");
         }
-        // Mit Toleranz greift die Farbvorlage auch nach CMYK-Umwandlung.
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="0 0 100 100">
             <path d="M0 0H10" stroke="#ed1c24" fill="none"/>
             <path d="M0 10H10" stroke="#00a651" fill="none"/>
@@ -925,7 +916,6 @@ mod tests {
         assert_eq!(templates, Templates::default());
         assert_eq!(templates.default_template(), predefined()[0]);
 
-        // Only rule steps and ignore rules go into the template.
         let mut project = Project::default();
         project.steps.push(JobStep {
             filters: Some(color("#ff0000")),
@@ -966,7 +956,6 @@ mod tests {
                 .store(Predefined::from_project("Leer", &Project::default()))
                 .is_err()
         );
-        // Same name replaces.
         let mut changed = own.clone();
         changed.ignore.clear();
         templates.store(changed.clone()).unwrap();
@@ -1001,7 +990,6 @@ mod tests {
         templates.remove("Halle");
         assert_eq!(templates.default, None);
         assert_eq!(templates.default_template(), predefined()[0]);
-        // A default that is gone falls back to the first built-in template.
         templates.default = Some(TemplateRef::Builtin(99));
         assert_eq!(templates.default_template(), predefined()[0]);
         templates.default = Some(TemplateRef::Builtin(1));

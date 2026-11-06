@@ -282,7 +282,6 @@ fn font_row(ui: &mut egui::Ui, name: &str, font: &mut String) -> egui::Response 
     } else {
         visuals.text_color()
     };
-    // Zu lange Namen enden auf „…“ statt mitten im Buchstaben.
     let galley = egui::WidgetText::from(
         egui::RichText::new(name)
             .font(egui::FontId::new(16.0, family))
@@ -294,7 +293,6 @@ fn font_row(ui: &mut egui::Ui, name: &str, font: &mut String) -> egui::Response 
         rect.width() - 12.0,
         egui::TextStyle::Body,
     );
-    // Schreibschriften mit hohen Ober- und Unterlängen nicht in die Nachbarzeilen.
     ui.painter_at(rect).galley(
         egui::pos2(rect.left() + 6.0, rect.center().y - galley.size().y / 2.0),
         galley,
@@ -410,14 +408,11 @@ impl ComposeUi {
         let mut apply = false;
         let mut cancel = false;
         crate::form::tool_window(ctx, "compose_tool", title, 420.0, &mut open, |ui| {
-            // Wie Hinweis und Sende-Bestätigung: Rahmen in der Akzentfarbe,
-            // Titel mit Symbol, Knöpfe rechts unten.
             egui::Frame::new()
                 .stroke(egui::Stroke::new(2.0, crate::form::ACCENT))
                 .corner_radius(7.0)
                 .inner_margin(egui::Margin::symmetric(18, 14))
                 .show(ui, |ui| {
-                    // Feste Breite: Textfelder wachsen sonst mit dem Fenster.
                     ui.set_width(CONTENT_WIDTH);
                     ui.vertical_centered(|ui| {
                         ui.horizontal(|ui| {
@@ -454,7 +449,6 @@ impl ComposeUi {
                         Tool::Text if self.editing => tr("Übernehmen"),
                         _ => tr("Einfügen"),
                     };
-                    // Nur eine Zeile hoch, sonst wächst das Fenster mit.
                     ui.allocate_ui_with_layout(
                         egui::vec2(ui.available_width(), 30.0),
                         egui::Layout::right_to_left(egui::Align::Center),
@@ -490,7 +484,6 @@ impl ComposeUi {
     }
 
     fn compose(&self, tool: Tool, project: &Project, view: [f32; 4]) -> Composed {
-        // Jedes neue Element wird ein eigenes Teil (siehe `add_objects_as_part`).
         let name = match tool {
             Tool::Text => tr("Text"),
             Tool::Shape => tr("Form"),

@@ -464,8 +464,6 @@ impl ParameterSet {
     }
 }
 
-// V1 stored a derived physical speed. V2 stores the controller percentage;
-// read both explicitly so legacy values never silently change units.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProjectFile {
@@ -583,7 +581,6 @@ fn default_host() -> String {
 fn default_port() -> u16 {
     9100
 }
-// VisiCut's default rotary diameter.
 fn default_rotary_diameter() -> f32 {
     100.0
 }
@@ -677,8 +674,6 @@ impl Project {
         if self.svg.is_empty() {
             return Err(ProjectError::NoDrawing);
         }
-        // Other parts: placement only; their documents are checked in full
-        // when the job is prepared (see `part_view`).
         for part in &self.parts {
             if part.svg.is_empty()
                 || !part.width_mm.is_finite()
@@ -901,7 +896,6 @@ impl Project {
         if self.format_version != 2 {
             return Err(ProjectError::UnknownVersion);
         }
-        // Before anything parses the drawings (see `svg::MAX_NESTING`).
         let parametric = self.parts.iter().filter_map(|p| p.parametric.as_ref());
         for svg in std::iter::once(&self.svg)
             .chain(self.parts.iter().map(|p| &p.svg))
@@ -936,7 +930,6 @@ impl Project {
         if !(1..=100).contains(&self.passes) {
             return Err(ProjectError::Passes);
         }
-        // The LTT driver requires at least 5 mm and stores the radius in 0.01 mm.
         if !self.rotary_diameter_mm.is_finite()
             || !(5.0..=1000.0).contains(&self.rotary_diameter_mm)
         {
@@ -1021,7 +1014,6 @@ mod tests {
     }
     #[test]
     fn only_the_drawing_has_to_lie_on_the_bed() {
-        // A4 page with a 20 × 10 mm rect 10 mm from the top left corner.
         let mut p = Project {
             svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 210 297"><rect x="10" y="10" width="20" height="10" stroke="black" stroke-width="4"/></svg>"#.into(),
             width_mm: 210.0,
@@ -1037,8 +1029,6 @@ mod tests {
                 .all(|(a, b)| (a - b).abs() < 1e-3),
             "{content:?}"
         );
-        // The page reaches beyond the right and bottom edges, the rect not
-        // (strokes are not counted, like Java for vectors).
         (p.x_mm, p.y_mm) = (970.0, 580.0);
         assert!(p.validate().is_ok());
         (p.x_mm, p.y_mm) = (970.1, 580.0);

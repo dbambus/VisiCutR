@@ -140,7 +140,6 @@ pub fn fit_to_content(source: &str) -> Option<String> {
             .filter_map(|t| t.parse().ok())
             .collect()
     });
-    // Canvas pixels → user units of the document (default `xMidYMid meet`).
     let (scale, origin, offset) = match view_box.as_deref() {
         Some(&[x, y, w, h]) if w > 0.0 && h > 0.0 => {
             let scale = (canvas.width() / w).min(canvas.height() / h);
@@ -158,7 +157,6 @@ pub fn fit_to_content(source: &str) -> Option<String> {
     let x = origin[0] + (bbox.left() - offset[0]) / scale;
     let y = origin[1] + (bbox.top() - offset[1]) / scale;
     let (w, h) = (bbox.width() / scale, bbox.height() / scale);
-    // Cut the old size attributes out of the start tag, back to front.
     let range = root.range();
     let mut tag_end = range.start;
     let mut quote = None;
@@ -339,7 +337,6 @@ fn classify(href: &str) -> Href {
     if href.is_empty() || href.starts_with('#') {
         return Href::Skip;
     }
-    // A single letter before ':' is a Windows drive, not a URL scheme.
     let scheme = href
         .split_once(':')
         .map(|(scheme, _)| scheme)
@@ -358,7 +355,6 @@ fn classify(href: &str) -> Href {
         Some(_) => Href::Unsupported,
         None if is_network_path(Path::new(href)) => Href::Remote,
         None => {
-            // A relative reference is a URI, but tools often write plain paths.
             let mut paths = vec![PathBuf::from(href)];
             if href.contains('%')
                 && let Some(decoded) = percent_decode(href)
@@ -411,7 +407,6 @@ fn is_network_path(path: &Path) -> bool {
 fn file_url_path(url: &str) -> Option<PathBuf> {
     let rest = url[5..].split(['?', '#']).next().unwrap_or_default();
     let path = match rest.strip_prefix("//") {
-        // Hosts other than localhost are rejected by `classify`.
         Some(authority_and_path) => {
             &authority_and_path[authority_and_path
                 .find('/')
@@ -421,7 +416,6 @@ fn file_url_path(url: &str) -> Option<PathBuf> {
     };
     let decoded = percent_decode(path)?;
     if cfg!(windows) {
-        // file:///C:/dir/x.png decodes to /C:/dir/x.png.
         let text = decoded.to_string_lossy();
         let bytes = text.as_bytes();
         if bytes.len() >= 3
@@ -489,7 +483,6 @@ fn mime_type(data: &[u8], svgz: bool) -> Option<&'static str> {
     } else if data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP" {
         Some("image/webp")
     } else if svgz && data.starts_with(&[0x1F, 0x8B]) {
-        // Compressed SVG (svgz); usvg decompresses nested SVG data.
         Some("image/svg+xml")
     } else {
         let head = String::from_utf8_lossy(&data[..data.len().min(4096)]);
@@ -610,11 +603,9 @@ mod tests {
         let source = svg(r#"href="../red.png""#);
         let result = embed_external_images(&source, &dir.0.join("svg"));
         assert!(result.svg.contains(&png_uri()));
-        // Outside the drawing's folder: embedded, but not silently.
         assert_eq!(result.warnings.len(), 1, "{:?}", result.warnings);
         assert!(result.warnings[0].contains("nicht im Ordner der Zeichnung"));
         assert!(result.warnings[0].contains("red.png"));
-        // The same file twice is reported once.
         let twice = source.replace(
             "<rect",
             r#"<image width="1" height="1" href="../red.png"/><rect"#,
@@ -647,7 +638,6 @@ mod tests {
         assert!(is_network_path(Path::new("//server/share")));
         assert!(!is_network_path(Path::new("/home/user/red.png")));
         assert!(!is_network_path(Path::new("img/red.png")));
-        // A sodipodi:absref on another computer is not tried either.
         let source = svg(r#"href="missing.png" sodipodi:absref="//attacker.example/s/red.png""#)
             .replace(
                 "<svg ",
@@ -789,7 +779,6 @@ mod tests {
         let dir = TempDir::new("render");
         std::fs::write(dir.0.join("red.png"), red_png()).unwrap();
         let path = dir.0.join("art.svg");
-        // Only the image is drawn, so visible pixels must come from it.
         std::fs::write(
             &path,
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm" viewBox="0 0 10 10"><image width="10" height="10" href="red.png"/></svg>"#,

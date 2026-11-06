@@ -63,8 +63,6 @@ pub fn remove_duplicates(contours: Vec<Contour>) -> (Vec<Contour>, Removed) {
             }
             pieces.push(kept);
         }
-        // Later contours are compared with this one as a whole: what it lost
-        // is covered by earlier lines anyway.
         for segment in contour.windows(2) {
             let index = accepted.len();
             accepted.push((segment[0], segment[1]));
@@ -116,7 +114,6 @@ fn overlap(a: Point, b: Point, c: Point, d: Point) -> Option<(f64, f64)> {
     if off(a, c, d) || off(b, c, d) {
         return None;
     }
-    // A very short segment has no reliable direction; lying on `c`–`d` is enough.
     if length > TOLERANCE_MM && (off(c, a, b) || off(d, a, b)) {
         return None;
     }
@@ -124,8 +121,6 @@ fn overlap(a: Point, b: Point, c: Point, d: Point) -> Option<(f64, f64)> {
         ((p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1])) / (length * length)
     };
     let (tc, td) = (along(c), along(d));
-    // No slack at the ends: lines that only touch end to end must keep their
-    // full length. Tiny leftovers are dropped by the minimum piece length.
     let (lo, hi) = (tc.min(td).max(0.0), tc.max(td).min(1.0));
     (hi > lo).then_some((lo, hi))
 }
@@ -228,7 +223,6 @@ mod tests {
         let (output, removed) =
             remove_duplicates(vec![square(0.0, 0.0, 10.0), square(10.0, 0.0, 10.0)]);
         assert_eq!(output[0], square(0.0, 0.0, 10.0));
-        // The second square loses its left edge and becomes one open path.
         assert_eq!(output.len(), 2);
         assert_eq!(
             output[1],
@@ -253,7 +247,6 @@ mod tests {
     #[test]
     fn partial_overlap_keeps_the_rest_and_tolerates_tiny_offsets() {
         let first = vec![[0.0, 0.0], [10.0, 0.0]];
-        // Overlaps 4 mm of the first line, 0.01 mm beside it.
         let second = vec![[6.0, 0.01], [16.0, 0.01]];
         let (output, removed) = remove_duplicates(vec![first.clone(), second]);
         assert_eq!(output[0], first);
@@ -274,8 +267,6 @@ mod tests {
 
     #[test]
     fn closed_contour_with_a_removed_middle_edge_joins_across_its_start() {
-        // A rectangle starting in the middle of its bottom edge; its right
-        // edge duplicates an earlier line.
         let line = vec![[10.0, 0.0], [10.0, 10.0]];
         let ring = vec![
             [5.0, 0.0],

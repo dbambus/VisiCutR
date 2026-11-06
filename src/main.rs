@@ -205,12 +205,10 @@ impl Command {
             Self::Materials => (COMMAND_SHIFT, Key::M),
             Self::Preview => (COMMAND_SHIFT, Key::P),
             Self::ToggleGrid => (Modifiers::COMMAND, Key::G),
-            // Nur ohne aktives Eingabefeld (siehe `keyboard`).
             Self::Undo => (Modifiers::COMMAND, Key::Z),
             Self::Redo => (COMMAND_SHIFT, Key::Z),
             Self::Delete => (Modifiers::NONE, Key::Delete),
             Self::Duplicate => (Modifiers::COMMAND, Key::D),
-            // ⌘C und ⌘V meldet egui als Kopieren/Einfügen (siehe `keyboard`).
             Self::Copy => (Modifiers::COMMAND, Key::C),
             Self::Paste => (Modifiers::COMMAND, Key::V),
             Self::PasteInPlace => (Modifiers::COMMAND, Key::F),
@@ -572,7 +570,6 @@ struct VisiCutR {
 
 impl VisiCutR {
     fn new(cc: &eframe::CreationContext<'_>, launch: instance::Launch) -> Self {
-        // Erster Start nach der Umbenennung: Einstellungen von VisiCutRust übernehmen.
         let moved = visicut_core::device::migrate_legacy_config();
         let mut settings = settings::AppSettings::load();
         if let Some((old, new)) = &moved {
@@ -580,17 +577,12 @@ impl VisiCutR {
             let _ = settings.save();
         }
         i18n::set_language(settings.language());
-        // Die Oberfläche ist hell: auch die Titelleiste hell, nicht schwarz auf
-        // dunklem Hintergrund.
         cc.egui_ctx.set_theme(egui::ThemePreference::Light);
-        // Die Titelleiste richtet winit nach dem Windows-Theme; egui gibt die
-        // Vorgabe nicht von selbst weiter.
         cc.egui_ctx
             .send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Light));
         cc.egui_ctx.set_visuals(egui::Visuals::light());
         form::apply_style(&cc.egui_ctx);
         form::apply_fonts(&cc.egui_ctx);
-        // Strg+Plus/Minus/0 zoomen die Arbeitsfläche, nicht die Oberfläche.
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let (devices, device_error) = devices_ui::DeviceUi::load();
         let (jobs, material_error) = jobs_ui::JobUi::load();
@@ -656,7 +648,6 @@ impl VisiCutR {
         };
         app.reset_project();
         app.preview.single_job = app.settings.single_job;
-        // Alle 14 Tage im Hintergrund nach einem neuen Release fragen.
         if !app.settings.update_check_disabled
             && visicut_core::update::is_due(
                 app.settings.last_update_check,
@@ -665,7 +656,6 @@ impl VisiCutR {
         {
             app.start_update_check(false);
         }
-        // Einmal am Tag nach einer neuen Fassung der FabLab-Einstellungen fragen.
         if let Some(lab) = app
             .settings
             .lab
@@ -698,7 +688,6 @@ impl VisiCutR {
                 .get(index + 1)
                 .map(|path| (PathBuf::from(path), 0));
         }
-        // Reiter für die Aufnahme: `--page preview|materials|job|general|devices`.
         #[cfg(feature = "screenshot")]
         if let Some(index) = arguments.iter().position(|argument| argument == "--page") {
             match arguments.get(index + 1).map(String::as_str) {
@@ -712,7 +701,6 @@ impl VisiCutR {
             }
         }
         if !launch.standalone {
-            // Für das Illustrator-Skript und das CorelDRAW-Makro.
             if let Ok(program) = std::env::current_exe()
                 && let Err(e) =
                     addins::remember_program(&visicut_core::device::config_dir(), &program)
@@ -727,7 +715,6 @@ impl VisiCutR {
                 Err(e) => eprintln!("Einzelinstanz nicht verfügbar: {e}"),
             }
         }
-        // Unter macOS kommen per Doppelklick geöffnete Dateien als Ereignis.
         let opened = open_files::take();
         open_files::watch(&cc.egui_ctx);
         if launch.demo {
@@ -737,7 +724,6 @@ impl VisiCutR {
         } else if !opened.is_empty() {
             app.open_files(&cc.egui_ctx, opened);
         } else if let Some(path) = session::take_resume(&session::dir()) {
-            // Sonst der beim letzten Beenden ungesicherte Stand.
             app.perform(&cc.egui_ctx, Replace::Open(path));
         }
         cc.egui_ctx.request_repaint();
@@ -832,7 +818,6 @@ impl VisiCutR {
                 }
                 self.save_settings();
             }
-            // Ohne Netz nur ein Hinweis in der Statuszeile; morgen wieder.
             Err(e) => {
                 self.status = tr!(
                     "FabLab-Einstellungen von „{name}“ nicht abrufbar: {error}",
@@ -1051,7 +1036,6 @@ impl VisiCutR {
 
     /// Fehler und Warnungen: Statuszeile und ein Hinweisdialog.
     fn report(&mut self, message: String) {
-        // Nach einem Fehler (etwa beim Öffnen) nicht das falsche Projekt senden.
         if let Some(options) = &mut self.launch_options {
             options.execute = false;
         }
@@ -1133,7 +1117,6 @@ impl VisiCutR {
         import::install(prefetched);
         let fit_policy = std::mem::replace(&mut self.fit_policy, fit_policy);
         match then {
-            // Mit Rückfrage, falls inzwischen ungesicherte Änderungen entstanden.
             Deferred::Open(path) => self.request(ctx, Replace::Open(path)),
             Deferred::Drop(paths) => self.drop_files(ctx, paths),
             Deferred::Request(request) => self.open_request(ctx, request),
@@ -1351,7 +1334,6 @@ impl VisiCutR {
         self.project.height_mm = preview.height_mm;
         self.project.steps = steps;
         self.project.ignore_filters.clear();
-        // Die neue Grafik ersetzt alle Teile.
         self.project.parts.clear();
         self.project.active_part = 0;
         self.part_textures.clear();
@@ -1378,15 +1360,12 @@ impl VisiCutR {
         self.import(ctx, imported.svg, name.into(), imported.steps)?;
         self.project.part_source_file = Some(path.display().to_string());
         self.project.part_parametric = imported.parametric;
-        // Ein VisiCut-Projekt (PLF) ist auf den Bettursprung bezogen, nicht
-        // auf die Lage des vorigen Motivs.
         if path
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("plf"))
         {
             (self.project.x_mm, self.project.y_mm) = (0.0, 0.0);
         }
-        // Ein zugeschnittenes Projektteil liegt dort, wo es im Projekt lag.
         self.project.x_mm += imported.offset_mm[0] as f32;
         self.project.y_mm += imported.offset_mm[1] as f32;
         if !imported.extra_parts.is_empty() {
@@ -1439,7 +1418,6 @@ impl VisiCutR {
             let source = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
             let project: Project = serde_json::from_str(&source)
                 .map_err(|e| tr!("Ungültiges Projekt: {error}", error = e))?;
-            // Entwürfe ohne Motiv oder außerhalb des Betts lassen sich öffnen.
             project.validate_document()?;
             (self.texture, self.part_textures) = self.textures_for(ctx, &project)?;
             self.project = project;
@@ -1448,7 +1426,6 @@ impl VisiCutR {
             }
             self.devices.apply(&mut self.project);
             self.forget_history();
-            // Ein Zwischenstand hat noch keinen eigenen Speicherort.
             if session::is_cached(&session::dir(), path) {
                 self.project_path = None;
                 self.cached = Some(path.to_owned());
@@ -1596,7 +1573,6 @@ impl VisiCutR {
                 .map(|p| file_name(p))
                 .collect();
             if !overflowing.is_empty() {
-                // Eine Frage für alle Dateien; danach läuft der Import weiter.
                 self.pending_import = Some(PendingImport {
                     replace: self.project.svg.is_empty(),
                     paths: graphics.iter().chain(&projects).cloned().collect(),
@@ -1626,7 +1602,6 @@ impl VisiCutR {
             }
         }
         if !rest.is_empty() {
-            // Jede Datei wird ein eigenes Teil mit eigener Lage und Zuordnung.
             let before = self.project.part_count();
             match visicut_core::compose::add_files_as_parts(
                 &self.project,
@@ -1873,7 +1848,6 @@ impl VisiCutR {
         self.checkpoint();
         let same_part = project.active_part == self.project.active_part
             && project.parts.len() == self.project.parts.len();
-        // Ein neues Teil (etwa ein Schild) bekommt für alle Schritte das Profil.
         let new_part = project.parts.len() > self.project.parts.len();
         let old_steps = if same_part {
             self.project.steps.len()
@@ -1892,7 +1866,6 @@ impl VisiCutR {
         self.project = project;
         (self.texture, self.part_textures) = textures;
         for index in old_steps..self.project.steps.len() {
-            // Steps of the existing motif keep its parameters.
             if self.project.steps[index]
                 .objects
                 .iter()
@@ -1920,8 +1893,6 @@ impl VisiCutR {
     ) {
         match visicut_core::remnant::add_part(&self.project, remnants) {
             Ok(mut project) => {
-                // Schneid-Parameter aus dem Materialprofil statt der Werte des
-                // bisherigen Teils (z. B. einer Gravur).
                 let preset = jobs_ui::apply_presets(self.jobs.active(), &mut project) > 0;
                 self.apply_composed(ctx, project, Vec::new());
                 self.status = if preset {
@@ -2036,8 +2007,6 @@ impl VisiCutR {
         self.project = Project {
             width_mm: self.project.width_mm,
             height_mm: self.project.height_mm,
-            // Das Muster ersetzt alle Teile (`pattern` übernimmt sie sonst
-            // aus dem bisherigen Projekt).
             part_name: self.project.part_name.clone(),
             active_part: 0,
             parts: Vec::new(),
@@ -2198,8 +2167,6 @@ impl VisiCutR {
         let mut clicked = None;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
-            // Datei-Menü hinter dem Haus wie in Bambu Studio, abgesetzt durch
-            // einen Strich.
             let home = form::top_icon(ui, object_bar::Icon::Home).on_hover_text(tr("Datei"));
             egui::Popup::menu(&home).show(|ui| self.file_menu(ui, &mut clicked));
             let (rect, _) = ui.allocate_exact_size(Vec2::new(17.0, 40.0), Sense::hover());
@@ -2292,7 +2259,6 @@ impl VisiCutR {
 
     /// Einstellungen → Job: Schnittreihenfolge des Projekts.
     fn job_page(&mut self, ui: &mut egui::Ui) {
-        // Volle Fensterbreite wie die übrigen Einstellungsseiten.
         egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
             ui.set_width(ui.available_width());
             form::section(ui, tr("Schnittreihenfolge"), |ui| {
@@ -2315,7 +2281,6 @@ impl VisiCutR {
                         self.project.cut_order = order;
                         self.dirty = true;
                     }
-                    // Erklärung unter dem Text des Knopfs eingerückt.
                     egui::Frame::new()
                         .inner_margin(egui::Margin {
                             left: 24,
@@ -2325,8 +2290,6 @@ impl VisiCutR {
                     ui.add_space(2.0);
                 }
             });
-            // Regeln und Ignorieren gehören wie die Reihenfolge zum Projekt; die
-            // Schritte selbst stehen unter „Vorbereiten“.
             form::section(ui, tr("Regeln und Vorlagen"), |ui| {
                 ui.add_enabled_ui(!self.busy(), |ui| {
                     self.jobs.rules_settings(ui, &mut self.project, &mut self.dirty);
@@ -2337,7 +2300,6 @@ impl VisiCutR {
                     self.jobs.ignore_rules(ui, &mut self.project, &mut self.dirty);
                 });
             });
-            // Früher in der Objektzuordnung; gehört wie die Reihenfolge zum Projekt.
             form::section(ui, tr("Doppelte Linien"), |ui| {
                 if ui
                     .add_enabled(
@@ -2370,7 +2332,6 @@ impl VisiCutR {
 
     /// Einstellungen → Allgemein: Sprache, Update-Prüfung und Geräteliste übertragen.
     fn general_page(&mut self, ui: &mut egui::Ui) {
-        // Volle Fensterbreite wie die übrigen Einstellungsseiten.
         egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
             ui.set_width(ui.available_width());
             form::section(ui, tr("Sprache"), |ui| {
@@ -2492,7 +2453,6 @@ impl VisiCutR {
                         ),
                     );
                 });
-                // CorelDRAW-Makros (VBA) gibt es nur unter Windows.
                 if cfg!(windows) {
                     form::section(ui, tr("CorelDRAW"), |ui| {
                         if ui.button(tr("CorelDRAW-Makro speichern …")).clicked() {
@@ -2665,7 +2625,6 @@ impl VisiCutR {
                                 }
                             }
                         });
-                    // Hostname und Port stehen in den Einstellungen, hier nur das Bett.
                     form::caption(
                         ui,
                         format!(
@@ -2674,7 +2633,6 @@ impl VisiCutR {
                         ),
                     );
                 });
-                // Rotationseinheit direkt unter dem Gerät, ohne eigenen Bereich.
                 if self.devices.device().rotary_axis {
                     egui::Frame::new()
                         .inner_margin(egui::Margin::symmetric(4, 2))
@@ -2846,7 +2804,6 @@ impl VisiCutR {
                     commands.push(command);
                 }
             }
-            // „+“ liegt auf vielen Tastaturen auf der Taste mit „=“.
             if i.consume_key(Modifiers::COMMAND, Key::Equals) {
                 commands.push(Command::ZoomIn);
             }
@@ -2857,12 +2814,9 @@ impl VisiCutR {
         if self.busy() || ctx.memory(|m| m.focused().is_some()) {
             return;
         }
-        // Widerrufen, Wiederholen, Löschen und Duplizieren nur ohne aktives Eingabefeld,
-        // damit diese Tasten dort weiter Text bearbeiten.
         let mut pasted = None;
         let editing = ctx.input_mut(|i| {
             let mut commands = Vec::new();
-            // Erst mit Umschalt prüfen: egui ignoriert eine zusätzliche Umschalttaste.
             if i.consume_key(COMMAND_SHIFT, Key::Z) || i.consume_key(Modifiers::COMMAND, Key::Y) {
                 commands.push(Command::Redo);
             } else if i.consume_key(Modifiers::COMMAND, Key::Z) {
@@ -2874,8 +2828,6 @@ impl VisiCutR {
             if i.consume_key(Modifiers::COMMAND, Key::F) {
                 commands.push(Command::PasteInPlace);
             }
-            // ⌘C und ⌘V kommen als Ereignisse, ⌘V nur mit Text in der
-            // Zwischenablage (dort liegt das kopierte Teil, siehe `copy_part`).
             for event in &i.events {
                 match event {
                     egui::Event::Copy => commands.push(Command::Copy),
@@ -2899,7 +2851,6 @@ impl VisiCutR {
         if pasted.is_some() {
             self.paste_part(ctx, pasted, false);
         }
-        // Pfeiltasten verschieben das Motiv, solange kein Eingabefeld aktiv ist.
         if self.texture.is_none() {
             return;
         }
@@ -3090,7 +3041,6 @@ impl VisiCutR {
             self.select_part(index);
         }
         ui.add_space(2.0);
-        // Umbrechen statt die Seitenleiste zu verbreitern (längere Übersetzungen).
         ui.horizontal_wrapped(|ui| {
             for (command, text, hover) in [
                 (
@@ -3127,12 +3077,8 @@ impl VisiCutR {
         let mut reference = self.reference;
         let mut dirty = false;
         let mut proportional = self.proportional;
-        // Nullpunkt unten links: Y zählt wie am Gerät von der unteren
-        // Bettkante nach oben (nur Anzeige, der Auftrag bleibt gleich).
         let bottom = self.devices.origin_bottom_left();
         let p = &mut self.project;
-        // Wie das Transformieren-Feld in Grafikprogrammen: Bezugspunkt, X/Y,
-        // B/H und rechts die Kette, die das Seitenverhältnis hält.
         let (mut new_x, mut new_y, mut new_w, mut new_h) = (None, None, None, None);
         ui.horizontal(|ui| {
             reference_picker(ui, &mut reference);
@@ -3151,11 +3097,9 @@ impl VisiCutR {
             let field_w = 100.0;
             egui::Grid::new("position_size")
                 .num_columns(4)
-                // Sonst sind die Beschriftungsspalten 40 px breit.
                 .min_col_width(0.0)
                 .spacing([4.0, 4.0])
                 .show(ui, |ui| {
-                    // Zeilenweise X, Y, dann B, H: Tab springt von X nach Y.
                     ui.label(egui::RichText::new("X").color(AXIS_X));
                     if ui
                         .add_sized([field_w, 20.0], field(&mut x, -10000.0))
@@ -3237,7 +3181,6 @@ impl VisiCutR {
         let (mut new_scale, mut new_size) = (None, None);
         let field_w = 80.0;
         let height = ui.spacing().interact_size.y;
-        // Rechts neben den Feldern die Kette wie unter „Position und Größe“.
         ui.horizontal(|ui| {
             let grid = egui::Grid::new("scale_size")
                 .num_columns(4)
@@ -3254,7 +3197,6 @@ impl VisiCutR {
                     ui.end_row();
 
                     ui.label(tr("Skalieren"));
-                    // Kein Ziehen: der Faktor gilt einmal, wenn er eingetippt ist.
                     fn percent(value: &mut f32) -> egui::DragValue<'_> {
                         egui::DragValue::new(value)
                             .speed(0.0)
@@ -3296,7 +3238,6 @@ impl VisiCutR {
                         new_size = Some((changed_w, changed_h));
                     }
                 });
-            // Mittig neben den beiden Feldzeilen, nicht neben der Kopfzeile.
             let rows = 2.0 * height + ui.spacing().item_spacing.y;
             let top = (grid.response.rect.height() - rows / 2.0 - 17.0).max(0.0);
             ui.vertical(|ui| {
@@ -3336,7 +3277,6 @@ impl VisiCutR {
         let editable = self.texture.is_some() && !self.busy();
         ui.horizontal(|ui| {
             ui.label(tr("Winkel"));
-            // Feste Breite und kein Ziehen: anklicken, Zahl tippen, Enter dreht.
             let field = ui
                 .add_sized(
                     [80.0, ui.spacing().interact_size.y],
@@ -3381,7 +3321,6 @@ impl VisiCutR {
     /// Rechnet die farbige Bearbeitung neu, wenn sich Motiv, Teile oder
     /// Zuordnung geändert haben; reines Verschieben verschiebt das Bild.
     fn refresh_live(&mut self, ctx: &egui::Context) {
-        // Während des Ziehens an einem Anfasser wird das Bild nur gestreckt.
         if self.handle_drag.is_some() {
             return;
         }
@@ -3390,14 +3329,10 @@ impl VisiCutR {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         p.svg.hash(&mut hasher);
         let position = (!p.parts.is_empty()).then_some((p.x_mm, p.y_mm));
-        // Texturgröße folgt der Anzeige (in groben Stufen, damit nicht jeder
-        // Mausradschritt neu rechnet).
         let [_, _, bw, bh] = p.bounds();
         let shown = (bw.max(bh) * self.view_scale * ctx.pixels_per_point()).max(1.0);
         let shown = 2f32.powf((shown.log2() * 2.0).ceil() / 2.0);
         let max_px = (shown * 1.5).clamp(800.0, 4096.0);
-        // Linien mindestens 1,5 Bildschirmpunkte breit, sonst verschwinden sie
-        // beim Verkleinern der Textur.
         let min_line_px = 1.5 * max_px / shown;
         max_px.to_bits().hash(&mut hasher);
         serde_json::to_string(&(
@@ -3437,7 +3372,6 @@ impl VisiCutR {
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(20, 14))
             .show(ui, |ui| self.canvas_header(ui, &mut clicked));
-        // Probleme mit der Lage des Motivs stehen rot über dem Arbeitsbett.
         if !self.project.svg.is_empty()
             && let Err(e) = self.project.validate()
         {
@@ -3450,7 +3384,6 @@ impl VisiCutR {
                 });
         }
         form::divider(ui);
-        // Berechnen steht oben in der Leiste; hier nur Zeitschätzung und Anzeige.
         if self.preview.has_toolbar() {
             egui::Frame::new()
                 .inner_margin(egui::Margin::symmetric(20, 8))
@@ -3498,8 +3431,6 @@ impl VisiCutR {
     fn canvas_header(&mut self, ui: &mut egui::Ui, clicked: &mut Option<Command>) {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                // Projektname: Doppelklick zum Umbenennen, ⏎ oder Klick
-                // daneben übernimmt, Esc bricht ab.
                 if let Some(draft) = &mut self.name_draft {
                     let field = ui.add(
                         egui::TextEdit::singleline(draft)
@@ -3550,8 +3481,6 @@ impl VisiCutR {
                     }
                 ));
             });
-            // Gruppen von links nach rechts; was nicht neben den Titel passt,
-            // wandert von rechts beginnend in das Menü „…“.
             let camera = format!("📷 {}", tr("Kamera"));
             let zoom = format!("{:.0} %", self.zoom * 100.0);
             let has_camera = self.devices.has_camera();
@@ -3631,7 +3560,6 @@ impl VisiCutR {
                         .clicked()
                         .then_some(command)
                 };
-                // Umschalter wie die Symbolschalter unter macOS.
                 let toggle = |ui: &mut egui::Ui, command: Command, text: &str, on: bool| {
                     ui.add_enabled(self.enabled(command), egui::Button::new(text).selected(on))
                         .on_hover_text(command.title())
@@ -3665,7 +3593,6 @@ impl VisiCutR {
                             let shown = self.devices.camera_shown();
                             chosen.extend(toggle(ui, Command::ToggleCamera, &camera, shown));
                         }
-                        // Reststücke im Kamerabild erkennen.
                         ViewGroup::Remnants => {
                             chosen.extend(tool(ui, Command::Remnants, Command::Remnants.title()))
                         }
@@ -3703,7 +3630,6 @@ impl VisiCutR {
             tool(ui, Icon::Shape, Command::Shape);
             tool(ui, Icon::Sign, Command::Sign);
             object_bar::separator(ui);
-            // Aufklappfelder: hinterlegt, solange sie offen sind.
             let popup = |ui: &mut egui::Ui, icon: Icon, title: &str, hover: &str| {
                 let id = ui.make_persistent_id(("object_bar", title));
                 let open = egui::Popup::is_id_open(ui.ctx(), id);
@@ -3827,7 +3753,6 @@ impl VisiCutR {
                 rect: Rect::from_min_size(rect.min + Vec2::splat(RULER), bed_mm * scale),
                 scale,
             };
-            // Neue Text-, Form- und Schild-Teile kommen in den sichtbaren Ausschnitt.
             let shown = view.rect.intersect(ui.clip_rect());
             if shown.is_positive() {
                 let min = view.to_mm(shown.min);
@@ -3907,7 +3832,6 @@ impl VisiCutR {
         let camera = self.devices.paint_camera(painter, bed);
         if self.show_grid && !camera {
             let step = workspace::grid_step_mm(scale);
-            // Linien an den Linealzahlen kräftiger.
             let labels = workspace::ruler_step_mm(scale);
             let line = |mm: f32| {
                 let major = ((mm / labels).round() * labels - mm).abs() < step * 0.01;
@@ -3948,7 +3872,6 @@ impl VisiCutR {
         clicked: &mut Option<Command>,
     ) {
         let others = self.paint_parts(painter, view, texture);
-        // Die Auftragsvorschau umfasst alle Teile.
         self.preview
             .overlay(painter, view.to_screen(self.project.bounds()));
         if let Some(index) = self.other_parts_clicked(ui, painter, view, &others) {
@@ -3957,8 +3880,6 @@ impl VisiCutR {
         }
         let p = &self.project;
         let motif = view.to_screen([p.x_mm, p.y_mm, p.width_mm, p.height_mm]);
-        // Auswahl schwarz gestrichelt: Blau, Rot, Orange und Violett
-        // stehen für Bearbeitungen und dürfen nicht verwechselt werden.
         let frame = motif.shrink(0.5);
         painter.extend(egui::Shape::dashed_line(
             &[
@@ -3981,8 +3902,6 @@ impl VisiCutR {
             )
             .on_hover_cursor(egui::CursorIcon::Grab);
         self.motif_menu(&response, clicked);
-        // Liegt unter dem gewählten Teil ein anderes, wählt ein Klick
-        // dieses; sonst wäre es nicht mehr erreichbar.
         if response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
             && let Some((index, _)) = others.iter().rev().find(|(_, r)| r.contains(pos))
@@ -4011,10 +3930,7 @@ impl VisiCutR {
         texture: egui::TextureId,
     ) -> Vec<(usize, Rect)> {
         let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
-        // Bearbeitung in Farbe statt der Originalbilder, schon vor der
-        // Auftragsvorschau.
         let live = self.live.as_ref().and_then(|(_, t)| t.as_ref());
-        // Die übrigen Teile unter dem gewählten, mit dünnem grauem Rahmen.
         let others = self
             .project
             .parts
@@ -4076,14 +3992,10 @@ impl VisiCutR {
             if response.clicked() {
                 select = Some(index);
             }
-            // Rechtsklick wählt das Teil und öffnet gleich sein Menü
-            // (dasselbe wie beim gewählten Teil, siehe „motif“).
             if response.secondary_clicked() {
                 select = Some(index);
                 let menu = ui.id().with("motif").with("popup");
                 let at = response.interact_pointer_pos();
-                // Wie egui's eigenes `context_menu` (Position für den
-                // Anker `PointerFixed`); einen anderen Weg gibt es nicht.
                 #[allow(deprecated)]
                 ui.memory_mut(|m| m.open_popup_at(menu, at));
             }
@@ -4125,7 +4037,6 @@ impl VisiCutR {
             }
             _ => None,
         };
-        // Gelb: keine Bearbeitungsfarbe.
         let Some(index) = self.jobs.hovered_object.take().or(self.jobs.canvas_hover) else {
             return;
         };
@@ -4272,7 +4183,6 @@ impl VisiCutR {
                 egui::StrokeKind::Middle,
             );
         }
-        // Drehanfasser über der Mitte, bei wenig Platz darunter.
         let above = motif.top() - 22.0 >= view.rect.top();
         let (edge, knob) = if above {
             (
@@ -4312,7 +4222,6 @@ impl VisiCutR {
                 [pointer.x, pointer.y],
                 shift,
             )
-            // Nur ganze Grad, wie im Eingabefeld.
             .round();
             self.handle_drag = Some(HandleDrag::Rotate { start, degrees });
         }
@@ -4320,7 +4229,6 @@ impl VisiCutR {
             if let Some(HandleDrag::Rotate { degrees, .. }) = self.handle_drag
                 && degrees.abs() >= 0.1
             {
-                // Dreht wie „Drehen“ im Inspektor um die Mitte.
                 self.rotate_deg = degrees;
                 *clicked = Some(Command::RotateBy);
             }
@@ -4329,7 +4237,6 @@ impl VisiCutR {
         let painter = ui.painter();
         painter.line_segment([edge, knob], handle_stroke);
         painter.circle(knob, 4.5, Color32::WHITE, handle_stroke);
-        // Vorschau der Drehung: Motiv und Rahmen gedreht um die Mitte.
         if let Some(HandleDrag::Rotate { degrees, .. }) = self.handle_drag {
             let angle = degrees.to_radians();
             egui::Image::new((texture, motif.size()))
@@ -4426,7 +4333,6 @@ impl VisiCutR {
         self.overwrite_dialog(ctx);
         self.clear_cache_dialog(ctx);
         self.send_dialog(ctx);
-        // Hinweise zuletzt, damit sie über anderen Dialogen liegen.
         self.alert_dialog(ctx);
     }
 
@@ -4435,7 +4341,6 @@ impl VisiCutR {
         if !self.confirm_library_quit {
             return;
         }
-        // Some(true): sichern, Some(false): verwerfen.
         let mut choice = None;
         let modal = egui::Modal::new(egui::Id::new("library_quit")).show(ctx, |ui| {
             ui.set_max_width(380.0);
@@ -4519,7 +4424,6 @@ impl VisiCutR {
         let Some(pending) = self.pending_import.take() else {
             return;
         };
-        // Some(true): ganze Zeichnung, Some(false): nur die Fläche.
         let mut choice = None;
         let modal = egui::Modal::new(egui::Id::new("canvas_overflow")).show(ctx, |ui| {
             ui.set_max_width(400.0);
@@ -4624,8 +4528,6 @@ impl VisiCutR {
         };
         let mut send = false;
         let mut cancel = false;
-        // Wie der Hinweis: Rahmen ein paar Punkte innerhalb des
-        // Fensterrands, in der Akzentfarbe.
         let outer = egui::Frame::popup(&ctx.style()).inner_margin(5.0);
         let modal = egui::Modal::new(egui::Id::new("send"))
             .frame(outer)
@@ -4672,8 +4574,6 @@ impl VisiCutR {
             return;
         };
         let mut close = false;
-        // Roter Rahmen ein paar Punkte innerhalb des Fensterrands, Inhalt
-        // zentriert.
         let outer = egui::Frame::popup(&ctx.style()).inner_margin(5.0);
         let modal = egui::Modal::new(egui::Id::new("alert"))
             .frame(outer)
@@ -4777,7 +4677,6 @@ impl VisiCutR {
                                     preview_ui::operation_color(step.operation),
                                 );
                                 ui.vertical(|ui| {
-                                    // Die Datei, die am Gerät erscheint.
                                     let job = prepared
                                         .jobs
                                         .iter()
@@ -4880,7 +4779,6 @@ impl VisiCutR {
             self.allow_close = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         } else {
-            // Eine laufende Vorschauberechnung abwarten.
             if !computing {
                 *frames += 1;
             }
@@ -4897,7 +4795,6 @@ impl VisiCutR {
 /// Ein mit tiny-skia gerendertes Bild als egui-Bild.
 fn color_image(pixmap: resvg::tiny_skia::Pixmap) -> egui::ColorImage {
     let size = [pixmap.width() as usize, pixmap.height() as usize];
-    // tiny-skia speichert vormultipliziertes RGBA; egui bekommt es entmultipliziert.
     let mut pixels = pixmap.take();
     for pixel in pixels.chunks_exact_mut(4) {
         let alpha = pixel[3] as u32;
@@ -5041,8 +4938,6 @@ impl eframe::App for VisiCutR {
         self.poll_send(ctx);
         self.poll_reading(ctx);
         self.sendable = !self.busy() && self.project.validate().is_ok();
-        // Nullpunkt unten links: Bezugspunkt standardmäßig unten links, wie
-        // am Gerät; eine eigene Wahl bleibt erhalten.
         let bottom = self.devices.origin_bottom_left();
         if self.origin_bottom_left != Some(bottom) {
             let (from, to) = if bottom {
@@ -5078,8 +4973,6 @@ impl eframe::App for VisiCutR {
         } else if !dropped.is_empty() && !self.modal_open() {
             self.drop_files(ctx, dropped);
         }
-        // Ein späterer Start hat Dateien übergeben: Fenster nach vorn holen.
-        // Wartet ein Dialog, bleibt die Anfrage bis zu seinem Ende liegen.
         if self.handed_over.is_none()
             && let Some(request) = self.instance.as_ref().and_then(|i| i.try_recv())
         {
@@ -5112,8 +5005,6 @@ impl eframe::App for VisiCutR {
         }
         match self.compose.windows(ctx, &self.project, self.visible_mm) {
             Some(Ok((mut project, notes))) => {
-                // Bearbeiteter Text mit anderer Bearbeitung: Laserwerte aus dem
-                // Profil, ohne Profil Markieren und Gravieren mit 0 %.
                 if let (Some(old), Some(new)) = (&self.project.part_text, &project.part_text)
                     && project.parts.len() == self.project.parts.len()
                     && project.active_part == self.project.active_part
@@ -5128,7 +5019,6 @@ impl eframe::App for VisiCutR {
             Some(Err(e)) => self.report(e.to_string()),
             None => {}
         }
-        // Die Rückfrage bei ungesicherten Änderungen stellt `request`.
         if let Some((svg, name)) = self.vectorize.windows(ctx, false, &mut self.status) {
             self.request(ctx, Replace::Vectorized { svg, name });
         }
@@ -5173,7 +5063,6 @@ impl eframe::App for VisiCutR {
             &mut self.status,
             self.page == Page::Preview,
         );
-        // Eine angeforderte Vorschau (Menü, Kürzel, Knopf) zeigt ihren Reiter.
         if self.preview.open {
             self.preview.open = false;
             self.page = Page::Preview;
@@ -5267,7 +5156,6 @@ impl eframe::App for VisiCutR {
 
 /// VisiCut-Symbol für Fenster und Taskleiste (das der Java-Oberfläche).
 fn window_icon() -> Option<egui::IconData> {
-    // VisiCutR-Logo, erzeugt von scripts/icons.sh.
     let png = include_bytes!("../resources/icon/icon.png");
     let image = image::load_from_memory(png).ok()?.into_rgba8();
     Some(egui::IconData {
@@ -5278,7 +5166,6 @@ fn window_icon() -> Option<egui::IconData> {
 }
 
 fn main() -> eframe::Result {
-    // Hilfsprozess für Skripte und PDF-Seiten aus Dateien (import::worker).
     if std::env::args().nth(1).as_deref() == Some(import::WORKER_FLAG) {
         std::process::exit(import::serve_worker());
     }
@@ -5297,7 +5184,6 @@ fn main() -> eframe::Result {
         println!("{text}");
         return Ok(());
     }
-    // Läuft VisiCutR schon, öffnet das dortige Fenster die Dateien.
     if launch.forwards() && instance::forward(&visicut_core::device::config_dir(), &launch.request)
     {
         return Ok(());
@@ -5331,7 +5217,6 @@ mod tests {
         let icon = window_icon().expect("VisiCutR-Logo lesbar");
         assert_eq!((icon.width, icon.height), (256, 256));
         assert_eq!(icon.rgba.len(), 256 * 256 * 4);
-        // Mitte der oberen Kante: Akzentfarbe des Logos.
         let at = |x: usize, y: usize| &icon.rgba[(y * 256 + x) * 4..(y * 256 + x) * 4 + 3];
         assert_eq!(
             at(128, 20),
@@ -5341,9 +5226,6 @@ mod tests {
 
     #[test]
     fn every_listed_shortcut_is_handled() {
-        // ⌘R stood in the menu and the shortcut list but did nothing.
-        // Undo, Redo, Duplicate, Delete, Copy and Paste are handled outside
-        // text fields.
         let editing = [
             Command::Undo,
             Command::Redo,

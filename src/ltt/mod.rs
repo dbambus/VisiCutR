@@ -50,7 +50,6 @@ fn dword(out: &mut Vec<u8>, value: u32) {
     out.extend(value.to_be_bytes());
 }
 
-// Rotary engraving: steps per full turn, an approximation in LibLaserCut.
 const ROTARY_STEPS_PER_REVOLUTION: f64 = 6400.0;
 /// Highest raw Y of the XY bed (Java `yMax`, truncated like its int cast).
 const MAX_RAW_Y: i32 = (BED_HEIGHT * MACHINE_DPI / 25.4) as i32;
@@ -326,7 +325,6 @@ pub fn processing_preview_sized(
         (frame.height * scale).ceil().max(1.0) as u32,
     )
     .ok_or(LttError::PreviewFailed)?;
-    // Areas first, outlines on top.
     let ordered = parts
         .iter()
         .filter(|p| p.operation.is_raster())
@@ -343,7 +341,6 @@ pub fn processing_preview_sized(
                 operation_color(part.operation),
             )?;
         } else {
-            // Kräftig genug, um auch auf einer Gravurfläche erkennbar zu sein.
             draw_contours(
                 &mut preview,
                 frame,
@@ -370,7 +367,6 @@ fn draw_area(
     let size = tree.size();
     let sx = preview.width() as f32 / frame.width;
     let sy = preview.height() as f32 / frame.height;
-    // Canvas units → mm on the bed → preview pixels.
     let transform = tiny_skia::Transform::from_row(
         source.width_mm / size.width() * sx,
         0.0,
@@ -387,7 +383,6 @@ fn draw_area(
         if a == 0 {
             continue;
         }
-        // Premultiplied: unpremultiply for the brightness.
         let luma =
             (299 * u32::from(pixel[0]) + 587 * u32::from(pixel[1]) + 114 * u32::from(pixel[2]))
                 / 1000
@@ -444,8 +439,6 @@ pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, 
     {
         return Err(LttError::WrongBed);
     }
-    // All parts together: the preview covers their bounding box, rotary
-    // limits apply to the whole layout.
     let [frame_x, frame_y, frame_width, frame_height] = project.bounds();
     let frame = Frame {
         x: frame_x,
@@ -512,11 +505,6 @@ pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, 
                 .into(),
         );
     }
-    // Finishing operations first, cutting last; one LTT file per operation
-    // holding its steps in order.
-    // One job per operation, or (`single_job`) one job with all of them:
-    // engravings first like Java, then marking and cutting (Java keeps the
-    // mapping order of marking and cutting; cutting last is deliberate).
     let ordered: Vec<&Part> = Operation::ALL
         .iter()
         .flat_map(|operation| parts.iter().filter(move |p| p.operation == *operation))
@@ -543,7 +531,6 @@ pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, 
         } else {
             device_job_name(operation.prefix(), &project.name)
         };
-        // One `ESC D` per file: all engravings of a job share the resolution.
         let pitches: std::collections::BTreeSet<i32> = group
             .iter()
             .filter(|p| p.operation.is_raster())
@@ -561,8 +548,6 @@ pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, 
                     .map(|s| overscan(p.operation, s.speed_percent))
             })
             .fold(0.0, f32::max);
-        // The header holds the bounds of the actual content (LaserJob
-        // .getBoundingBox in Java), so it is written after the parts.
         let mut bounds: Option<Bounds> = None;
         let mut job = JobOutput {
             body: Vec::new(),
@@ -714,9 +699,6 @@ fn append_part(
     if part.sets.iter().any(|s| s.power_percent <= 0.0) {
         return Err(LttError::ZeroPower(part.operation));
     }
-    // The cutter takes power in 0.1 % steps; like Java (at least 1 step)
-    // smaller values such as the FAU profiles' 0.01 % for marking paper
-    // are sent as 0.1 %.
     if part.sets.iter().any(|s| s.power_percent < 0.1) {
         warnings.push(tr!(
             "{operation}: Leistung unter 0,1 % wird wie in VisiCut mit 0,1 % gesendet",
@@ -732,8 +714,6 @@ fn append_part(
     let bounds;
     match part.operation {
         Operation::Cut | Operation::Mark => {
-            // A LaserScript part goes out as VisiCut runs the script for the
-            // job: in script order, with its own power and speed, on whole pixels.
             let script = if part.outline {
                 None
             } else {
@@ -743,8 +723,6 @@ fn append_part(
                 Some(script) => script.iter().map(|p| p.points.clone()).collect(),
                 None => part.vector_paths(&source)?,
             };
-            // Optional: parts that run along an earlier line of this step are
-            // cut once (passes and parameter sets still repeat everything).
             let (paths, duplicates) = if project.remove_duplicate_lines && script.is_none() {
                 crate::overlap::remove_duplicates(paths)
             } else {
@@ -776,12 +754,12 @@ fn append_part(
                 }
             }
 
-            out.extend([0x1b, 0x56]); // vector mode
-            out.extend([0x1b, 0x45, 0, 0, 0, 0, 0, 0, 0]); // pulse mode off
-            out.extend([0x1b, 0x4e, 1]); // colour code red
+            out.extend([0x1b, 0x56]);
+            out.extend([0x1b, 0x45, 0, 0, 0, 0, 0, 0, 0]);
+            out.extend([0x1b, 0x4e, 1]);
             out.extend(b"PS");
             if !state.ppi {
-                out.extend([0x1b, 0x50, 0, 4]); // PPI divisor
+                out.extend([0x1b, 0x50, 0, 4]);
                 state.ppi = true;
             }
             let kind = if part.operation == Operation::Mark {
@@ -789,10 +767,6 @@ fn append_part(
             } else {
                 MotionKind::Cut
             };
-            // As in VisiCut's VectorProfile, the shapes are added once per
-            // LaserProperty and every pass is one more property; the optimizer
-            // then orders all of them together (see order::inner_first).
-            // VisiCut adds the material thickness to the focus of each property.
             let mut keys = Vec::new();
             for set in &part.sets {
                 for _ in 0..set.passes {
@@ -803,7 +777,6 @@ fn append_part(
                     });
                 }
             }
-            // Paths of a LaserScript that continue without a move.
             let mut joined = Vec::new();
             let elements: Vec<order::Element> = match &script {
                 Some(script) => {
@@ -812,7 +785,6 @@ fn append_part(
                     elements
                 }
                 None => {
-                    // The shapes in pixels as VisiCut's ShapeConverter adds them.
                     let shapes: Vec<([f64; 2], Vec<[f64; 2]>)> = paths
                         .iter()
                         .filter_map(|path| shape_converter(path))
@@ -828,12 +800,10 @@ fn append_part(
                         .collect()
                 }
             };
-            // LaserJob.getBoundingBox: extent of the commands, px2mm per point.
             bounds = Bounds::of_points(
                 elements
                     .iter()
                     .enumerate()
-                    // Not the property changes of a LaserScript.
                     .filter(|(i, e)| {
                         !(joined.get(*i).copied().unwrap_or(false) && e.moves.is_empty())
                     })
@@ -842,7 +812,6 @@ fn append_part(
             )
             .ok_or(LttError::NoVectorPaths)?;
             let ordered = match project.cut_order {
-                // VisiCut does not optimise a LaserScript.
                 _ if script.is_some() => elements,
                 CutOrder::VisiCut => order::inner_first(elements, &keys),
                 CutOrder::File => elements,
@@ -860,7 +829,6 @@ fn append_part(
                     o
                 }),
             };
-            // Java prescales Y only while generating the commands.
             let scale_y = axis.prescale();
             let mut program = Program::new(part.operation);
             let (circles, curves) = {
@@ -896,8 +864,6 @@ fn append_part(
                 (state.speed, state.power) = (encoder.speed, encoder.power);
                 (encoder.circles, encoder.curves)
             };
-            // Passes are interleaved per path like in Java, so the timeline
-            // holds the whole sequence once.
             estimated += timeline.append(program, 1);
             let mut text = tr!(
                 "{paths} Vektorpfade · {passes} Durchgänge",
@@ -928,7 +894,6 @@ fn append_part(
         }
         Operation::Engrave | Operation::Engrave3d => {
             let (pixmap, area) = render_raster(&source, part.operation, part.raster.pitch())?;
-            // RasterizableJobPart: start point plus image size, px2mm.
             let mm = |px: i32| area.mm(px);
             bounds = Bounds {
                 min: [mm(area.x), mm(area.y)],
@@ -946,17 +911,14 @@ fn append_part(
             let color = operation_color(part.operation);
             draw_raster(preview, frame, &raster, area, color);
             let raster_png = raster_preview(&raster, color)?;
-            // Job mode: one or eight bits per pixel ("engrave 3D").
             state.raster_mode(out, raster.bits_per_pixel);
             let mut lines = 0;
             for set in &part.sets {
                 let mut program = Program::new(part.operation);
                 let encoded;
                 (encoded, lines) = raster_code(project, area, part, &raster, set, &mut program)?;
-                // Java adds one RasterPart per pass; each sends the colour
-                // code and its settings and starts again to the right.
                 for _ in 0..set.passes {
-                    out.extend([0x1b, 0x4e, 0]); // colour code black
+                    out.extend([0x1b, 0x4e, 0]);
                     state.set(out, set.speed_percent, set.power_percent);
                     out.extend(&encoded);
                 }
@@ -1066,7 +1028,6 @@ fn raster_pixmap(raster: &Raster, color: [u8; 3]) -> Result<tiny_skia::Pixmap, L
     let width = raster.width;
     for (i, pixel) in mask.data_mut().chunks_exact_mut(4).enumerate() {
         let a = raster.intensity(i % width, i / width) as u32;
-        // tiny-skia stores premultiplied colours.
         pixel.copy_from_slice(&[
             (color[0] as u32 * a / 255) as u8,
             (color[1] as u32 * a / 255) as u8,
@@ -1087,7 +1048,6 @@ fn draw_raster(
     let Ok(mask) = raster_pixmap(raster, color) else {
         return;
     };
-    // Raster pixels → mm on the bed → preview pixels of the motif.
     let px_per_mm = area.dpi() / 25.4;
     let scale_x = preview.width() as f64 / frame.width as f64 / px_per_mm;
     let scale_y = preview.height() as f64 / frame.height as f64 / px_per_mm;
@@ -1184,19 +1144,17 @@ fn settings(out: &mut Vec<u8>, power: f32, speed: f32) {
 
 fn header(project: &Project, overscan: f32, name: &str, bounds: Bounds, pitch: i32) -> Vec<u8> {
     let mut out = b"LTT\x1bv\x01\x01\x02\x1bF".to_vec();
-    // Prefix is part of the actual controller name, within its 15-byte limit.
     out.push(name.len() as u8);
     out.extend(name.as_bytes());
     let axis = Axis::of(project);
     if project.rotary_axis {
-        out.extend([0x1b, 0x61, 0x15]); // temporary reference point: centre, stay
-        out.extend([0x1b, 0x4d, 0x10]); // rotary axis, one bit per raster pixel
+        out.extend([0x1b, 0x61, 0x15]);
+        out.extend([0x1b, 0x4d, 0x10]);
     } else {
-        out.extend([0x1b, 0x61, 0]); // temporary reference point off
-        out.extend([0x1b, 0x4d, 0]); // XY, one bit per raster pixel
+        out.extend([0x1b, 0x61, 0]);
+        out.extend([0x1b, 0x4d, 0]);
     }
     out.extend([0x1b, 0x6c]);
-    // Content bounds, then with engrave overscan as in Java setBoundingBox.
     for margin in [0.0, overscan as f64] {
         let xmin = (bounds.min[0] - margin).max(0.0);
         let xmax = (bounds.max[0] + margin).min(BED_WIDTH);
@@ -1210,11 +1168,9 @@ fn header(project: &Project, overscan: f32, name: &str, bounds: Bounds, pitch: i
         );
     }
     out.extend([0x1b, 0x6e, 0, 0, 0x5d, 0xcf, 0, 0, 0x69, 0x56]);
-    out.extend([0x1b, 0x4f, 0]); // no autorun
+    out.extend([0x1b, 0x4f, 0]);
     out.extend([0x1b, 0x51, 0, 0]);
-    // Raster resolution as divisor of 4000 DPI (8: 500 DPI); raster lines only.
     out.extend([0x1b, 0x44, pitch as u8]);
-    // Material radius in 0.01 mm; LibLaserCut sends 42 mm for XY jobs.
     out.extend([0x1b, 0x52]);
     let radius = if project.rotary_axis {
         project.rotary_diameter_mm / 2.0
@@ -1270,7 +1226,6 @@ fn render_raster(
         } else {
             usvg::TextRendering::OptimizeSpeed
         },
-        // Java2D draws images with nearest-neighbour interpolation.
         image_rendering: usvg::ImageRendering::OptimizeSpeed,
         ..crate::svg::options()
     };
@@ -1299,7 +1254,6 @@ fn render_raster(
     let mut pixmap =
         tiny_skia::Pixmap::new(width as u32, height as u32).ok_or(LttError::RenderFailed)?;
     pixmap.fill(tiny_skia::Color::WHITE);
-    // translate(-bb) · mm2laserPx · (translate(x, y) · scale(document → mm))
     resvg::render(
         &tree,
         tiny_skia::Transform::from_row(
@@ -1437,8 +1391,6 @@ fn raster_code(
     let dpi = area.dpi();
     let offset = engrave_shift_pixels(&project.machine, speed, dpi);
     let per_byte = (8 / raster.bits_per_pixel) as i32;
-    // Shift by whole pixels for 3D rows so power values stay intact; for
-    // 1-bit rows this equals the Java driver's bit shift.
     let shift_px = engrave_shift_px_at(&project.machine, speed, extra_shift_px, dpi);
     let shift = shift_px * raster.bits_per_pixel as i32;
     let spare = (offset.abs().ceil() as i32).max(shift_px.abs());
@@ -1466,8 +1418,6 @@ fn raster_code(
         start_x -= left as i32 * per_byte;
         let mut data = vec![0; left];
         data.extend_from_slice(&row[first..=last]);
-        // Java adds bytes while the end stays below max_x - per_byte, so the
-        // last one may reach past that line (rounding up, not down).
         let room = max_x - spare - per_byte - start_x - data.len() as i32 * per_byte;
         let right_bytes = overscan_bytes.min((room.max(0) + per_byte - 1) / per_byte) as usize;
         data.resize(data.len() + right_bytes, 0);
@@ -1491,7 +1441,6 @@ fn raster_code(
             vector::cutting_time_mm(right_mm - left_mm, raster_speed),
         );
         if !right {
-            // Right to left: reverse pixel order (bit order for 1-bit rows).
             data.reverse();
             if raster.bits_per_pixel == 1 {
                 data.iter_mut().for_each(|b| *b = b.reverse_bits());
@@ -1647,8 +1596,6 @@ mod tests {
 
     #[test]
     fn laser_script_keeps_its_order_and_its_power_per_path() {
-        // Right square first with 30 %, then the left one with the step's
-        // power: VisiCut runs the script for the job and does not reorder it.
         let source = "move(20, 0); line(30, 0); line(30, 10); line(20, 10); line(20, 0); \
                       set('power', 30); move(0, 0); line(10, 0); line(10, 10); line(0, 10); line(0, 0);";
         let path = std::env::temp_dir().join(format!(
@@ -1671,11 +1618,9 @@ mod tests {
         };
         let bytes = &prepare(&project).unwrap().jobs[0].bytes;
         let find = |needle: &[u8]| bytes.windows(needle.len()).position(|w| w == needle);
-        // 60 % for the first square, then 30 %.
         let first = find(&[0x1b, 0x4a, 0x02, 0x58]).expect("60 %");
         let second = find(&[0x1b, 0x4a, 0x01, 0x2c]).expect("30 %");
         assert!(first < second);
-        // The first move goes to the right square (x = 120 mm, whole pixels).
         let x = |at: usize| u32::from_be_bytes(bytes[at + 2..at + 6].try_into().unwrap());
         let moves: Vec<u32> = (0..bytes.len() - 1)
             .filter(|&i| &bytes[i..i + 2] == b"PA")
@@ -1692,7 +1637,6 @@ mod tests {
         assert_eq!(job.jobs.len(), 2);
         assert_eq!(job.jobs[0].operation, Operation::Engrave);
         assert_eq!(job.jobs[1].operation, Operation::Cut);
-        // Both device jobs start at the home position top right.
         let starts: Vec<_> = job.timeline.runs.iter().map(|r| r.from_mm).collect();
         assert_eq!(starts, [HOME_MM, HOME_MM]);
         assert!(job.jobs[0].bytes.windows(2).any(|b| b == [0x1b, 0x30]));
@@ -1741,8 +1685,6 @@ mod tests {
 
     #[test]
     fn parts_keep_their_own_place_and_assignment_and_share_one_job_per_operation() {
-        // Part 1: the mixed drawing (engrave + cut steps) at 10/10; part 2:
-        // a plain rectangle cut as a whole at 200/100.
         let mut p = mixed();
         p.part_name = "gemischt".into();
         let single = mixed();
@@ -1768,23 +1710,19 @@ mod tests {
         assert_eq!(p.part_count(), 2);
         assert_eq!(p.active_part, 1);
         let job = prepare(&p).unwrap();
-        // Still one engrave and one cut job; the cut job holds both parts.
         assert_eq!(job.jobs.len(), 2);
         assert_eq!(job.jobs[1].operation, Operation::Cut);
         assert_eq!(job.steps.len(), 3);
         assert!(job.jobs[1].bytes.len() > job_single.jobs[1].bytes.len());
-        // The preview covers both parts (10..220 × 10..110 mm).
         let image = tiny_skia::Pixmap::decode_png(&job.preview_png).unwrap();
         let ratio = image.width() as f32 / image.height() as f32;
         assert!((ratio - 210.0 / 100.0).abs() < 0.05, "{ratio}");
-        // Selecting the first part swaps the assignments back.
         p.select_part(0);
         assert_eq!(p.part_name, "gemischt");
         assert_eq!(p.steps.len(), 2);
         assert_eq!(p.parts[0].name, "rechteck");
         let reloaded: Project = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
         assert_eq!(prepare(&reloaded).unwrap().jobs[1].bytes, job.jobs[1].bytes);
-        // A part outside the bed blocks sending and names the part.
         p.parts[0].x_mm = 990.0;
         assert!(matches!(
             prepare(&p),
@@ -1820,15 +1758,12 @@ mod tests {
             ..Default::default()
         };
         let job = prepare(&project).unwrap();
-        // The inner rectangle is cut first, with both sets, then the outline with both sets.
         let speeds: Vec<u16> = job.jobs[0]
             .bytes
             .windows(4)
             .filter(|w| w[..2] == [0x1b, 0x53])
             .map(|w| u16::from_be_bytes([w[2], w[3]]))
             .collect();
-        // (50 %, 8 %) comes first because of the HashMap order of the Java
-        // properties (bucket 4 before 12), not because it is the first set.
         assert_eq!(speeds, vec![80, 300, 80, 300]);
         assert_eq!(job.timeline.programs.len(), 1);
         assert_eq!(job.steps[0].parameter_sets, 2);
@@ -1836,7 +1771,6 @@ mod tests {
 
     #[test]
     fn every_cut_order_prepares_a_framed_job_with_its_own_order() {
-        // A frame with a hole, listed outside first, and a small square.
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="300mm" height="100mm" viewBox="0 0 300 100"><rect x="10" y="10" width="80" height="80" fill="none" stroke="red"/><rect x="200" y="10" width="10" height="10" fill="none" stroke="red"/><circle cx="50" cy="50" r="10" fill="none" stroke="red"/></svg>"#;
         let mut bytes = Vec::new();
         for order in CutOrder::ALL {
@@ -1852,8 +1786,6 @@ mod tests {
             assert_framing(&job.jobs[0].bytes);
             bytes.push(job.jobs[0].bytes.clone());
         }
-        // „Wie in der Datei“ and „Nächster Pfad“ cut the frame before its
-        // hole, so they differ from the inner-first orders.
         assert_ne!(bytes[2], bytes[1]);
         assert_ne!(bytes[3], bytes[1]);
         assert_ne!(bytes[4], bytes[2]);
@@ -1862,7 +1794,6 @@ mod tests {
     #[test]
     fn shortest_travel_is_the_default_and_reduces_time() {
         assert_eq!(Project::default().cut_order, CutOrder::ShortestTravel);
-        // Parts at alternating heights: the inner-first sweep zigzags across.
         let mut body = String::new();
         for i in 0..6 {
             let (x, y) = (5 + i * 90, if i % 2 == 0 { 5 } else { 150 });
@@ -1900,7 +1831,6 @@ mod tests {
 
     #[test]
     fn duplicate_lines_are_cut_once_only_when_enabled() {
-        // Two adjacent squares share their middle edge.
         let project = Project {
             width_mm: 60.0,
             height_mm: 30.0,
@@ -1924,7 +1854,6 @@ mod tests {
         );
         assert!(deduped.estimated_seconds < plain.estimated_seconds);
         assert_framing(&deduped.jobs[0].bytes);
-        // Without duplicates the option changes nothing.
         let single = Project {
             svg: project.svg.replace(r#"<rect x="25""#, r#"<rect x="35""#),
             ..project
@@ -1976,7 +1905,6 @@ mod tests {
 
     #[test]
     fn outline_cuts_only_the_border_of_the_covered_area() {
-        // Two overlapping squares: four sides each without outline, one ring with.
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="50mm" height="30mm" viewBox="0 0 50 30"><rect x="5" y="5" width="20" height="20" fill="none" stroke="red"/><rect x="15" y="5" width="20" height="20" fill="none" stroke="red"/></svg>"#;
         let job = |outline| {
             let project = Project {
@@ -1990,7 +1918,6 @@ mod tests {
                     outline,
                     ..crate::project::JobStep::new(Operation::Cut)
                 }],
-                // The overlapping edges stay, only the outline merges them.
                 remove_duplicate_lines: false,
                 ..Default::default()
             };
@@ -2046,7 +1973,6 @@ mod tests {
             );
             let bytes = &job.jobs[0].bytes;
             assert_framing(bytes);
-            // ESC D right after the copy counter, then the material radius.
             assert!(
                 bytes
                     .windows(9)
@@ -2054,7 +1980,6 @@ mod tests {
                 "{dpi}"
             );
             let starts = raster_starts(bytes);
-            // 6 mm of rows, one row per pitch machine steps (1/4000 inch).
             let expected = 6.0 / 25.4 * 4000.0 / f64::from(pitch);
             assert!(
                 (starts.len() as f64 - expected).abs() <= 2.0,
@@ -2066,7 +1991,6 @@ mod tests {
                 assert_eq!(pair[0].1 - pair[1].1, pitch, "{dpi}");
             }
             assert!(starts.iter().all(|(x, _)| x % pitch == 0), "{dpi}");
-            // The first row lies at the top of the black rectangle (102 mm).
             let top_mm = 600.0 - f64::from(starts[0].1) / 4000.0 * 25.4;
             assert!(
                 (top_mm - 102.0).abs() < 25.4 / f64::from(dpi) + 1e-6,
@@ -2105,7 +2029,6 @@ mod tests {
             step(Operation::Engrave, 1, 1000),
         ]);
         assert!(prepare(&mixed).is_err());
-        // Engraving and 3D engraving are separate files unless sent as one.
         let separate = project(vec![
             step(Operation::Engrave, 0, 500),
             step(Operation::Engrave3d, 1, 250),
@@ -2122,7 +2045,6 @@ mod tests {
 
     #[test]
     fn single_job_holds_all_operations_and_switches_the_raster_mode() {
-        // Engrave, 3D engrave (same object), mark and cut in one file.
         let mut p = three_modes();
         p.steps.push(crate::project::JobStep {
             objects: vec![1],
@@ -2141,12 +2063,9 @@ mod tests {
         );
         assert_framing(&job.bytes);
         let at = |pattern: &[u8]| job.bytes.windows(pattern.len()).position(|w| w == pattern);
-        // 8 bits per pixel for the 3D engraving, rasters before the vector mode.
         let mode_3d = at(&[0x1b, 0x4d, 0x02]).expect("3D-Modus");
         let vector = at(&[0x1b, 0x56]).expect("Vektormodus");
         assert!(mode_3d < vector);
-        // Same steps, estimates and simulation as the separate jobs except
-        // that the head no longer returns home between operations.
         assert_eq!(single.steps.len(), separate.steps.len());
         assert!(single.estimated_seconds <= separate.estimated_seconds);
         let from_home = single
@@ -2160,7 +2079,6 @@ mod tests {
 
     #[test]
     fn three_modes_have_distinct_prefixed_files_and_ordered_simulation() {
-        // Pfadrichtung wie in VisiCut.
         let p = Project {
             cut_order: CutOrder::VisiCut,
             ..three_modes()
@@ -2186,8 +2104,6 @@ mod tests {
                 .any(|b| b == [0x1b, 0x4a, 0, 50])
         );
         assert_eq!(job.timeline.programs.len(), 3);
-        // Engrave, mark and cut once each: vector passes are interleaved per
-        // path like in Java and belong to the single run of their program.
         assert_eq!(job.timeline.runs.len(), 3);
         assert_eq!(job.timeline.programs[1].operation, Operation::Mark);
         assert!(
@@ -2260,8 +2176,6 @@ mod tests {
             while payloads.len() < 3 {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
-                        // On macOS accepted sockets inherit the listener's
-                        // non-blocking mode; the read below must block.
                         stream.set_nonblocking(false).unwrap();
                         stream
                             .set_read_timeout(Some(Duration::from_secs(3)))
@@ -2296,9 +2210,6 @@ mod tests {
         let mut p = Project { x_mm: 0.0, y_mm: 0.0, width_mm: 100.0, height_mm: 10.0,
             speed_percent: 10.0, cut_order: CutOrder::VisiCut,
             svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="10mm" viewBox="0 0 100 10"><path d="M0 0L100 0" stroke="black"/></svg>"#.into(), ..Default::default() };
-        // Travel from home (top right) to the start of the line, then the
-        // Java estimate: distance plus acceleration distance v²/a at 2000 mm/s²,
-        // plus the controller's dwell at the start of the contour.
         let entry = 1000.0 / crate::timeline::TRAVEL_MM_S;
         let pierce = p.machine.pierce_delay_ms / 1000.0;
         assert!(pierce > 0.0);
@@ -2308,8 +2219,6 @@ mod tests {
         p.speed_percent = 20.0;
         let faster = prepare(&p).unwrap().estimated_seconds;
         assert!((faster - expected(67.7354)).abs() < 0.003, "{faster}");
-        // Java joins the line and its second pass into one path there and
-        // back: no travel in between, the reversal is a corner, one start.
         p.passes = 2;
         let twice = prepare(&p).unwrap().estimated_seconds;
         assert!(
@@ -2353,7 +2262,6 @@ mod tests {
         p.steps[0].objects.clear();
         p.steps[1].objects.clear();
         assert!(matches!(prepare(&p), Err(LttError::NothingSelected)));
-        // As in VisiCut, one object may be processed by several steps.
         let mut p = mixed();
         p.steps[0].objects = vec![1];
         assert_eq!(prepare(&p).unwrap().jobs.len(), 2);
@@ -2408,7 +2316,6 @@ mod tests {
             196,
             393,
         );
-        // Java casts bedHeight*4000/25.4 to int, scales 500-DPI coordinates by eight.
         assert_eq!(bytes, [0, 0, 6, 32, 0, 1, 100, 208]);
     }
     #[test]
@@ -2449,8 +2356,6 @@ mod tests {
     }
     #[test]
     fn engraving_rows_outside_the_bed_in_y_are_refused() {
-        // The stroke reaches 1 mm beyond the placement box, which itself
-        // fits the bed; Java asserts 0 <= y <= yMax for every raster row.
         let stroked = |y_mm: f32, rotary_axis: bool| {
             Project {
             operation: Operation::Engrave,
@@ -2486,7 +2391,6 @@ mod tests {
         let mut out = Vec::new();
         assert!(raster_pair(&mut out, axis, -1, 10, 8).is_err());
         assert!(out.is_empty());
-        // Header bounds stay on the axis instead of wrapping around.
         assert_eq!(axis.bounding(-1.0), 0);
         assert_eq!(axis.bounding(601.0), raw(BED_HEIGHT));
     }
@@ -2508,10 +2412,7 @@ mod tests {
         let rotary = prepare(&p).unwrap();
         let bytes = &rotary.jobs[0].bytes;
         assert!(has(bytes, &[0x1b, 0x61, 0x15, 0x1b, 0x4d, 0x10]));
-        // Radius 50 mm in 0.01 mm.
         assert!(has(bytes, &[0x1b, 0x52, 0x13, 0x88]));
-        // Bounding box of the contours; Y as rotation steps on a 314.16 mm
-        // circumference instead of 4000-DPI machine units.
         let b =
             Bounds::of_points(geometry::contours(&p).unwrap().iter().flatten().copied()).unwrap();
         let axis = Axis::of(&p);
@@ -2524,7 +2425,7 @@ mod tests {
         assert!(has(bytes, &bbox));
         let mut absolute = Vec::new();
         pair(&mut absolute, Axis::of(&p), 100, 500);
-        assert_eq!(absolute[4..], 517i32.to_be_bytes()); // 25.4 mm
+        assert_eq!(absolute[4..], 517i32.to_be_bytes());
         assert_eq!(Axis::of(&p).relative(-10), -10);
         assert!(rotary.warnings[0].contains("Adjust rotary temp"));
         assert_framing(bytes);
@@ -2619,7 +2520,6 @@ mod tests {
             .collect();
         assert!(rows.windows(2).all(|w| w[1] < w[0]));
 
-        // 3D: own file, eight bits per pixel, power ramps with darkness.
         let mut deep = step(Operation::Engrave3d, RasterSettings::default());
         deep.additional.push(ParameterSet {
             power_percent: 40.0,
@@ -2637,7 +2537,6 @@ mod tests {
         assert!(has(bytes, &[0x1b, 0x4d, 0x02]));
         assert!(has(bytes, &[0x1b, 0x53, 0x03, 0xe8]) && has(bytes, &[0x1b, 0x53, 0x01, 0xf4]));
         assert_eq!(job.steps[1].parameter_sets, 2);
-        // One program per parameter set; the second runs twice.
         assert_eq!(job.timeline.programs.len(), 3);
         assert_eq!(job.timeline.runs.len(), 4);
         assert!(job.steps[1].description.contains("3D"));
@@ -2679,7 +2578,6 @@ mod tests {
 
     #[test]
     fn processing_preview_colours_outlines_and_engravings_as_drawn() {
-        // A dark rectangle and an outline rectangle engraved, a line cut.
         let p = Project {
             x_mm: 0.0,
             y_mm: 0.0,
@@ -2701,8 +2599,6 @@ mod tests {
                 .unwrap()
                 .demultiply()
         };
-        // The dark area in the engrave colour; the outline stays an outline,
-        // as the raster engraves exactly what is drawn.
         assert_eq!(at(40.0, 25.0).alpha(), 0);
         let inside = at(15.0, 25.0);
         assert_eq!(
@@ -2710,7 +2606,6 @@ mod tests {
             (35, 113, 210)
         );
         assert!(inside.alpha() > 200);
-        // On the cut line: red; next to it: empty.
         let cut = at(77.0, 25.0);
         assert!(
             cut.red() > 150 && cut.blue() < 100 && cut.alpha() > 100,
@@ -2734,7 +2629,6 @@ mod tests {
             prepare(&p),
             Err(LttError::ZeroPower(Operation::Engrave))
         ));
-        // The FAU mark profiles use 0.01 %: sent as the smallest step, 0.1 %.
         p.steps[1].power_percent = 0.01;
         let prepared = prepare(&p).unwrap();
         assert!(
@@ -2770,7 +2664,6 @@ mod tests {
 
     #[test]
     fn connection_errors_name_address_and_local_network_permission() {
-        // Bind and drop to get a local port nobody listens on.
         let port = std::net::TcpListener::bind("127.0.0.1:0")
             .unwrap()
             .local_addr()
@@ -2808,7 +2701,6 @@ mod tests {
     #[test]
     fn machine_table_and_step_shift_move_engrave_lines() {
         let machine = MachineSettings::default();
-        // FAU table: truncated like getEngraveShiftPixels in the Java driver.
         assert_eq!(engrave_shift_px(&machine, 10.0, 0), 0);
         assert_eq!(engrave_shift_px(&machine, 100.0, 0), 2);
         assert_eq!(engrave_shift_px(&machine, 100.0, -3), -1);

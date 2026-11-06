@@ -60,7 +60,6 @@ pub fn read_plf(path: &Path) -> Result<Imported, ImportError> {
         if entry.is_dir() {
             continue;
         }
-        // VisiCut writes UTF-8 names without setting the ZIP's UTF-8 flag.
         let name = std::str::from_utf8(entry.name_raw())
             .map(str::to_string)
             .unwrap_or_else(|_| String::from_utf8_lossy(entry.name_raw()).into_owned());
@@ -91,7 +90,6 @@ pub fn read_plf(path: &Path) -> Result<Imported, ImportError> {
             let file_name = sanitize(local);
             let target = directory.join(&file_name);
             std::fs::write(&target, &bytes)?;
-            // Parameter files only accompany a parametric SVG.
             if !file_name.to_ascii_lowercase().ends_with(".parameters") {
                 let shown = local.rsplit(['/', '\\']).next().unwrap_or(local);
                 part.source = Some((shown.to_string(), target));
@@ -153,8 +151,6 @@ pub fn read_plf(path: &Path) -> Result<Imported, ImportError> {
                 None
             }
         };
-        // Parametrische Teile bleiben eigene Teile, damit sich ihre
-        // Parameter ändern lassen.
         if let Some(parametric) = imported.parametric {
             let parametric = crate::project::Parametric {
                 placement: Some(crate::project::Placement { transform }),
@@ -175,7 +171,6 @@ pub fn read_plf(path: &Path) -> Result<Imported, ImportError> {
         }
         match composer.add(&name, &file, &imported.svg, transform) {
             Ok(()) => placed.push(mappings::Placed {
-                // Same source as the composer parses (without DOCTYPE), with the original ids.
                 objects: attributes(&xml::strip_doctype(&imported.svg)).ok(),
                 svg: is_svg(&file),
                 mapping,
@@ -189,7 +184,6 @@ pub fn read_plf(path: &Path) -> Result<Imported, ImportError> {
         }
     }
     if composer.parts.is_empty() && !separate.is_empty() {
-        // Nur parametrische Teile: das erste wird die Hauptgrafik.
         let first = separate.remove(0);
         for part in &mut separate {
             part.offset_mm[0] -= first.offset_mm[0];
@@ -213,7 +207,6 @@ pub fn read_plf(path: &Path) -> Result<Imported, ImportError> {
     }
     let (svg, more, shift) = composer.finish()?;
     warnings.extend(more);
-    // Die Hauptgrafik beginnt am (verschobenen) Ursprung des Betts.
     let (sx, sy) = shift.unwrap_or_default();
     for part in &mut separate {
         part.offset_mm[0] += sx;
@@ -280,7 +273,6 @@ pub fn read_parametric_svg(path: &Path) -> Result<Imported, ImportError> {
         .unwrap_or_default()
         .to_string_lossy()
         .to_ascii_lowercase();
-    // Like VisiCut, `.parametric.svg` files skip the PSVG translation.
     let psvg = !name.ends_with(".parametric.svg");
     let mut warnings = Vec::new();
     let mut saved = Vec::new();
@@ -321,7 +313,6 @@ pub fn read_laser_script(path: &Path) -> Result<Imported, ImportError> {
     let source = String::from_utf8_lossy(&bytes).into_owned();
     let drawing = laserscript::run(source, script::TIME_LIMIT)?;
     let (svg, mut warnings) = laserscript::to_svg(&drawing)?;
-    // Applied in the job (`geometry::laser_script`), not shown in the steps.
     let sets_values = drawing
         .segments
         .iter()
@@ -477,9 +468,7 @@ impl Frame {
         let extension = name.rsplit('.').next().unwrap_or_default();
         let [x, y, w, h] = self.view_box;
         match extension {
-            // SVG user units; LaserScript output uses millimetres as user units.
             "svg" | "psvg" | "ls" => [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-            // Image pixels.
             "png" | "jpg" | "jpeg" | "bmp" | "gif" => match image::image_dimensions(file) {
                 Ok((pw, ph)) => {
                     let (sx, sy) = (pw as f64 / w, ph as f64 / h);
@@ -487,11 +476,8 @@ impl Frame {
                 }
                 Err(_) => multiply(scale(72.0 / 25.4, 72.0 / 25.4), self.physical()),
             },
-            // PostScript points of the cropped page.
             "eps" | "ps" => multiply(scale(72.0 / 25.4, 72.0 / 25.4), self.physical()),
-            // Absolute millimetres.
             "nc" | "gcode" => scale(self.width_mm / w, self.height_mm / h),
-            // kabeja's drawing units, Y flipped about the DXF origin.
             "dxf" => match super::dxf::java_frame(file) {
                 Ok(frame) => multiply(frame, scale(self.width_mm / w, self.height_mm / h)),
                 Err(_) => scale(self.width_mm / w, self.height_mm / h),
@@ -569,8 +555,6 @@ impl Composer {
             .map(|a| a.range())
             .collect();
         let [x, y, w, h] = frame.view_box;
-        // With x/y/width/height equal to the viewBox the nested viewport maps
-        // user units 1:1; overflow="visible" avoids a clip path.
         let added: Vec<(String, String)> = [
             ("x", format!("{x}")),
             ("y", format!("{y}")),
@@ -656,7 +640,6 @@ impl Composer {
         let probe = document(1.0, 1.0, None, &body);
         let tree = usvg::Tree::from_str(&probe, &crate::svg::options())
             .map_err(ImportError::ComposeFailed)?;
-        // The probe's 1 × 1 viewBox spans 1 mm; usvg reports pixels.
         let px = tree.size().width() as f64;
         let bounds = tree.root().abs_bounding_box();
         let stroke = tree.root().abs_stroke_bounding_box();
@@ -937,13 +920,9 @@ mod tests {
 
     #[test]
     fn places_plf_parts_in_millimetres() {
-        // Part 0: 100 × 100 user units on a 50 mm page, moved by VisiCut.
         let first = br##"<svg xmlns="http://www.w3.org/2000/svg" width="50mm" height="50mm" viewBox="0 0 100 100"><rect id="r" x="10" y="10" width="20" height="20" fill="none" stroke="#f00"/></svg>"##;
-        // Part 1: px units, same ids (a duplicated part), rotated by 90°.
         let second = br##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="40" height="40"><defs><path id="r" d="M0 0 H10 V5 H0 Z"/></defs><use xlink:href="#r" fill="none" stroke="#00f"/></svg>"##;
-        // Java stores SVG user units → mm: scale 0.5 plus a move of 20/30 mm.
         let t0 = transform_xml([0.5, 0.0, 0.0, 0.5, 20.0, 30.0]);
-        // Rotation by 90° (x' = -y + 100, y' = x + 10), 1 user unit = 1 mm.
         let t1 = transform_xml([0.0, 1.0, -1.0, 0.0, 100.0, 10.0]);
         let (_dir, path) = write_plf(&[
             ("Teil eins.svg", first),
@@ -957,7 +936,6 @@ mod tests {
         assert!(svg.contains("inkscape:label=\"Teil eins.svg\""), "{svg}");
         assert!(svg.contains("id=\"teil2-r\""), "{svg}");
         assert!(svg.contains("xlink:href=\"#teil2-r\""), "{svg}");
-        // `<mapping/>` is not a mapping set: reported, geometry unaffected.
         assert!(
             imported.warnings.iter().any(|w| w.contains("nicht lesbar")),
             "{:?}",
@@ -966,9 +944,7 @@ mod tests {
         assert!(imported.steps.len() == 1 && imported.steps[0].objects.is_empty());
         let mut parts = contour_bounds(svg);
         parts.sort_by(|a, b| a[0].total_cmp(&b[0]));
-        // Part 0: rect 10..30 user units → 25..35 mm, 35..45 mm.
         assert!(close(parts[0], [25.0, 35.0, 35.0, 45.0]), "{parts:?}");
-        // Part 1: x' = 100 - y (y 0..5) → 95..100, y' = 10 + x (x 0..10) → 10..20.
         assert!(close(parts[1], [95.0, 10.0, 100.0, 20.0]), "{parts:?}");
         let preview = crate::svg::render(svg).unwrap();
         assert!(
@@ -1016,9 +992,7 @@ mod tests {
         ]);
         let with = read_plf(&mapped).unwrap();
         let without = read_plf(&plain).unwrap();
-        // The geometry is the same with and without the mapping.
         assert_eq!(with.svg, without.svg);
-        // The red rectangle is cut; the unknown filter's entry produces no step.
         assert_eq!(with.steps.len(), 1, "{:?}", with.steps);
         let step = &with.steps[0];
         assert_eq!(step.operation, Operation::Cut);
@@ -1032,7 +1006,6 @@ mod tests {
             }])
         );
         assert!(step.objects.is_empty());
-        // Laser settings are not in the file: defaults, reported.
         assert_eq!(
             (step.power_percent, step.speed_percent, step.passes),
             (20.0, 100.0, 1)
@@ -1045,7 +1018,6 @@ mod tests {
             with.warnings
         );
         assert!(with.warnings.iter().any(|w| w.contains("Standardwerte")));
-        // The unknown filter is reported.
         assert!(
             with.warnings
                 .iter()
@@ -1059,7 +1031,6 @@ mod tests {
     #[test]
     fn rest_and_ignore_follow_visicut() {
         let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 100 50"><rect x="5" y="5" width="10" height="10" fill="none" stroke="#ff0000"/><rect x="20" y="5" width="10" height="10" fill="none" stroke="#0000ff"/><rect x="35" y="5" width="10" height="10" fill="none" stroke="#00ff00"/></svg>"##;
-        // red → cut, blue → ignored, everything else → mark (the rest).
         let set = format!(
             r#"<com.t_oster.visicut.model.mapping.MappingSet><linked-list><default/><int>3</int><mapping><a class="filters"><linked-list><default/><int>1</int>{}</linked-list></a><b class="vectorProfile"><DPI>500.0</DPI><isCut>true</isCut></b></mapping><mapping><a class="filters"><linked-list><default/><int>1</int>{}</linked-list></a></mapping><mapping><b class="vectorProfile"><DPI>500.0</DPI><isCut>false</isCut></b></mapping></linked-list></com.t_oster.visicut.model.mapping.MappingSet>"#,
             stroke_filter([255, 0, 0]),
@@ -1075,7 +1046,6 @@ mod tests {
         assert_eq!(imported.steps.len(), 2, "{:?}", imported.steps);
         assert_eq!(imported.steps[0].operation, Operation::Cut);
         assert!(imported.steps[0].filters.is_some());
-        // Only the green rectangle (index 2) is left for the rest step.
         assert_eq!(imported.steps[1].operation, Operation::Mark);
         assert_eq!(imported.steps[1].objects, vec![2]);
         assert!(imported.steps[1].filters.is_none());
@@ -1083,8 +1053,6 @@ mod tests {
 
     #[test]
     fn image_parts_keep_mappings_without_conditions() {
-        // A 4 × 2 px PNG: engraved as a whole (empty filter set), as VisiCut
-        // does for images; a conditional entry is still reported.
         let mut png = Vec::new();
         image::RgbImage::from_pixel(4, 2, image::Rgb([0, 0, 0]))
             .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
@@ -1120,7 +1088,6 @@ mod tests {
 
     #[test]
     fn colour_rules_of_one_part_do_not_select_other_parts() {
-        // Part 1 maps red to cut; part 2 also has a red rectangle and no mapping.
         let transform = transform_xml([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
         let set = one_mapping(&stroke_filter([255, 0, 0]), r#"<isCut>true</isCut>"#);
         let (_dir, path) = write_plf(&[
@@ -1131,7 +1098,6 @@ mod tests {
             ("1/transform.xml", transform.as_bytes()),
         ]);
         let imported = read_plf(&path).unwrap();
-        // Objects: a.svg red (0), a.svg blue (1), b.svg red (2), b.svg blue (3).
         assert_eq!(imported.steps.len(), 1, "{:?}", imported.steps);
         assert_eq!(imported.steps[0].operation, Operation::Cut);
         assert!(imported.steps[0].filters.is_none());
@@ -1155,7 +1121,6 @@ mod tests {
             ("mappings.xml", b"<wrong/>"),
         ]);
         let imported = read_plf(&path).unwrap();
-        // A step without objects: the whole motif is not processed by default.
         assert_eq!(imported.steps.len(), 1);
         assert!(imported.steps[0].objects.is_empty() && imported.steps[0].filters.is_none());
         assert!(imported.warnings.iter().any(|w| w.contains("nicht lesbar")));
@@ -1180,8 +1145,6 @@ mod tests {
             ),
             ("1/transform.xml", t.as_bytes()),
         ]);
-        // Whether or not the DXF importer exists yet, the SVG part is kept and
-        // the DXF part either joins it or is reported.
         let imported = read_plf(&path).unwrap();
         let reported = imported
             .warnings
@@ -1220,8 +1183,6 @@ mod tests {
             ("transform.xml", t.as_bytes()),
         ]);
         let imported = read_plf(&path).unwrap();
-        // Ein einzelnes parametrisches Teil wird die Hauptgrafik, auf ihren
-        // Inhalt zugeschnitten (die Linie ragt 0,5 mm über den Ursprung).
         assert!(
             close(bounds(&imported.svg), [0.5, 0.5, 30.5, 5.5]),
             "{}",
@@ -1233,7 +1194,6 @@ mod tests {
             parametric.values,
             [("size".to_string(), ParameterValue::Number(30.0))]
         );
-        // Mit neuem Wert bleibt die Lage aus der PLF-Datei.
         let wider = crate::project::Parametric {
             values: vec![("size".into(), ParameterValue::Number(50.0))],
             ..parametric
@@ -1265,7 +1225,6 @@ mod tests {
         };
         assert_eq!(extra.name, "box");
         assert!(extra.parametric.as_ref().unwrap().placement.is_some());
-        // Lage relativ zum Ursprung der Hauptgrafik (Bettursprung).
         assert!(
             (extra.offset_mm[0] - 59.95).abs() < 0.01 && (extra.offset_mm[1] - 39.95).abs() < 0.01,
             "{:?}",
@@ -1283,9 +1242,6 @@ mod tests {
         }
         let imported = read_plf(&path).unwrap();
         assert!(imported.svg.contains("Schlu"), "{}", &imported.svg[..300]);
-        // Only the green line mapping matches; the others match nothing in VisiCut
-        // (a filter set with three fill colours needs one object with all three,
-        // and the stroke width is stored as text).
         assert_eq!(imported.steps.len(), 1, "{:?}", imported.steps);
         assert_eq!(imported.steps[0].operation, Operation::Mark);
         assert_eq!(
@@ -1301,7 +1257,6 @@ mod tests {
             imported.warnings
         );
         let preview = crate::svg::render(&imported.svg).unwrap();
-        // VisiCut placed the keyring (about 40 × 37 mm) at the bed's top left corner.
         assert!(
             (35.0..50.0).contains(&preview.width_mm),
             "{}",
@@ -1329,7 +1284,6 @@ mod tests {
             "{}",
             imported.svg
         );
-        // Die Werte lassen sich später ändern.
         let parametric = imported.parametric.unwrap();
         assert_eq!(
             parametric.values,

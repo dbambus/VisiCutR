@@ -75,14 +75,12 @@ pub(super) fn arc_curves(
     } else {
         difference.rem_euclid(360.0)
     };
-    // Bounded so that a huge angle cannot create an enormous path.
     let sweep = sweep.clamp(-3600.0, 3600.0);
     if sweep.abs() < 1e-9 {
         return Vec::new();
     }
     let count = (sweep.abs() / 90.0).ceil() as usize;
     let step = sweep / count as f64;
-    // Control point distance for a cubic approximation of one piece.
     let k = 4.0 / 3.0 * (step.to_radians() / 4.0).tan() * r;
     (0..count)
         .map(|i| {

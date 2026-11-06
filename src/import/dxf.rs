@@ -165,7 +165,6 @@ fn text_markup(size: f64, anchor: &str, lines: &[String], first: f64, step: f64)
 /// Bounding boxes of all texts in their local coordinates, measured with the
 /// same fonts the preview uses; `None` where no glyphs were laid out.
 fn text_extents(prims: &[Prim]) -> Vec<Option<[f64; 4]>> {
-    // Lay out at a fixed size so tiny or huge drawings keep f32 precision.
     const SIZE: f64 = 100.0;
     let mut svg = String::from(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">"#);
     let mut ids = Vec::new();
@@ -275,7 +274,6 @@ fn write_svg(prims: &[Prim], layer_order: &[String]) -> Result<(String, [f64; 2]
             height: num(height),
         });
     }
-    // World (Y up) → SVG (Y down, origin at the top-left of the drawing).
     let flip = Affine {
         a: 1.0,
         b: 0.0,
@@ -285,9 +283,6 @@ fn write_svg(prims: &[Prim], layer_order: &[String]) -> Result<(String, [f64; 2]
         f: bbox.max[1],
     };
 
-    // Primitives per layer in drawing order; layers as in the LAYER table,
-    // then in order of appearance. Grouped once: files with many layers
-    // would otherwise take layers × primitives comparisons.
     let mut by_layer: HashMap<&str, Vec<&Prim>> = HashMap::new();
     let mut appearance: Vec<&str> = Vec::new();
     for prim in prims {

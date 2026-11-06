@@ -137,7 +137,6 @@ pub fn check() -> Result<Option<Release>, UpdateError> {
         .into();
     let body = agent
         .get(LATEST_RELEASE_API)
-        // GitHub's API requires a user agent.
         .header("User-Agent", &format!("VisiCutR/{}", current_version()))
         .header("Accept", "application/vnd.github+json")
         .call()
@@ -162,7 +161,6 @@ mod tests {
         assert!(!is_newer("v0.19.0", "0.19.0"));
         assert!(!is_newer("v0.9.0", "0.19.0"));
         assert!(!is_newer("nightly", "0.19.0"));
-        // Vorabversionen liegen vor der fertigen Version.
         assert!(is_newer("v1.0.0", "1.0.0-rc.1"));
         assert!(is_newer("v1.0.0-rc.2", "1.0.0-rc.1"));
         assert!(is_newer("v1.0.0-rc.1", "0.20.1"));

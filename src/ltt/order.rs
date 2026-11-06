@@ -90,8 +90,8 @@ impl SetKey {
         inner = inner.wrapping_mul(67).wrapping_add(bits(self.focus));
         inner = inner.wrapping_mul(67).wrapping_add(500);
         let mut hash: i32 = 5;
-        hash = hash.wrapping_mul(97).wrapping_add(1); // ventilation
-        hash = hash.wrapping_mul(97).wrapping_add(1); // purge
+        hash = hash.wrapping_mul(97).wrapping_add(1);
+        hash = hash.wrapping_mul(97).wrapping_add(1);
         hash.wrapping_mul(97).wrapping_add(inner)
     }
 }
@@ -109,8 +109,6 @@ pub fn inner_first(elements: Vec<Element>, keys: &[SetKey]) -> Vec<Element> {
     let mut order: Vec<usize> = (0..result.len()).collect();
     order.sort_by(|&i, &j| {
         let (a, b) = (boxes[i], boxes[j]);
-        // Java sorts four times stably (xmin desc, ymin desc, xmax asc, ymax
-        // asc), so the last sort has the highest priority.
         a[3].total_cmp(&b[3])
             .then(a[2].total_cmp(&b[2]))
             .then((-a[1]).total_cmp(&-b[1]))
@@ -188,7 +186,6 @@ fn java_groups(elements: Vec<Element>, keys: &[SetKey]) -> Vec<Vec<Element>> {
             None => groups.push((key, vec![element])),
         }
     }
-    // Default capacity 16, doubled whenever the size exceeds 3/4 of it.
     let mut capacity = 16usize;
     while groups.len() > capacity * 3 / 4 {
         capacity *= 2;
@@ -197,7 +194,6 @@ fn java_groups(elements: Vec<Element>, keys: &[SetKey]) -> Vec<Vec<Element>> {
         let h = key.java_hash() as u32;
         ((h ^ (h >> 16)) as usize) & (capacity - 1)
     };
-    // Tree bins (eight or more keys in one bucket) are not modelled.
     let mut indexed: Vec<(usize, (SetKey, Vec<Element>))> =
         groups.into_iter().enumerate().collect();
     indexed.sort_by_key(|(i, (key, _))| (bucket(*key), std::cmp::Reverse(*i)));
@@ -267,7 +263,6 @@ fn join_contiguous(group: Vec<Element>) -> Vec<Element> {
             inverted: true,
         }));
     }
-    // Collections.sort is stable.
     points.sort_by(|a, b| a.unwrap().start[0].total_cmp(&b.unwrap().start[0]));
     let xs: Vec<f64> = points.iter().map(|p| p.unwrap().start[0]).collect();
     let mut elements: Vec<Option<Open>> = open
@@ -338,10 +333,8 @@ fn join_contiguous(group: Vec<Element>) -> Vec<Element> {
                     let mut cur = elements[current].take().unwrap();
                     let o = elements[other].take().unwrap();
                     if invert {
-                        // current.end ---- other.start
                         points[cur.end_index] = None;
                     } else {
-                        // current.start ---- other.start, by reversing current
                         points[cur.start_index] = None;
                         cur.invert();
                     }
@@ -354,7 +347,6 @@ fn join_contiguous(group: Vec<Element>) -> Vec<Element> {
                     let mut cur = elements[current].take().unwrap();
                     let mut o = elements[other].take().unwrap();
                     if invert {
-                        // current.end ---- other.end, by reversing other
                         points[cur.end_index] = None;
                         points[o.end_index] = None;
                         o.invert();
@@ -362,7 +354,6 @@ fn join_contiguous(group: Vec<Element>) -> Vec<Element> {
                         elements[current] = Some(cur);
                         current
                     } else {
-                        // other.end ---- current.start
                         points[o.end_index] = None;
                         points[cur.start_index] = None;
                         o.append(cur);
@@ -418,7 +409,6 @@ pub fn shortest_travel(
     let boxes: Vec<[f64; 4]> = elements.iter().map(Element::bounds).collect();
     let strictly_inside =
         |o: [f64; 4], i: [f64; 4]| o[0] < i[0] && o[1] < i[1] && o[2] > i[2] && o[3] > i[3];
-    // Number of paths still to cut inside each path's box.
     let mut inner: Vec<usize> = (0..elements.len())
         .map(|i| {
             (0..elements.len())
@@ -431,7 +421,6 @@ pub fn shortest_travel(
     let mut at = start;
     let distance = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]);
     while result.len() < slots.len() {
-        // (distance, path, start vertex, reversed)
         let mut best: Option<(f64, usize, usize, bool)> = None;
         for (i, slot) in slots.iter().enumerate() {
             let Some(e) = slot else { continue };
@@ -453,13 +442,11 @@ pub fn shortest_travel(
                 consider(distance(at, e.end()), 0, true);
             }
         }
-        // Some path is always free: the one with the smallest box.
         let (_, i, start, reversed) = best.expect("a path without inner paths");
         let mut e = slots[i].take().unwrap();
         if reversed {
             e.invert();
         } else if start > 0 {
-            // Ring without the closing point, rotated to begin at `start`.
             let mut ring: Vec<[f64; 2]> = std::iter::once(e.start)
                 .chain(e.moves[..e.moves.len() - 1].iter().copied())
                 .collect();
@@ -547,8 +534,6 @@ mod tests {
 
     #[test]
     fn equal_properties_share_the_order_like_repeated_passes() {
-        // Java: each further LaserProperty adds the shapes again; with equal
-        // values both copies sort next to each other.
         let outer = square(10.0, 10.0, 100.0);
         let hole = square(50.0, 50.0, 10.0);
         let second = |e: &Element| Element {
@@ -568,7 +553,6 @@ mod tests {
         let single = vec![path(&[[100.0, 0.0], [10.0, 0.0]])];
         assert_eq!(order(single.clone()), single);
 
-        // b's end meets a's start: Java appends a to b.
         let a = path(&[[200.0, 200.0], [210.0, 200.0]]);
         let b = path(&[[220.0, 210.0], [200.0, 200.5]]);
         assert_eq!(
@@ -576,7 +560,6 @@ mod tests {
             vec![path(&[[220.0, 210.0], [200.0, 200.5], [210.0, 200.0]])]
         );
 
-        // The same line twice (two passes) becomes there and back again.
         let line = path(&[[0.0, 0.0], [50.0, 0.0]]);
         assert_eq!(
             order(vec![line.clone(), line]),
@@ -622,7 +605,6 @@ mod tests {
             speed: 50.0,
             focus: 3.0,
         };
-        // Values printed by Java's LaosCutterProperty.hashCode for these settings.
         assert_eq!(a.java_hash(), -840030222);
         assert_eq!(b.java_hash(), -36296718);
         let c = SetKey {
@@ -645,11 +627,9 @@ mod tests {
         let outer = square(0.0, 0.0, 100.0);
         let hole = square(40.0, 40.0, 10.0);
         let far = square(500.0, 0.0, 10.0);
-        // An open line ending next to the far square: it is cut backwards.
         let line = path(&[[600.0, 0.0], [500.0, 0.0]]);
         let line_reversed = path(&[[500.0, 0.0], [600.0, 0.0]]);
         let result = nearest(vec![outer.clone(), far.clone(), line, hole.clone()], &[KEY]);
-        // The outline (first path) comes before its hole, unlike inner first.
         assert_eq!(result, vec![outer, hole, far, line_reversed]);
     }
 
@@ -673,14 +653,11 @@ mod tests {
             line.clone(),
             also_small.clone(),
         ]);
-        // A straight line has no area and comes first; equal areas keep their order.
         assert_eq!(result, vec![line, small, also_small, big]);
     }
 
     #[test]
     fn shortest_travel_keeps_holes_first_and_cuts_travel() {
-        // Two parts, each a square with a hole, far apart and listed so that
-        // the inner-first sweep jumps back and forth.
         let a = square(0.0, 0.0, 100.0);
         let a_hole = square(40.0, 40.0, 10.0);
         let b = square(1000.0, 0.0, 100.0);
@@ -693,7 +670,6 @@ mod tests {
             vec![a_hole.bounds(), a.bounds(), b_hole.bounds(), b.bounds()]
         );
         assert!(result.iter().all(Element::is_closed));
-        // From a start on the right, the right part comes first.
         let result = shortest_travel(elements, [2000.0, 0.0]).unwrap();
         let bounds: Vec<[f64; 4]> = result.iter().map(Element::bounds).collect();
         assert_eq!(
@@ -704,8 +680,6 @@ mod tests {
 
     #[test]
     fn shortest_travel_rotates_closed_and_reverses_open_paths() {
-        // From the origin the square comes first; the line is then entered at
-        // its nearer end and therefore reversed.
         let result = shortest_travel(
             vec![path(&[[500.0, 0.0], [120.0, 0.0]]), square(0.0, 0.0, 100.0)],
             [0.0, 0.0],
@@ -715,8 +689,6 @@ mod tests {
         assert_eq!(result[1].start, [120.0, 0.0]);
         assert_eq!(result[1].end(), [500.0, 0.0]);
 
-        // After the line the square starts at its vertex nearest to the line's
-        // end and returns there.
         let result = shortest_travel(
             vec![
                 path(&[[0.0, 0.0], [160.0, 90.0]]),
@@ -729,7 +701,6 @@ mod tests {
         assert_eq!(result[1].end(), [150.0, 100.0]);
         assert_eq!(result[1].moves.len(), 4);
 
-        // A path whose box contains another waits for it, even if it is nearer.
         let result = shortest_travel(
             vec![
                 path(&[[0.0, 0.0], [160.0, 160.0]]),

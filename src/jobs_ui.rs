@@ -146,7 +146,6 @@ pub fn default_step(library: &Library, project: &Project, operation: Operation) 
         None if project.operation == operation => project.passes,
         None => 1,
     };
-    // Ein Profil mit mehreren Sätzen bringt sie mit.
     if let Some(p) = profile {
         step.additional = p.additional.clone();
     }
@@ -267,7 +266,6 @@ pub fn apply_presets(library: &Library, project: &mut Project) -> usize {
         let Some(p) = preset(library, project, project.operation) else {
             return 0;
         };
-        // Das ganze Motiv hat nur einen Parametersatz (siehe `parameters`).
         (project.power_percent, project.speed_percent, project.passes) =
             (p.power_percent, p.speed_percent, p.passes);
         return 1;
@@ -280,8 +278,6 @@ pub fn apply_presets(library: &Library, project: &mut Project) -> usize {
 /// `None` chooses an own material that is not part of the library.
 pub fn select_material(library: &Library, project: &mut Project, name: Option<&str>) {
     let Some(name) = name else {
-        // Name given to a material that is not part of the library; it is
-        // stored in the project, so it is created in the chosen language.
         project.material = tr("Eigenes Material").into();
         return;
     };
@@ -384,7 +380,6 @@ pub fn duplicate_material(materials: &mut Vec<Material>, index: usize) -> usize 
 fn profile_table(ui: &mut egui::Ui, material: &mut Material, drop: &mut Option<usize>) {
     let groups = profile_groups(&material.profiles);
     let mut add_to = None;
-    // Einheitliche Feldbreiten, egal wie viele Stellen der Wert hat.
     let height = ui.spacing().interact_size.y;
     let percent = [64.0, height];
     egui::Grid::new("profiles")
@@ -444,8 +439,6 @@ fn profile_table(ui: &mut egui::Ui, material: &mut Material, drop: &mut Option<u
                                     .color(color),
                             )
                             .show_ui(ui, |ui| {
-                                // Neutral hinterlegt: auf dem Orange der Auswahl
-                                // wären die Verfahrensfarben nicht lesbar.
                                 ui.visuals_mut().selection.bg_fill = egui::Color32::from_gray(222);
                                 for o in Operation::ALL {
                                     let text = egui::RichText::new(operation_title(o))
@@ -454,7 +447,6 @@ fn profile_table(ui: &mut egui::Ui, material: &mut Material, drop: &mut Option<u
                                 }
                             });
                         if profile.is_multi() {
-                            // Die Felder zeigen den ersten Satz; die übrigen stehen im Hinweis.
                             let sets: Vec<String> = std::iter::once(ParameterSet {
                                 power_percent: profile.power_percent,
                                 speed_percent: profile.speed_percent,
@@ -721,8 +713,6 @@ impl Document {
 }
 
 fn operation_selector(ui: &mut egui::Ui, project: &mut Project) -> bool {
-    // Wie „Gesamt · Einzeln · Regeln“; der gewählte Teil nimmt die Farbe
-    // des Verfahrens an.
     let options =
         Operation::ALL.map(|o| (o, operation_title(o), crate::preview_ui::operation_color(o)));
     match crate::form::segmented_colored(ui, project.operation, &options) {
@@ -1148,8 +1138,6 @@ impl JobUi {
         let list = find_material(library, &project.material)
             .map(thicknesses)
             .unwrap_or_default();
-        // Nur Materialien mit echten Stärken zeigen die Auswahl; gibt es nur
-        // „Nicht festgelegt“ (z. B. Folien, Beschichtungen), entfällt sie.
         if list.is_empty() {
             *dirty |= crate::number(
                 ui,
@@ -1166,7 +1154,6 @@ impl JobUi {
                     format!("{t} mm")
                 }
             };
-            // Bis zu drei Stärken als eigene Knöpfe, mehr (Acryl …) im Menü.
             if list.len() <= 3 {
                 crate::form::row(ui, tr("Stärke"), |ui| {
                     for &t in &list {
@@ -1202,8 +1189,6 @@ impl JobUi {
             }
         }
         if (project.material.clone(), project.thickness_mm) != before {
-            // Das Materialprofil ist der Standard; Abweichungen zeigt die
-            // Bearbeitung orange an.
             apply_presets(library, project);
         }
         if !project.material.is_empty()
@@ -1229,7 +1214,6 @@ impl JobUi {
         library.save(&device::config_dir())?;
         self.library = library;
         self.custom = true;
-        // Eine offene Bearbeitung zeigt die neue Bibliothek.
         self.editor = None;
         Ok(())
     }
@@ -1288,7 +1272,6 @@ impl JobUi {
                 set_mode(self.active(), project, candidate, count, &template);
                 *dirty = true;
             }
-            // A click above may have changed the mode.
             match assignment_mode(project) {
                 AssignmentMode::Whole => {}
                 AssignmentMode::Objects => self.objects(ui, project, dirty),
@@ -1324,7 +1307,6 @@ impl JobUi {
     /// One operation and its parameters for the whole motif.
     fn whole(&mut self, ui: &mut egui::Ui, project: &mut Project, dirty: &mut bool) {
         if operation_selector(ui, project) {
-            // Das Materialprofil ist der Standard.
             apply_presets(self.active(), project);
             *dirty = true;
         }
@@ -1355,14 +1337,12 @@ impl JobUi {
         if self.canvas_hover.is_none() {
             self.scrolled_to = None;
         }
-        // Wächst bis zu fünf Zeilen mit, darüber scrollt die Liste.
         let row = ui.spacing().interact_size.y + 2.0 + ui.spacing().item_spacing.y;
         egui::ScrollArea::vertical()
             .id_salt("objects")
             .max_height(5.0 * row)
             .show(ui, |ui| {
                 for (i, row) in self.document.objects.iter().enumerate() {
-                    // Ausgewählt: Objekt unter der Maus (Liste oder Arbeitsfläche).
                     let selected = self.canvas_hover == Some(i) || self.list_hover == Some(i);
                     let fill = if selected {
                         ui.visuals().selection.bg_fill.gamma_multiply(0.45)
@@ -1413,7 +1393,6 @@ impl JobUi {
                     if line.response.contains_pointer() {
                         row_hover = Some(i);
                     }
-                    // Steht die Maus auf der Arbeitsfläche, die Zeile ins Bild holen.
                     if self.canvas_hover == Some(i) && self.scrolled_to != Some(i) {
                         line.response.scroll_to_me(Some(egui::Align::Center));
                         self.scrolled_to = Some(i);
@@ -1534,7 +1513,6 @@ impl JobUi {
             None => {}
         }
         ui.add_space(8.0);
-        // Aktuelle Regeln als eigene Vorlage sichern oder aus VisiCut holen.
         let rules = assignment_mode(project) == AssignmentMode::Rules;
         let name = self.template_name.trim().to_string();
         let exists = self.templates.own.iter().any(|p| p.name == name);
@@ -1624,7 +1602,6 @@ impl JobUi {
                 Ok((templates, notes)) => {
                     warnings.extend(notes);
                     for mut template in templates {
-                        // Eigene Vorlagen gleichen Namens bleiben erhalten.
                         template.name = self.templates.free_name(&template.name);
                         names.push(template.name.clone());
                         if let Err(e) = self.templates.store(template) {
@@ -1674,8 +1651,6 @@ impl JobUi {
                 Err(_) if !is_rule(&project.steps[i]) => project.steps[i].objects.len(),
                 Err(_) => 0,
             };
-            // In „Einzeln“ nur Verfahren, denen Objekte zugeordnet sind; die
-            // Einstellungen der übrigen bleiben erhalten.
             if objects == 0 && assignment_mode(project) == AssignmentMode::Objects {
                 continue;
             }
@@ -1688,7 +1663,6 @@ impl JobUi {
                         .strong()
                         .color(crate::preview_ui::operation_color(step.operation));
                     if rule {
-                        // Bearbeitung umschaltbar; Bedingungen bleiben erhalten.
                         ui.menu_button(title, |ui| {
                             for operation in Operation::ALL {
                                 if ui.button(operation_title(operation)).clicked() {
@@ -1789,7 +1763,6 @@ impl JobUi {
         if let Some((i, operation)) = change
             && project.steps[i].operation != operation
         {
-            // Bedingungen bleiben, Leistung und Tempo kommen aus dem Profil.
             let old = project.steps[i].clone();
             project.steps[i] = JobStep {
                 filters: old.filters,
@@ -1852,11 +1825,8 @@ impl JobUi {
         else {
             return;
         };
-        // Liste und Profile füllen die Seite; ihre Symbolleisten sitzen unten
-        // über den Knöpfen (Importieren … Sichern), Platz für diese bleibt frei.
         let spacing = ui.spacing().item_spacing.y;
         let row = ui.spacing().interact_size.y;
-        // Unten: Trennlinie und die Knopfzeile.
         let columns = (ui.available_height() - row - 6.0 * spacing - 8.0).max(240.0);
         let footer = 28.0 + spacing;
         egui::ScrollArea::vertical()
@@ -1889,8 +1859,6 @@ impl JobUi {
                             }
                         });
                     });
-                    // Trennstrich so hoch wie die Spalten; `separator()` nähme die
-                    // ganze verfügbare Höhe und schöbe die Knopfzeile hinaus.
                     let (line, _) =
                         ui.allocate_exact_size(egui::vec2(12.0, columns), egui::Sense::hover());
                     ui.painter().vline(
@@ -1913,7 +1881,6 @@ impl JobUi {
                              ein Profil pro Verfahren möglich; 0 % Leistung gilt als \
                              „nicht übernehmbar“."));
                         let mut drop = None;
-                        // Die Symbolleiste schließt unten mit der der Materialliste ab.
                         let used = ui.cursor().top() - top;
                         egui::ScrollArea::vertical()
                             .id_salt("profiles")
@@ -2183,7 +2150,6 @@ mod tests {
             (p.steps[0].passes, p.steps[0].additional[0].power_percent),
             (2, 40.0)
         );
-        // Das ganze Motiv nimmt nur den ersten Satz.
         p.steps.clear();
         p.operation = Operation::Cut;
         apply_presets(&library, &mut p);
@@ -2196,12 +2162,9 @@ mod tests {
         let p = project();
         let cut = default_step(&library, &p, Operation::Cut);
         assert_eq!((cut.power_percent, cut.speed_percent), (80.0, 20.0));
-        // Passes of the profile, not the two of the engraved motif.
         assert_eq!(cut.passes, 1);
-        // The 0 % mark profile is not applicable.
         let mark = default_step(&library, &p, Operation::Mark);
         assert_eq!((mark.power_percent, mark.speed_percent), (0.0, 100.0));
-        // Ohne Profil keine Werte eines anderen Verfahrens übernehmen …
         let engrave3d = default_step(&library, &p, Operation::Engrave3d);
         assert_eq!(
             (engrave3d.power_percent, engrave3d.speed_percent),
@@ -2209,7 +2172,6 @@ mod tests {
         );
         assert_eq!(engrave3d.raster, p.raster);
         assert_eq!(engrave3d.passes, 1);
-        // … wohl aber die des gleichen Verfahrens.
         let mut deep = p.clone();
         deep.operation = Operation::Engrave3d;
         let engrave3d = default_step(&library, &deep, Operation::Engrave3d);
@@ -2265,7 +2227,6 @@ mod tests {
         assert!(p.steps[0].objects.is_empty());
         let selections = mapping::resolve(&p).unwrap();
         assert_eq!(selections, [vec![], vec![], vec![0], vec![1]]);
-        // 3D engraving as the motif operation keeps all objects assigned.
         let mut deep = project();
         deep.operation = Operation::Engrave3d;
         set_mode(
@@ -2298,13 +2259,11 @@ mod tests {
             &mapping::predefined()[0],
         );
         assert_eq!(assignment_mode(&p), AssignmentMode::Rules);
-        // The first template maps pure red, blue and green.
         assert_eq!(p.steps.len(), mapping::predefined()[0].rules.len());
         assert!(mapping::predefined()[0].name.starts_with("Farben"));
         for step in &mut p.steps {
             (step.power_percent, step.speed_percent, step.passes) = (1.0, 1.0, 3);
         }
-        // Mark has no usable profile; cut and engrave do.
         assert_eq!(apply_presets(&library, &mut p), 2);
         let cut = p
             .steps
@@ -2363,10 +2322,8 @@ mod tests {
         assert_eq!(p.steps.len(), 1);
         let step = &p.steps[0];
         assert!(step.rest && step.outline && step.filters.is_none());
-        // Parameters come from the material profile, not from the template.
         assert_eq!(step.power_percent, 80.0);
         assert_eq!(p.ignore_filters, own.ignore);
-        // Saved back from the project, the template is the same.
         assert_eq!(Predefined::from_project(&own.name, &p), own);
     }
 
@@ -2384,7 +2341,6 @@ mod tests {
         assert_eq!(materials[new].name, "Neues Material");
         assert_eq!(materials[other].name, "Neues Material (2)");
         assert!(materials[new].profiles.is_empty());
-        // Neue Stärke: 3 mm, danach 1 mm über der größten.
         let first = add_profile(&mut materials[new]);
         assert_eq!(materials[new].profiles[first].thickness_mm, 3.0);
         materials[new].profiles[first].thickness_mm = 6.0;
@@ -2392,7 +2348,6 @@ mod tests {
         let added = &materials[new].profiles[second];
         assert_eq!((added.thickness_mm, added.operation), (7.0, Operation::Cut));
         assert_eq!((added.power_percent, added.speed_percent), (100.0, 10.0));
-        // Weitere Verfahren je Stärke in fester Reihenfolge, bis alle da sind.
         let mut ops = Vec::new();
         while let Some(i) = add_operation(&mut materials[new], 6.0) {
             ops.push(materials[new].profiles[i].operation);
@@ -2401,7 +2356,6 @@ mod tests {
             ops,
             [Operation::Engrave, Operation::Engrave3d, Operation::Mark]
         );
-        // Gruppen: aufsteigend nach Stärke, je Gruppe in Verfahrensreihenfolge.
         let groups = profile_groups(&materials[new].profiles);
         let thicknesses: Vec<f32> = groups.iter().map(|g| g.0).collect();
         assert_eq!(thicknesses, [6.0, 7.0]);
@@ -2411,7 +2365,6 @@ mod tests {
             .map(|i| materials[new].profiles[*i].operation)
             .collect();
         assert_eq!(order, Operation::ALL);
-        // Entfernen: die Auswahl bleibt an der Stelle, am Ende rückt sie vor.
         let count = materials.len();
         let at = remove_material(&mut materials, 1);
         assert_eq!((at, materials.len()), (1, count - 1));

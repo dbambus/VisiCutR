@@ -69,8 +69,6 @@ fn convert(data: Vec<u8>) -> Result<Imported, ImportError> {
 
 /// [`convert`] in this process.
 pub(super) fn convert_here(data: Vec<u8>) -> Result<Imported, ImportError> {
-    // hayro does not use unsafe code but may still panic on malformed input;
-    // a broken file must not take the whole application down.
     std::panic::catch_unwind(move || convert_unchecked(data))
         .unwrap_or_else(|_| Err(ImportError::PdfDamaged))
 }
@@ -124,8 +122,6 @@ fn convert_unchecked(data: Vec<u8>) -> Result<Imported, ImportError> {
     {
         warnings.push(tr("Ein Bild im PDF konnte nicht dekodiert werden und fehlt").into());
     }
-    // Clip paths are cut as the intersection of the outlines (see
-    // `geometry::contours`); masks cannot be cut.
     if svg.contains("mask=\"url(") {
         warnings.push(
             tr(
@@ -191,7 +187,6 @@ fn crop_to_content(svg: String, width_pt: f32, height_pt: f32) -> String {
     }
     let bounds = tree.root().abs_stroke_bounding_box();
     let size = tree.size();
-    // Canvas pixels to points; the viewBox maps the page uniformly.
     let (sx, sy) = (width_pt / size.width(), height_pt / size.height());
     let left = (bounds.left() * sx).clamp(0.0, width_pt);
     let top = (bounds.top() * sy).clamp(0.0, height_pt);

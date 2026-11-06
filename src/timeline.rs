@@ -206,7 +206,6 @@ mod tests {
         let seconds = timeline.append(first, 1);
         assert_eq!(timeline.runs[0].from_mm, [1000.0, 0.0]);
         assert!((seconds - 500.0 / TRAVEL_MM_S - 1.0).abs() < 1e-9);
-        // Same job: the next program follows on from the previous end.
         let mut second = Program::new(Operation::Cut);
         second.travel([10.0, 10.0]);
         timeline.append(second, 1);

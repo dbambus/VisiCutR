@@ -254,7 +254,6 @@ impl PathBuilder {
         let radius = (from[0] - center[0]).hypot(from[1] - center[1]);
         let start = (from[1] - center[1]).atan2(from[0] - center[0]);
         self.arc(center, [radius, 0.0], [0.0, radius], start, angle);
-        // Land exactly on the next vertex.
         if let Some(Seg::Cubic(_, _, end)) = self.segs.last_mut() {
             *end = self.m.apply(to);
             self.current = Some(*end);
@@ -368,7 +367,6 @@ fn cubic_point(p0: P, p1: P, p2: P, p3: P, t: f64) -> P {
 
 /// Parameters in (0, 1) where a cubic's derivative is zero along one axis.
 fn cubic_extrema(p0: f64, p1: f64, p2: f64, p3: f64) -> Vec<f64> {
-    // Derivative / 3: a t² + b t + c.
     let a = -p0 + 3.0 * p1 - 3.0 * p2 + p3;
     let b = 2.0 * (p0 - 2.0 * p1 + p2);
     let c = p1 - p0;
@@ -400,7 +398,6 @@ mod tests {
         path.bulge_to([0.0, 0.0], [10.0, 0.0], 1.0);
         let mut bbox = BBox::default();
         bbox.add_segments(&path.segs);
-        // Counter-clockwise from (0,0) to (10,0) bows below the chord.
         assert!((bbox.min[1] + 5.0).abs() < 1e-3, "{bbox:?}");
         assert!(bbox.max[1].abs() < 1e-9);
         assert!((bbox.max[0] - 10.0).abs() < 1e-9);

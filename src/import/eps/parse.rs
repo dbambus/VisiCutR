@@ -28,7 +28,6 @@ pub(super) enum Obj {
 /// Parses a whole PostScript program into top-level objects.
 pub(super) fn parse(src: &[u8]) -> Result<Rc<[Obj]>, EpsError> {
     let mut root: Vec<Obj> = Vec::new();
-    // Procedures that are still open, innermost last.
     let mut open: Vec<Vec<Obj>> = Vec::new();
     let mut i = 0;
     while i < src.len() {
@@ -80,7 +79,6 @@ pub(super) fn parse(src: &[u8]) -> Result<Rc<[Obj]>, EpsError> {
                 )
             }
             _ => {
-                // None of the delimiters above, so the token is at least one byte.
                 let end = token_end(src, i);
                 let text = String::from_utf8_lossy(&src[i..end]);
                 (token_object(&text), end)
@@ -182,7 +180,6 @@ fn read_string(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), EpsError> {
                     b'b' => out.push(8),
                     b'f' => out.push(12),
                     b'0'..=b'7' => {
-                        // Up to three octal digits; the value wraps to a byte.
                         let mut value = u32::from(escaped - b'0');
                         for _ in 1..3 {
                             match src.get(i) {
@@ -195,7 +192,6 @@ fn read_string(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), EpsError> {
                         }
                         out.push(value as u8);
                     }
-                    // Backslash at the end of a line continues the string.
                     b'\r' => {
                         if src.get(i) == Some(&b'\n') {
                             i += 1;

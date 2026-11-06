@@ -113,7 +113,6 @@ pub fn convert(doc: &Document, unit_mm: f64) -> Result<Converted, DxfError> {
         linetype: "CONTINUOUS".into(),
         depth: 0,
     };
-    // Model space only, unless the drawing has nothing else.
     let mut entities: Vec<&Entity> = doc
         .entities
         .iter()
@@ -354,7 +353,6 @@ fn dash_array(pattern: &[f64], scale: f64) -> Option<Vec<f64>> {
     }
     let gaps: f64 = out.iter().skip(1).step_by(2).sum();
     let total: f64 = out.iter().sum();
-    // Patterns below 0.05 mm would only produce a cloud of dots.
     (gaps > 0.0 && total >= 0.05 && total.is_finite()).then_some(out)
 }
 
@@ -410,7 +408,6 @@ impl Converter<'_> {
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| "0".into());
         match &ctx.layer {
-            // Block entities on layer 0 take the layer of the block reference.
             Some(parent) if name == "0" => parent.clone(),
             _ => self
                 .doc
@@ -774,7 +771,6 @@ impl Converter<'_> {
         let alignment = e.f(11).map(|_| point(e, 11));
         let mut rotation = e.fd(50, 0.0).to_radians();
         let (origin, anchor, vertical) = match (horizontal, alignment) {
-            // Aligned and fit text run along the baseline from 10 to 11.
             (3 | 5, Some(end)) => {
                 rotation = (end[1] - start[1]).atan2(end[0] - start[0]);
                 (start, "start", 0)
@@ -992,8 +988,6 @@ fn hatch_spline(cursor: &mut Cursor, b: &mut PathBuilder) {
             1.0
         });
     }
-    // Optional fit data (AutoCAD 2010+); a second 97 would be the source
-    // boundary count of the loop.
     let next = cursor.pairs.get(cursor.at + 1).map(|p| p.code);
     if cursor.peek() == Some(97) && matches!(next, Some(11 | 97 | 12)) {
         for _ in 0..cursor.count(97) {
@@ -1026,7 +1020,6 @@ mod tests {
 
     #[test]
     fn clockwise_hatch_arcs_use_mirrored_angles() {
-        // Quarter arc from 90° clockwise to 0°, stored as 270° → 360°.
         let (t0, span) = edge_sweep(270.0, 360.0, false);
         assert!((t0.to_degrees() + 270.0).abs() < 1e-9);
         assert!((span.to_degrees() + 90.0).abs() < 1e-9);

@@ -425,7 +425,6 @@ mod tests {
                 )
             })
             .collect();
-        // „engrave_32_3d“ geht vor „engrave3d“.
         assert_eq!(
             summary,
             [
@@ -435,7 +434,6 @@ mod tests {
                 (3.0, Operation::Engrave3d, 40.0, 60.0),
             ]
         );
-        // Zwei gleiche Sätze ergeben zwei Durchgänge, dann folgt der dritte.
         let engrave = &holz.profiles[0];
         assert_eq!(engrave.passes, 2);
         assert_eq!(
@@ -447,7 +445,6 @@ mod tests {
             }]
         );
         assert_eq!(lab.profile_count(), 5);
-        // Gleicher Inhalt, gleicher Fingerabdruck; geänderte Werte, neuer.
         let again = read(&archive(&refs), "Testlabor").unwrap();
         assert_eq!(again.fingerprint, lab.fingerprint);
         let mut changed = files.clone();

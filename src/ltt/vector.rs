@@ -189,7 +189,6 @@ impl<'a> Encoder<'a> {
     fn go_to(&mut self, x: f64, y: f64, relative: bool) {
         if relative {
             self.out.extend(b"PR");
-            // Truncate before subtracting so increments sum to the position.
             let dx = x as i32 - self.x as i32;
             let dy = y as i32 - self.y as i32;
             self.out.extend((dx * 8).to_be_bytes());
@@ -259,7 +258,6 @@ impl<'a> Encoder<'a> {
                 {
                     time += self.curve(std::mem::take(&mut list))?;
                     list.push(P::new(last.x, last.y));
-                    // The new segment starts at the corner.
                     point.delta = Some((x - last.x, y - last.y));
                 }
             }
@@ -283,10 +281,8 @@ impl<'a> Encoder<'a> {
         let radius_px = (center.0 - self.x).hypot(center.1 - self.y);
         let radius_mm = px_to_mm(radius_px);
         if radius_mm > CIRCLE_MAX_RADIUS_MM {
-            // Larger circles accelerate violently on the real machine.
             return None;
         }
-        // Constant speed on a circle: a = v² / r.
         let max_speed =
             ((self.curve_acceleration * radius_mm).sqrt() / percent_to_mm_s(1.0)) as f32 * 0.7;
         let (old_speed, old_power) = (self.speed, self.power);
@@ -307,7 +303,6 @@ impl<'a> Encoder<'a> {
             px_to_mm(2.0 * std::f64::consts::PI * radius_px),
             self.speed as f64,
         );
-        // The timeline shows the circle as a polygon.
         let (x0, y0) = (self.x, self.y);
         let start = (y0 - center.1).atan2(x0 - center.0);
         for i in 1..=36 {
@@ -422,7 +417,6 @@ impl<'a> Encoder<'a> {
                 i += 1;
             }
         }
-        // Drop points on straight segments with little speed change.
         let mut filtered = vec![points[0]];
         let mut speed_now = points[0].speed;
         let mut since_last = 0.0;
@@ -472,7 +466,6 @@ impl<'a> Encoder<'a> {
             }
             (vx, vy, v) = (new_vx, new_vy, new_v);
             self.out.extend(b"PE");
-            // Target speed in the middle of the segment; arc compensation on.
             let sent = (before + speed) / 2.0;
             word(
                 self.out,
@@ -601,14 +594,13 @@ mod tests {
         assert_eq!((circles, curves), (0, 0));
         assert!(!has(&bytes, b"PJ"));
         assert_eq!(bytes.windows(2).filter(|w| *w == b"PR").count(), 4);
-        // 4 × 25.4 mm at 169.3 mm/s plus acceleration distance.
         let plain = 4.0 * 25.4 / (0.5 * NOMINAL_CUT_SPEED);
         assert!(time > plain && time < plain * 1.5, "{time}");
     }
 
     #[test]
     fn circles_use_the_circle_command_with_reduced_speed_and_restore_it() {
-        let r = 200.0; // 10.16 mm radius
+        let r = 200.0;
         let ring: Vec<_> = (0..=64)
             .map(|i| {
                 let a = i as f64 / 64.0 * 2.0 * std::f64::consts::PI;
@@ -622,10 +614,8 @@ mod tests {
         let (bytes, _, circles, _) = encode(&ring, 100.0);
         assert_eq!(circles, 1);
         assert!(has(&bytes, b"PJPB\0\0\0\0\0\0\0\0"));
-        // Max. speed sqrt(2000 · 10.16) / 3.387 · 0.7 = 29.46 % → 294, then back to 100 %.
         assert!(has(&bytes, &[0x1b, 0x53, 0x01, 0x26]));
         assert!(has(&bytes, &[0x1b, 0x53, 0x03, 0xe8]));
-        // Centre relative to the start point: about (−200, 0) px, in 1/8 px.
         let at = bytes.windows(4).position(|w| w == b"PJPB").unwrap() + 12;
         let dx = i32::from_be_bytes(bytes[at..at + 4].try_into().unwrap());
         let dy = i32::from_be_bytes(bytes[at + 4..at + 8].try_into().unwrap());

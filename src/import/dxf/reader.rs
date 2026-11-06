@@ -154,7 +154,6 @@ fn decode(bytes: &[u8]) -> String {
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
     match std::str::from_utf8(bytes) {
         Ok(text) => text.to_owned(),
-        // Files before AutoCAD 2007 use the ANSI code page, mostly Windows-1252.
         Err(_) => bytes.iter().map(|b| windows_1252(*b)).collect(),
     }
 }
@@ -196,7 +195,6 @@ fn ascii_pairs(bytes: &[u8]) -> Result<Vec<Pair>, DxfError> {
         };
         let value = value.strip_suffix('\r').unwrap_or(value);
         let value = if code == 1 || code == 3 {
-            // Text keeps its leading spaces.
             value.trim_end().to_owned()
         } else {
             value.trim().to_owned()
@@ -245,7 +243,6 @@ fn value_kind(code: i32) -> Option<Kind> {
 
 fn binary_pairs(bytes: &[u8]) -> Result<Vec<Pair>, DxfError> {
     let broken = || DxfError::BinaryDamaged;
-    // Sentinel "AutoCAD Binary DXF\r\n\x1a\0"; tolerate a lost '\r'.
     let start = bytes
         .iter()
         .take(26)
@@ -253,7 +250,6 @@ fn binary_pairs(bytes: &[u8]) -> Result<Vec<Pair>, DxfError> {
         .filter(|i| bytes.get(i + 1) == Some(&0))
         .ok_or_else(broken)?
         + 2;
-    // R12 writes one-byte group codes, R13 and later two bytes.
     let wide = bytes.get(start) == Some(&0) && bytes.get(start + 1) == Some(&0);
     let mut at = start;
     let take = |at: &mut usize, n: usize| -> Result<&[u8], DxfError> {

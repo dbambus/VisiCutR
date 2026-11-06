@@ -24,7 +24,6 @@ pub fn apply_style(ctx: &egui::Context) {
     ctx.all_styles_mut(|style| {
         style.spacing.item_spacing = Vec2::new(8.0, 4.0);
         style.spacing.button_padding = Vec2::new(8.0, 3.0);
-        // Eine Höhe für alle Knöpfe, Felder und Auswahlen.
         style.spacing.interact_size.y = 24.0;
         let visuals = &mut style.visuals;
         visuals.window_corner_radius = CornerRadius::same(10);
@@ -49,7 +48,6 @@ pub fn apply_style(ctx: &egui::Context) {
         visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_gray(185));
         visuals.widgets.active.weak_bg_fill = Color32::from_gray(228);
         visuals.widgets.active.bg_fill = Color32::from_gray(228);
-        // Dunklere Schrift als egui (Grau 80/60): besser lesbar.
         visuals.widgets.noninteractive.fg_stroke.color = Color32::from_gray(30);
         visuals.widgets.inactive.fg_stroke.color = Color32::from_gray(25);
         visuals.widgets.hovered.fg_stroke.color = Color32::from_gray(10);
@@ -69,7 +67,6 @@ pub fn apply_fonts(ctx: &egui::Context) {
         "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ];
-    // Fetter Schnitt für Überschriften: Datei und Index in einer Sammlung.
     const BOLD: &[(&str, u32)] = &[
         ("/System/Library/Fonts/HelveticaNeue.ttc", 1),
         ("/System/Library/Fonts/Helvetica.ttc", 1),
@@ -79,8 +76,6 @@ pub fn apply_fonts(ctx: &egui::Context) {
     ];
     let mut fonts = egui::FontDefinitions::default();
     if let Some(data) = CANDIDATES.iter().find_map(|path| std::fs::read(path).ok()) {
-        // Lebt ohnehin bis zum Programmende; so teilt die Schriftauswahl die
-        // Daten als Ersatzschrift, ohne sie zu kopieren.
         let data: &'static [u8] = Box::leak(data.into_boxed_slice());
         let _ = crate::font_preview::FALLBACK.set(data);
         fonts.font_data.insert(
@@ -93,8 +88,6 @@ pub fn apply_fonts(ctx: &egui::Context) {
             .or_default()
             .insert(0, "system".to_owned());
     }
-    // Die Familie gibt es immer (sonst bricht egui ab); ohne Fettschnitt
-    // fällt sie auf die normale Schrift zurück.
     let mut bold = fonts.families[&egui::FontFamily::Proportional].clone();
     if let Some((data, index)) = BOLD
         .iter()
@@ -164,7 +157,6 @@ pub fn unit_value<N: egui::emath::Numeric>(
     width: f32,
 ) -> egui::Response {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), egui::Sense::hover());
-    // Weiß wie Auswahl- und Textfelder, auch auf grauem Fensterhintergrund.
     ui.painter().rect_filled(
         rect,
         3.0,
@@ -188,7 +180,6 @@ pub fn unit_value<N: egui::emath::Numeric>(
     );
     let response = ui
         .scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
-            // Den Rahmen zeichnet das Feld selbst.
             let visuals = &mut ui.visuals_mut().widgets;
             for widget in [
                 &mut visuals.inactive,
@@ -200,7 +191,6 @@ pub fn unit_value<N: egui::emath::Numeric>(
                 widget.bg_fill = Color32::TRANSPARENT;
             }
             let drag = egui::DragValue::new(value).speed(0.1).range(range);
-            // Ganzzahlen (etwa Durchgänge) ohne Nachkommastellen.
             let drag = if N::INTEGRAL {
                 drag.fixed_decimals(0)
             } else {
@@ -454,7 +444,6 @@ impl Dropdown {
         add: impl FnOnce(&mut egui::Ui) -> R,
     ) -> egui::InnerResponse<Option<R>> {
         let id = ui.make_persistent_id(self.id);
-        // Ohne feste Breite so breit wie der Text (mindestens `combo_width`).
         let natural = self
             .text
             .clone()
@@ -495,7 +484,6 @@ impl Dropdown {
                 Stroke::new(1.0, border),
                 egui::StrokeKind::Inside,
             );
-            // Winkel „﹀“ links, offen „︿“.
             let ink = if enabled {
                 Color32::from_gray(90)
             } else {
@@ -535,8 +523,6 @@ impl Dropdown {
             .width(width)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
             .show(|ui| {
-                // Liste so breit wie das Feld (egui nimmt die Breite nur als
-                // Vorschlag und schrumpft auf den Inhalt).
                 let frame = ui.spacing().menu_margin.sum().x + 2.0;
                 ui.set_min_width(width - frame);
                 egui::ScrollArea::vertical()
@@ -607,12 +593,9 @@ pub fn tool_window(
                 return;
             }
             let panel = egui::CentralPanel::default().show(ctx, |ui| {
-                // Nur den Inhalt messen: das Panel selbst reicht immer bis zum
-                // Fensterrand, damit würde das Fenster nie kleiner.
                 let content = ui.scope(&mut run).response.rect;
                 (content.top(), content.bottom())
             });
-            // Fensterhöhe an den Inhalt anpassen, unten so viel Rand wie oben.
             let (top, bottom) = panel.inner;
             let wanted = (bottom + top - panel.response.rect.top()).ceil();
             let current = ctx.input(|i| i.viewport().inner_rect.map(|r| r.height()));

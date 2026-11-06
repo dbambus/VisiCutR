@@ -22,7 +22,6 @@ pub fn unicode_escapes(text: &str) -> String {
             && matches!(chars.get(i + 1), Some('M' | 'm'))
             && chars.get(i + 2) == Some(&'+')
         {
-            // Multibyte "\M+nXXXX" of old Asian code pages: not decodable here.
             out.push('\u{FFFD}');
             i = (i + 8).min(chars.len());
             continue;
@@ -97,7 +96,6 @@ pub fn mtext_lines(text: &str) -> Vec<String> {
                     '\\' | '{' | '}' => push(&mut lines, code),
                     'L' | 'l' | 'O' | 'o' | 'K' | 'k' | 'N' => {}
                     'S' => {
-                        // Stacked fraction "\Sa^b;", "\Sa/b;" or "\Sa#b;".
                         while i < chars.len() && chars[i] != ';' {
                             match chars[i] {
                                 '^' | '#' => push(&mut lines, '/'),
@@ -108,7 +106,6 @@ pub fn mtext_lines(text: &str) -> Vec<String> {
                         }
                         i += 1;
                     }
-                    // Codes with a parameter up to ';' (font, height, colour, …).
                     _ => {
                         while i < chars.len() && chars[i] != ';' {
                             i += 1;

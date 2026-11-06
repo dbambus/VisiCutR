@@ -46,7 +46,6 @@ impl VectorizeUi {
         };
         match load(&path) {
             Ok((bitmap, name)) => {
-                // Standardgröße wie beim Bildimport: 72 DPI.
                 let (width, _) = bitmap.dimensions();
                 self.width_mm = width as f64 * 25.4 / 72.0;
                 self.bitmap = Some(bitmap);

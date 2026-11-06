@@ -522,7 +522,6 @@ impl App {
             Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
             Color32::WHITE,
         );
-        // Ecken aller Fotos zeigen, welche Bildbereiche schon abgedeckt sind.
         let k = undistorted.then(|| self.intrinsics.clone()).flatten();
         let to_screen = |p: [f64; 2]| {
             let p = k.as_ref().map_or(p, |k| k.undistort(p));
@@ -613,7 +612,6 @@ impl eframe::App for App {
 }
 
 fn main() -> eframe::Result {
-    // Ohne Einstellungen der Oberfläche gilt die Systemsprache.
     visicut_core::i18n::set_language(visicut_core::i18n::Language::system());
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(tr("VisiCutR Objektivkalibrierung"))
@@ -635,7 +633,6 @@ fn main() -> eframe::Result {
         },
         Box::new(|cc| {
             let mut app = App::new();
-            // Fotos aus der Befehlszeile gleich laden.
             let mut arguments = std::env::args_os().skip(1);
             let mut files = Vec::new();
             while let Some(argument) = arguments.by_ref().next() {

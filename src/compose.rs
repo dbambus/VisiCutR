@@ -279,7 +279,6 @@ impl TextSource {
             (false, true) => (180.0, true),
             (true, true) => (180.0, false),
         };
-        // Ein Spiegeln nach der bisherigen Drehung kehrt deren Richtung um.
         let before = if mirror {
             -self.rotate_deg
         } else {
@@ -451,8 +450,6 @@ pub fn font_families() -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for face in db.faces() {
-        // Nur der englische Name: die übersetzten (russisch, japanisch …)
-        // sind doppelt und erscheinen in der Oberfläche als Kästchen.
         let Some((name, _)) = face
             .families
             .iter()
@@ -464,7 +461,6 @@ pub fn font_families() -> Vec<String> {
         if !is_listed_font(name) || seen.contains(name) {
             continue;
         }
-        // Jede Familie einmal prüfen: bis eine ihrer Schriften Buchstaben zeichnet.
         if db.with_face_data(face.id, draws_letters) != Some(true) {
             continue;
         }
@@ -630,7 +626,6 @@ pub fn sign(sign: &Sign) -> Result<Vec<NewObject>, ComposeError> {
             align: Align::Center,
             line_spacing: 1.2,
         };
-        // Centre the text block on the plate.
         let (_, bounds) = outline(&shape)?;
         objects.push(NewObject {
             shape,
@@ -727,7 +722,6 @@ pub fn paste_part(
 fn place_in_view(project: &Project, width: f32, height: f32, view: [f32; 4]) -> (f32, f32) {
     let (bed_w, bed_h) = (project.bed_width_mm, project.bed_height_mm);
     let [mut vx, mut vy, mut vw, mut vh] = view;
-    // Auf das Bett beschränken.
     (vw, vh) = (
         (vx + vw).min(bed_w) - vx.max(0.0),
         (vy + vh).min(bed_h) - vy.max(0.0),
@@ -803,8 +797,6 @@ pub fn add_objects(
     }
     let mut result = with_document(project, &body, bounds.unwrap())?;
     let ids: Vec<usize> = (existing..existing + objects.len()).collect();
-    // Whole-motif processing turns into individual steps when the new
-    // elements need another operation; the motif keeps its parameters.
     let convert =
         project.steps.is_empty() && objects.iter().any(|o| o.operation != project.operation);
     if convert && existing > 0 {
@@ -864,7 +856,6 @@ pub fn transform(
         if flip_horizontal { -1.0 } else { 1.0 },
         if flip_vertical { -1.0 } else { 1.0 },
     );
-    // Exact quarter turns keep exact sizes.
     let radians = rotate.to_radians();
     let (sin, cos) = if rotate == 90.0 {
         (1.0, 0.0)
@@ -897,7 +888,6 @@ pub fn transform(
             None => turned,
         }
     };
-    // Ein Text bleibt bearbeitbar und merkt sich, wie er liegt.
     result.part_text = project
         .part_text
         .as_ref()
@@ -961,7 +951,6 @@ pub fn remove_objects(project: &Project, remove: &[usize]) -> Result<Project, Co
     remap(&mut result, |old| {
         kept.iter().position(|k| *k == old).into_iter().collect()
     });
-    // Steps that only held removed objects go away; empty ones stay.
     let mut index = 0;
     result.steps.retain(|step| {
         let before = &project.steps[index];
@@ -1052,10 +1041,6 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, Compos
     if instances.len() > MAX_COPIES {
         return Err(ComposeError::TooManyParts);
     }
-    // Engraved parts first: the controller engraves line by line in X with an
-    // overscan at both ends of every line, so they are lined up side by side
-    // (few lines) before the cut parts fill the rest. Then largest first;
-    // ties keep the drawing order.
     let engraved = raster_objects(project)?;
     let raster: Vec<bool> = parts
         .iter()
@@ -1071,7 +1056,6 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, Compos
             .cmp(&raster[*a])
             .then(area(*b).total_cmp(&area(*a)))
     });
-    // Y ranges already covered by engravings: lines the laser engraves anyway.
     let mut engraved_rows: Vec<[f64; 2]> = Vec::new();
     let gap = settings.gap_mm;
     let mut free = vec![[ax, ay, aw + gap, ah + gap]];
@@ -1079,7 +1063,6 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, Compos
         .iter()
         .map(|p| orientations(p, settings.rotation))
         .collect();
-    // (part, x, y, orientation)
     let mut placements: Vec<(usize, f64, f64, Orientation)> = Vec::new();
     let mut missing = 0;
     for part in instances {
@@ -1089,9 +1072,6 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, Compos
                 let [pw, ph] = orientation.size;
                 let (pw, ph) = (pw + gap, ph + gap);
                 if pw <= rect[2] + 1e-9 && ph <= rect[3] + 1e-9 {
-                    // Engravings: fewest additional engrave lines, then the
-                    // position nearest the top left. Others: best short side
-                    // fit, then lowest position.
                     let score = if raster[part] {
                         let rows = [rect[1], rect[1] + ph - gap];
                         (
@@ -1123,13 +1103,11 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, Compos
     if placements.is_empty() {
         return Err(ComposeError::NothingFits);
     }
-    // Output in drawing order of the parts so object numbers stay ordered.
     placements.sort_by_key(|p| p.0);
     let mut body = String::new();
     let mut bounds = None;
     let mut new_ids: Vec<Vec<usize>> = vec![Vec::new(); selection::objects(&project.svg)?.len()];
     let mut next = 0;
-    // The motif maps canvas pixels to the bed like `embed`.
     let tree = usvg::Tree::from_str(&project.svg, &svg::options())?;
     let size = tree.size();
     let motif = format!(
@@ -1153,8 +1131,6 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, Compos
                 orientation.degrees
             )
         };
-        // The first copy of each part keeps its ids (references point
-        // there); shared definitions come once, with the very first copy.
         let suffix = format!("-n{}", copy + 1);
         let first_of_part = previous_part != Some(*index);
         previous_part = Some(*index);
@@ -1186,7 +1162,6 @@ pub fn nest(project: &Project, settings: &NestSettings) -> Result<Nested, Compos
     remap(&mut result, |old| {
         new_ids.get(old).cloned().unwrap_or_default()
     });
-    // Without a gap neighbouring parts share their edges; cut them once.
     if settings.gap_mm == 0.0 {
         result.remove_duplicate_lines = true;
     }
@@ -1324,7 +1299,6 @@ pub fn add_files_as_parts(
         let appended = crate::import::read_file(path)
             .map_err(ComposeError::from)
             .and_then(|imported| {
-                // Ragt die Zeichnung über die Zeichenfläche, wächst diese mit.
                 let svg = whole_drawing
                     .then(|| crate::svg_import::fit_to_content(&imported.svg))
                     .flatten()
@@ -1477,7 +1451,6 @@ fn replace_drawing(part: &mut crate::project::Part, svg: String) -> Result<(), C
             })
     };
     let (new_w, new_h) = size_mm(&svg)?;
-    // Eine skalierte Grafik behält ihren Maßstab.
     let (scale_x, scale_y) = size_mm(&part.svg)
         .ok()
         .filter(|(w, h)| *w > 0.0 && *h > 0.0)
@@ -1668,7 +1641,6 @@ fn scope_names(existing: &str, source: &str) -> Result<String, ComposeError> {
         position = r.end;
     }
     text.push_str(&source[position..]);
-    // References in presentation attributes and style attributes.
     for (old, new) in &renamed {
         for quote in ["", "'", "\""] {
             text = text.replace(
@@ -1858,7 +1830,6 @@ fn orientations(part: &Part, rotation: NestRotation) -> Vec<Orientation> {
         size: [h, w],
     });
     if rotation == NestRotation::Free && !part.hull.is_empty() {
-        // Smallest enclosing rectangle over whole degrees; 0° wins ties.
         let area = |o: &Orientation| o.size[0] * o.size[1];
         let best = (1..90)
             .map(|d| turned(&part.hull, d))
@@ -2210,9 +2181,6 @@ fn style(operation: Operation) -> (&'static str, &'static str) {
 }
 
 fn unique_id(svg: &str, shape: &Shape, number: usize) -> String {
-    // The id names the object in the object list, so it uses the chosen
-    // language; it is stored in the document and stays when the language
-    // changes.
     let base = id_base(match shape {
         Shape::Rectangle { .. } => tr("Rechteck"),
         Shape::Ellipse { .. } => tr("Ellipse"),
@@ -2299,7 +2267,6 @@ fn with_document(project: &Project, body: &str, bounds: [f64; 4]) -> Result<Proj
         y_mm: y as f32,
         width_mm: w as f32,
         height_mm: h as f32,
-        // Gedreht, kopiert oder ergänzt passt der Text nicht mehr zur Zeichnung.
         part_text: None,
         ..project.clone()
     };
@@ -2349,7 +2316,6 @@ fn embed(
                 "x" | "y" | "width" | "height" | "overflow"
             )
         {
-            // Remove the attribute including the white space before it.
             let r = attribute.range();
             let mut start = r.start;
             while start > range.start && source.as_bytes()[start - 1].is_ascii_whitespace() {
@@ -2648,7 +2614,6 @@ fn transform_path(d: &str, dx: f64, dy: f64, out: &mut String) {
             return;
         }
         let value: f64 = number.parse().unwrap_or(0.0);
-        // Which argument of the command is an x or y coordinate.
         let shifted = match command {
             'H' => value + dx,
             'V' => value + dy,
@@ -2749,7 +2714,6 @@ mod tests {
         assert!(notes[0].contains("keinem Schritt"));
         assert_eq!((result.x_mm, result.y_mm), (10.0, 10.0));
         assert!((result.width_mm - 85.0).abs() < 1e-3 && (result.height_mm - 20.0).abs() < 1e-3);
-        // Names of the second drawing no longer collide.
         assert!(result.svg.contains(r#"id="r-2""#) && result.svg.contains(r##"href="#r-2""##));
         assert!(result.svg.contains(".cls-1-2{") && result.svg.contains(r#"class="cls-1-2""#));
         assert!(result.svg.contains("url(#g-2)") && result.svg.contains(r#"id="g-2""#));
@@ -2829,7 +2793,6 @@ mod tests {
         };
         let (d, b) = outline(&shape).unwrap();
         assert!(d.starts_with('M') && d.contains('Z'));
-        // Two lines of 10 mm text: roughly 7 + 12 mm high, wider than tall.
         assert!(b[3] > 15.0 && b[3] < 25.0, "{b:?}");
         assert!(b[2] > 20.0, "{b:?}");
     }
@@ -2864,7 +2827,6 @@ mod tests {
         assert_eq!(added.steps[0].objects, (0..count).collect::<Vec<_>>());
         assert_eq!(added.steps[1].operation, Operation::Cut);
         assert_eq!(added.steps[1].objects, vec![count]);
-        // The engraving of the motif is unchanged on the bed.
         let after = ltt::prepare(&added).unwrap();
         let engrave = |job: &ltt::PreparedJob| {
             job.jobs
@@ -2875,8 +2837,6 @@ mod tests {
                 .clone()
         };
         let (a, b) = (engrave(&before), engrave(&after));
-        // f32 transforms of the nested motif may move a raster edge by one
-        // pixel; the engraving stays the same within that.
         assert!(
             a.len().abs_diff(b.len()) * 100 < a.len(),
             "{} {}",
@@ -2893,7 +2853,6 @@ mod tests {
             .find(|j| j.operation == Operation::Cut)
             .unwrap();
         assert!(!cut.bytes.is_empty());
-        // Adding again nests once more and keeps everything.
         let (twice, _) = add_objects(
             &added,
             &[NewObject {
@@ -2915,7 +2874,6 @@ mod tests {
     #[test]
     fn a_sign_starts_an_empty_project() {
         let objects = sign(&Sign::default()).unwrap();
-        // Plate, two holes, text.
         assert_eq!(objects.len(), 4);
         let (project, ids) = add_objects(&Project::default(), &objects).unwrap();
         assert_eq!(project.steps.len(), 2);
@@ -2943,7 +2901,6 @@ mod tests {
             copies.steps[0].objects,
             (0..6).map(|c| c * count).collect::<Vec<_>>()
         );
-        // Ids stay unique.
         assert!(copies.svg.contains("-k6\""));
         ltt::prepare(&copies).unwrap();
         assert!(array(&project, 1, 1, 0.0, 0.0).is_err());
@@ -2966,7 +2923,6 @@ mod tests {
             part_source_file: Some(file.display().to_string()),
             x_mm: 30.0,
             y_mm: 40.0,
-            // Auf das Doppelte skaliert.
             width_mm: 40.0,
             height_mm: 20.0,
             ..Project::default()
@@ -2983,7 +2939,6 @@ mod tests {
         assert!((reloaded.width_mm - 60.0).abs() < 0.01);
         assert!((reloaded.height_mm - 20.0).abs() < 0.01);
         assert_eq!(reloaded.part_source_file, project.part_source_file);
-        // Fehlt die Datei, bleibt alles wie es war.
         let (kept, changed, notes) = reload_parts(&reloaded, false);
         assert_eq!((changed, notes.len()), (0, 1));
         assert_eq!(kept.svg, reloaded.svg);
@@ -3016,7 +2971,6 @@ mod tests {
             changed.part_parametric.as_ref().unwrap().values,
             [("breite".to_string(), ParameterValue::Number(35.0))]
         );
-        // Neu laden nimmt die geänderte Vorlage, behält aber die Werte.
         std::fs::write(
             &file,
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="0 0 100 100"><defs><ref param="$breite" default="20"/></defs><rect x="0" y="0" width="{$breite}" height="20" fill="none" stroke="red"/></svg>"#,
@@ -3037,10 +2991,8 @@ mod tests {
         assert_eq!(first.part_count(), 1);
         let second = add_objects_as_part(&first, &sign, "Schild", bed).unwrap();
         assert_eq!(second.part_count(), 2);
-        // Das erste Schild bleibt unverändert, das zweite ist gewählt.
         assert_eq!(second.parts[0].svg, first.svg);
         assert_eq!(second.active_part, 1);
-        // Nicht auf das erste, sondern mit Abstand daneben.
         let [a, b] = [second.parts[0].clone(), second.active()];
         let gap = APPEND_GAP_MM as f32 - 0.01;
         assert!(
@@ -3069,7 +3021,6 @@ mod tests {
         };
         let first = add_text(&Project::default(), &source, bed).unwrap();
         assert_eq!(first.part_text.as_ref(), Some(&source));
-        // Ein zweites Teil (Form) erbt den Text nicht; das erste behält ihn.
         let rectangle = NewObject {
             shape: Shape::Rectangle {
                 width_mm: 20.0,
@@ -3083,7 +3034,6 @@ mod tests {
         let both = add_objects_as_part(&first, &[rectangle], "Form", bed).unwrap();
         assert_eq!(both.part_text, None);
         assert_eq!(both.parts[0].text.as_ref(), Some(&source));
-        // Bearbeiten: neue Umrisse an derselben Stelle, länger mit mehr Text.
         let longer = TextSource {
             text: "Hallo Welt".into(),
             ..source.clone()
@@ -3098,11 +3048,9 @@ mod tests {
         );
         assert_eq!(edited.part_text.as_ref(), Some(&longer));
         assert_ne!(edited.svg, first.svg);
-        // Im Projekt gespeichert und wieder geöffnet bleibt der Text erhalten.
         let saved = serde_json::to_string(&both).unwrap();
         let opened: Project = serde_json::from_str(&saved).unwrap();
         assert_eq!(opened.parts[0].text.as_ref(), Some(&source));
-        // Gedreht bleibt der Text bearbeitbar und behält die Drehung.
         let turned = transform(&first, 90.0, false, false).unwrap();
         let stored = turned.part_text.as_ref().unwrap();
         assert_eq!((stored.rotate_deg, stored.mirrored), (90.0, false));
@@ -3119,7 +3067,6 @@ mod tests {
             "{}",
             edited.width_mm
         );
-        // Gespiegelt ebenso.
         let mirrored = transform(&first, 0.0, true, false).unwrap();
         assert!(mirrored.part_text.as_ref().unwrap().mirrored);
         let edited = set_text(&mirrored, &longer).unwrap();
@@ -3140,12 +3087,10 @@ mod tests {
             part_from_clipboard(&format!("{CLIPBOARD_MARK}\nkein JSON")),
             None
         );
-        // An Originalposition: genau darauf, mit allen Einstellungen.
         let in_place = paste_part(&project, part.clone(), None).unwrap();
         assert_eq!(in_place.part_count(), 2);
         assert_eq!(in_place.active_part, 1);
         assert_eq!(in_place.active(), part);
-        // Einfügen: im sichtbaren Ausschnitt neben dem Original.
         let view = [0.0, 0.0, 1000.0, 600.0];
         let pasted = paste_part(&project, part.clone(), Some(view)).unwrap();
         let copy = pasted.active();
@@ -3160,7 +3105,6 @@ mod tests {
                 || copy.y_mm + copy.height_mm <= part.y_mm,
             "{copy:?}"
         );
-        // Ein leeres Teil wird nicht eingefügt.
         let empty = crate::project::Part {
             svg: String::new(),
             ..part
@@ -3170,7 +3114,6 @@ mod tests {
 
     #[test]
     fn text_orientation_follows_turns_and_mirrors() {
-        // Lage als Matrix: erst waagrecht spiegeln, dann drehen (wie `transform`).
         type M = [[f64; 2]; 2];
         let mul = |a: M, b: M| -> M {
             [
@@ -3234,7 +3177,6 @@ mod tests {
                 }
             }
         }
-        // Zweimal spiegeln hebt sich auf.
         let back = text.turned(0.0, true, false).turned(0.0, true, false);
         assert_eq!(back.mirrored, text.mirrored);
         assert!((back.rotate_deg - text.rotate_deg).abs() < 1e-9);
@@ -3243,7 +3185,6 @@ mod tests {
     #[test]
     fn new_parts_go_into_the_visible_part_of_the_bed() {
         let sign = super::sign(&Sign::default()).unwrap();
-        // Auf 400 × 200 mm unten rechts gezoomt: mittig darin.
         let view = [500.0, 300.0, 400.0, 200.0];
         let first = add_objects_as_part(&Project::default(), &sign, "Schild", view).unwrap();
         let centre = |p: &Project| (p.x_mm + p.width_mm / 2.0, p.y_mm + p.height_mm / 2.0);
@@ -3252,7 +3193,6 @@ mod tests {
             (cx - 700.0).abs() < 0.01 && (cy - 400.0).abs() < 0.01,
             "{cx} {cy}"
         );
-        // Weitere Teile bleiben im Ausschnitt.
         let mut project = first;
         for _ in 0..3 {
             project = add_objects_as_part(&project, &sign, "Schild", view).unwrap();
@@ -3260,7 +3200,6 @@ mod tests {
             assert!(p.x_mm >= 500.0 && p.x_mm + p.width_mm <= 900.0, "{p:?}");
             assert!(p.y_mm >= 300.0 && p.y_mm + p.height_mm <= 500.0, "{p:?}");
         }
-        // Ausschnitt über den Bettrand hinaus: das Teil bleibt auf dem Bett.
         let edge = add_objects_as_part(
             &Project::default(),
             &sign,
@@ -3269,7 +3208,6 @@ mod tests {
         )
         .unwrap();
         assert!(edge.x_mm + edge.width_mm <= 1000.0 + 0.01, "{}", edge.x_mm);
-        // Ohne bekannten Ausschnitt mittig auf dem Bett.
         let unknown = add_objects_as_part(&Project::default(), &sign, "Schild", [0.0; 4]).unwrap();
         let (cx, cy) = centre(&unknown);
         assert!(
@@ -3321,7 +3259,6 @@ mod tests {
 
     #[test]
     fn free_rotation_turns_slanted_parts_upright() {
-        // A 100 × 10 bar slanted by 30°: only upright does it fit 105 × 15.
         let project = Project {
             svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="120mm" height="80mm" viewBox="0 0 120 80"><rect x="0" y="0" width="100" height="10" transform="translate(10 5) rotate(30)" fill="none" stroke="red" stroke-width="0.1"/></svg>"#.into(),
             x_mm: 0.0,
@@ -3387,7 +3324,6 @@ mod tests {
         let count = selection::objects(&project.svg).unwrap().len();
         let turned = transform(&project, 90.0, false, false).unwrap();
         assert!((turned.width_mm - 60.0).abs() < 1e-3 && (turned.height_mm - 100.0).abs() < 1e-3);
-        // Turned about the centre (70, 60).
         assert!((turned.x_mm - 40.0).abs() < 1e-3 && (turned.y_mm - 10.0).abs() < 1e-3);
         assert_eq!(selection::objects(&turned.svg).unwrap().len(), count);
         let mirrored = transform(&project, 0.0, true, false).unwrap();
@@ -3397,7 +3333,6 @@ mod tests {
         assert!((back.width_mm - 100.0).abs() < 1e-3);
         ltt::prepare(&back).unwrap();
         let diagonal = transform(&project, 45.0, false, false).unwrap();
-        // At most the turned frame; the content decides.
         assert!(diagonal.width_mm as f64 <= 160.0 / 2f64.sqrt() + 1e-2);
         assert!(diagonal.width_mm > 50.0);
         assert_eq!(
@@ -3408,8 +3343,6 @@ mod tests {
 
     #[test]
     fn turning_back_and_forth_keeps_the_size() {
-        // A 300 mm square filling its frame: +30° then −30° grew the frame
-        // to 560 mm and after a few turns it no longer fitted the bed.
         let project = Project {
             svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="300mm" height="300mm" viewBox="0 0 300 300"><rect x="1" y="1" width="298" height="298" fill="none" stroke="red" stroke-width="2"/></svg>"#.into(),
             x_mm: 150.0,
@@ -3432,7 +3365,6 @@ mod tests {
             back = transform(&back, 30.0, false, false).unwrap();
             back = transform(&back, -30.0, false, false).unwrap();
         }
-        // Rounding may add a few hundredths of a millimetre per turn.
         assert!((back.width_mm - 300.0).abs() < 0.5, "{}", back.width_mm);
         assert!(back.x_mm >= 0.0 && back.x_mm + back.width_mm <= back.bed_width_mm);
     }
@@ -3454,7 +3386,6 @@ mod tests {
         ];
         let removed = remove_objects(&project, &[0]).unwrap();
         assert_eq!(selection::objects(&removed.svg).unwrap().len(), count - 1);
-        // The cut step lost its only object; the engraving moved down by one.
         assert_eq!(removed.steps.len(), 1);
         assert_eq!(removed.steps[0].objects, (0..count - 1).collect::<Vec<_>>());
         let all: Vec<usize> = (0..count).collect();
@@ -3490,7 +3421,6 @@ mod tests {
             selection::objects(&nested.project.svg).unwrap().len(),
             objects
         );
-        // Each copy is embedded once, not the whole document per copy.
         assert!(
             nested.project.svg.len() < 2 * copies.svg.len(),
             "{}",
@@ -3508,15 +3438,12 @@ mod tests {
             quantity: 4,
             ..NestSettings::default()
         };
-        // Even if the project itself keeps duplicate lines.
         let separate_lines = Project {
             remove_duplicate_lines: false,
             ..demo()
         };
         let nested = nest(&separate_lines, &settings).unwrap();
         assert!(nested.project.remove_duplicate_lines);
-        // The frames are stacked along their cut lines, not their 0.5 mm
-        // strokes, so the shared straight edges are removed.
         let job = ltt::prepare(&nested.project).unwrap();
         assert!(
             job.description.contains("doppelte Abschnitte"),
@@ -3542,7 +3469,6 @@ mod tests {
 
     #[test]
     fn nesting_lines_up_engravings_to_save_engrave_lines() {
-        // Frame cut, circle engraved, triangle marked, as in the example.
         let step = |operation, object: usize| JobStep {
             objects: vec![object],
             ..JobStep::new(operation)
@@ -3568,8 +3494,6 @@ mod tests {
             .iter()
             .find(|s| s.operation == Operation::Engrave)
             .unwrap();
-        // All twelve circles (32 mm) side by side: one band of engrave lines
-        // instead of a column twelve circles high.
         let lines: usize = engrave
             .description
             .split(' ')
@@ -3616,7 +3540,6 @@ mod tests {
         );
         let two = font_sample("Hallo\nWelt", "sans-serif", false, false, 30.0).unwrap();
         assert!(two.height() > one.height() + 20, "{}", two.height());
-        // Leerer Text: Beispielzeichen statt nichts.
         assert!(font_sample("  ", "serif", true, true, 30.0).is_some());
     }
 }

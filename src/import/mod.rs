@@ -214,7 +214,6 @@ mod tests {
         assert!(time_left(limit).unwrap() <= std::time::Duration::from_secs(2));
         DEADLINE.set(Some(std::time::Instant::now()));
         assert!(matches!(time_left(limit), Err(ImportError::TimeLimit(_))));
-        // read_file sets the deadline only when none is running and clears it.
         DEADLINE.set(None);
         let _ = read_file(Path::new("does-not-exist.svg"));
         assert_eq!(DEADLINE.get(), None);
@@ -227,12 +226,9 @@ mod tests {
             budget.read(&mut &b"1234"[..], 5).unwrap(),
             Some(b"1234".to_vec())
         );
-        // Larger than the entry limit: skipped, but it still costs.
         assert_eq!(budget.read(&mut &b"123456"[..], 5).unwrap(), None);
         assert!(budget.read(&mut &b"12345"[..], 5).is_err());
 
-        // An entry that claims 100 bytes but inflates to 20 MB stops at the
-        // limit instead of filling memory.
         use std::io::Write;
         let mut bytes = Vec::new();
         {

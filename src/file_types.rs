@@ -169,7 +169,6 @@ mod registry {
     }
 
     pub fn register(exe: &Path) -> Result<(), String> {
-        // Gesamtsicht aus Benutzer- und Systemzweig.
         let owner = |extension: &str| get(HKEY_CLASSES_ROOT, &wide(extension), "");
         for entry in plan(exe, owner) {
             let data = wide(&entry.data);
@@ -211,7 +210,6 @@ mod registry {
                 },
                 &list,
             )?;
-            // Den Standardwert nur löschen, wenn er auf VisiCutR zeigt.
             if get(HKEY_CURRENT_USER, &classes(extension), "").as_deref() == Some(id) {
                 check(
                     unsafe {
@@ -278,7 +276,6 @@ mod tests {
         );
         assert_eq!(find(&values, ".vcr", ""), Some("VisiCutR.Project"));
         assert_eq!(find(&values, ".plf", ""), Some("VisiCutR.File"));
-        // Grafiken behalten ihr Standardprogramm.
         assert_eq!(find(&values, ".svg", ""), None);
         assert_eq!(
             find(&values, ".svg\\OpenWithProgids", "VisiCutR.File"),
@@ -305,7 +302,6 @@ mod tests {
             Some("")
         );
         assert_eq!(find(&values, ".ls", ""), Some("VisiCutR.File"));
-        // Erneutes Zuordnen nach dem Verschieben der EXE.
         let again = plan(exe, |_| Some("VisiCutR.File".to_owned()));
         assert_eq!(find(&again, ".plf", ""), Some("VisiCutR.File"));
     }

@@ -108,7 +108,6 @@ mod tests {
         let listener = Listener::start(&dir, || {}).unwrap();
         let address = std::fs::read_to_string(dir.join("instance.json")).unwrap();
         let svg = "C:\\Users\\Jürgen\\Temp\\visicutr-1\\Schild \"A\".svg";
-        // `#target` ist eine Anweisung für ExtendScript, kein JavaScript.
         let script: String = ILLUSTRATOR
             .1
             .lines()

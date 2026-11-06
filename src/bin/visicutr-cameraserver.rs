@@ -161,8 +161,6 @@ fn capture(options: &Options, timing: Timing) -> Result<Vec<u8>, String> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("{}: {e}", options.command[0]))?;
-    // Read both pipes on their own threads, limited, so the command never
-    // blocks on a full pipe and a huge output cannot fill the memory.
     let collect = |pipe: Option<Box<dyn Read + Send>>, limit: u64| {
         std::thread::spawn(move || {
             let mut bytes = Vec::new();
@@ -260,7 +258,6 @@ fn handle(
     authorization: Option<&str>,
     timing: Timing,
 ) -> std::io::Result<()> {
-    // Consume the request head; the path does not matter.
     let mut reader = BufReader::new(Deadline {
         stream: &stream,
         until: Instant::now() + timing.request,
@@ -306,7 +303,6 @@ fn handle(
             out.write_all(&body)?;
         }
         Err(error) => {
-            // Details only on the server's console, not to the network.
             eprintln!("{error}");
             let message = tr("Aufnahme fehlgeschlagen");
             out.until = Instant::now() + timing.response;
@@ -322,7 +318,6 @@ fn handle(
 }
 
 fn main() {
-    // Ohne Einstellungen der Oberfläche gilt die Systemsprache.
     visicut_core::i18n::set_language(visicut_core::i18n::Language::system());
     let password = std::env::var("VISICUTR_CAMERA_PASSWORD").ok();
     let options = match parse(std::env::args().skip(1), password) {
@@ -347,7 +342,6 @@ fn main() {
             port = options.port
         )
     );
-    // One request at a time: a camera can only take one photo at once.
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
@@ -454,7 +448,6 @@ mod tests {
     fn reports_capture_errors_without_details_and_parses_options() {
         let response = request(|| Err("/dev/video0: Kamera fehlt".into()), 0);
         assert!(response.starts_with(b"HTTP/1.0 500"));
-        // Details of the capture command stay on the server.
         assert_eq!(body(&response), "Aufnahme fehlgeschlagen".as_bytes());
 
         let list = [
@@ -466,7 +459,6 @@ mod tests {
         assert!(options.authorization.is_none());
         assert!(parse(args(&["--rotate", "45", "--", "x"]), None).is_err());
         assert!(parse(std::iter::empty(), None).is_err());
-        // --user needs a password, from the option or the variable.
         assert!(parse(args(&["--user", "laser", "--", "x"]), None).is_err());
         let options = parse(args(&["--user", "laser", "--", "x"]), Some("geheim".into())).unwrap();
         assert_eq!(
@@ -496,15 +488,12 @@ mod tests {
 
     #[test]
     fn long_or_slow_requests_are_dropped() {
-        // No end of line: stops at 16 KB instead of growing.
         let (response, result) = exchange(
             || panic!("no photo for an invalid request"),
             None,
             &vec![b'a'; 64 * 1024],
         );
         assert!(response.is_empty() && result.is_err());
-        // A client that sends one byte at a time cannot keep the camera
-        // busy beyond the request time.
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {

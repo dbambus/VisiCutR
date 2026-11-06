@@ -39,8 +39,6 @@ pub(super) fn interpret(data: &[u8]) -> Result<Imported, EpsError> {
         return Err(EpsError::EmptyBoundingBox);
     }
     let program = parse::parse(data)?;
-    // Maps user space to SVG device space: origin at the lower left corner of
-    // the BoundingBox, y pointing down.
     let mut machine = machine::Machine::new([1.0, 0.0, 0.0, -1.0, -llx, ury]);
     machine.run(&program)?;
     let svg = format!(

@@ -11,8 +11,6 @@ pub fn aci(index: i64) -> u32 {
     match index {
         0..=9 => BASE[index as usize],
         10..=249 => {
-            // 24 hues in 15° steps, each with 5 brightness levels in a full and a
-            // half-saturated variant.
             let hue = ((index / 10 - 1) * 15) as f64;
             let shade = index % 10;
             let value = [1.0, 0.8, 0.6, 0.5, 0.3][(shade / 2) as usize];
@@ -26,7 +24,6 @@ pub fn aci(index: i64) -> u32 {
                     _ => 1.0,
                 }
             };
-            // Red peaks at 0°, green at 120°, blue at 240°.
             let channels = [ramp(0.0), ramp(120.0), ramp(240.0)].map(|c| {
                 let full = 255.0 * c;
                 let level = if shade % 2 == 1 {

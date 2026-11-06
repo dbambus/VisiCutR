@@ -88,8 +88,6 @@ pub struct Calibration {
     pub view_rms: Vec<f64>,
 }
 
-// ---------------------------------------------------------------------------
-// Chessboard detection
 
 /// Grey values of a picture, row by row.
 struct Plane {
@@ -341,8 +339,6 @@ fn grow(
                 if grid.contains_key(&target) {
                     continue;
                 }
-                // Schritt aus dem Vorgänger auf derselben Linie oder dem
-                // Nachbarn auf der Nachbarlinie, sonst aus den Startvektoren.
                 let step = at(&grid, (i - di, j - dj))
                     .map(|q| sub(p, q))
                     .or_else(|| {
@@ -448,7 +444,6 @@ fn alternates(plane: &Plane, grid: &[Vec<[f64; 2]>]) -> bool {
                 (grid[j][i][1] + grid[j][i + 1][1] + grid[j + 1][i][1] + grid[j + 1][i + 1][1])
                     / 4.0,
             ];
-            // Hell/dunkel im Vergleich zum Mittel der vier Eckpunkte.
             let corners: f32 = [
                 grid[j][i],
                 grid[j][i + 1],
@@ -529,8 +524,6 @@ pub fn find_chessboard(image: &RgbaImage, pattern: (usize, usize)) -> Option<Vec
     let buckets = Buckets::new(&points, 16.0);
     let mut visited = vec![false; points.len()];
     let mut best: Option<Vec<Vec<[f64; 2]>>> = None;
-    // Jeder Punkt eines schon gewachsenen Gitters (etwa des Wabenbetts)
-    // scheidet als neuer Startpunkt aus.
     for seed in 0..points.len() {
         if visited[seed] {
             continue;
@@ -566,8 +559,6 @@ pub fn find_chessboard(image: &RgbaImage, pattern: (usize, usize)) -> Option<Vec
         break;
     }
     let mut grid = best?;
-    // Zeilen von links nach rechts, Spalten von oben nach unten (soweit das
-    // Brett nicht stark gedreht ist), wie OpenCV meist liefert.
     let along = sub(grid[0][pattern.0 - 1], grid[0][0]);
     if along[0] < 0.0 {
         grid.iter_mut().for_each(|r| r.reverse());
@@ -591,8 +582,6 @@ pub fn find_chessboard(image: &RgbaImage, pattern: (usize, usize)) -> Option<Vec
     )
 }
 
-// ---------------------------------------------------------------------------
-// Calibration
 
 fn object_points(pattern: (usize, usize)) -> Vec<[f64; 2]> {
     (0..pattern.1)
@@ -703,7 +692,6 @@ fn initial_intrinsics(homographies: &[Matrix], size: [u32; 2]) -> Intrinsics {
     let (cx, cy) = (size[0] as f64 / 2.0 - 0.5, size[1] as f64 / 2.0 - 0.5);
     let (mut a11, mut a12, mut a22, mut b1, mut b2) = (0.0, 0.0, 0.0, 0.0, 0.0);
     for h in homographies {
-        // Bildmitte in den Ursprung verschieben.
         let col = |j: usize| [h[0][j] - cx * h[2][j], h[1][j] - cy * h[2][j], h[2][j]];
         let (h1, h2) = (col(0), col(1));
         let n1 = norm3(h1);
@@ -756,7 +744,6 @@ fn initial_pose(h: &Matrix, k: &Intrinsics) -> [f64; 6] {
         lambda = -lambda;
     }
     let (r1, r2, t) = (scale3(h1, lambda), scale3(h2, lambda), scale3(h3, lambda));
-    // r1, r2 symmetrisch orthonormieren.
     let unit = |a: Vec3| scale3(a, 1.0 / norm3(a));
     let (r1, r2) = (unit(r1), unit(r2));
     let c = unit([r1[0] + r2[0], r1[1] + r2[1], r1[2] + r2[2]]);
@@ -877,8 +864,6 @@ pub fn calibrate(
         params.extend(initial_pose(h, &k));
     }
 
-    // Levenberg-Marquardt; die Ableitungen numerisch, je Foto nur über
-    // dessen eigene Lage.
     let n = params.len();
     let cost = |r: &[f64]| r.iter().map(|v| v * v).sum::<f64>();
     let mut residuals = all_residuals(&params, &objects, views);
@@ -999,8 +984,6 @@ pub fn undistort_image(image: &RgbaImage, k: &Intrinsics) -> RgbaImage {
     RgbaImage::from_raw(w, h, raw).expect("buffer has the image size")
 }
 
-// ---------------------------------------------------------------------------
-// calibration.npz
 
 /// NumPy `.npy` (format 1.0) of a little-endian float64 array.
 fn npy(shape: &[usize], values: &[f64]) -> Vec<u8> {
@@ -1156,11 +1139,9 @@ mod tests {
     /// through the lens `k`, slightly blurred by 3 × 3 supersampling.
     fn render(k: &Intrinsics, rt: &[f64; 6], size: [u32; 2]) -> RgbaImage {
         let r = rotation([rt[0], rt[1], rt[2]]);
-        // Bildpunkt -> Brettpunkt: entzerren, dann Strahl mit der Ebene schneiden.
         let to_board = |u: [f64; 2]| {
             let p = k.undistort(u);
             let ray = [(p[0] - k.cx) / k.fx, (p[1] - k.cy) / k.fy, 1.0];
-            // Ebene z=0 im Brett: n = r3, Punkt t.
             let n = [r[0][2], r[1][2], r[2][2]];
             let t = [rt[3], rt[4], rt[5]];
             let s = (n[0] * t[0] + n[1] * t[1] + n[2] * t[2])
@@ -1321,7 +1302,6 @@ mod tests {
         let (shape, values) = read_npy(&data).unwrap();
         assert_eq!(shape, [2, 3, 1]);
         assert_eq!(values[3], 0.4);
-        // Kopf auf 64 Byte ausgerichtet wie bei NumPy.
         assert_eq!(
             (10 + u16::from_le_bytes([data[8], data[9]]) as usize) % 64,
             0

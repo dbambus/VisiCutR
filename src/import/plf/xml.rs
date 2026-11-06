@@ -49,7 +49,6 @@ pub fn rewrite_start_tag(
     let mut position = start;
     for range in removed {
         if range.start >= position && range.end <= end {
-            // Drop the whitespace before the attribute as well.
             let kept = source[position..range.start].trim_end();
             tag.push_str(kept);
             position = range.end;
@@ -102,7 +101,6 @@ pub fn declare_thymeleaf(source: &str) -> String {
         } else if rest.starts_with("<!--") {
             rest.find("-->").map(|i| i + 3)
         } else if rest.starts_with("<!") {
-            // DOCTYPE, possibly with an internal subset in brackets.
             let close = rest.find(']').unwrap_or(0);
             rest[close..].find('>').map(|i| close + i + 1)
         } else {

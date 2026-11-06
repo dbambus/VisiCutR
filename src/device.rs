@@ -413,8 +413,6 @@ impl DeviceStore {
         self.validate()?;
         std::fs::create_dir_all(dir)?;
         let json = serde_json::to_string_pretty(self).map_err(DeviceError::Json)?;
-        // Write atomically and durably so a crash or power cut never leaves a
-        // truncated device list, readable only by the user (camera passwords).
         let temporary = dir.join(format!("{STORE_FILE}.{}.tmp", std::process::id()));
         let written = (|| {
             use std::io::Write;
@@ -511,7 +509,6 @@ fn points(node: Option<roxmltree::Node>) -> Result<Vec<[f64; 2]>, DeviceError> {
     };
     node.children()
         .filter(|n| n.is_element())
-        // XStream omits fields that are 0.0, e.g. a marker at x = 0.
         .map(|p| {
             Ok([
                 number(p, "x")?.unwrap_or(0.0),
@@ -596,7 +593,6 @@ pub fn from_visicut_xml(source: &str) -> Result<LaserDevice, DeviceError> {
         camera_url: text(root, "cameraURL").unwrap_or_default(),
         camera_user: text(root, "URLUser").unwrap_or_default(),
         camera_password: text(root, "URLPassword").unwrap_or_default(),
-        // VisiCut refreshes every 50 ms at 0; here 0 keeps the picture still.
         camera_refresh_ms: match number(root, "cameraTiming")? {
             Some(ms) if ms > 0.0 => (ms.round() as u32).max(MIN_CAMERA_REFRESH_MS),
             _ => 0,
@@ -632,7 +628,6 @@ fn import_archive(bytes: &[u8]) -> Result<Vec<LaserDevice>, DeviceError> {
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
         let name = file.name()?.to_string();
-        // Settings archives keep devices in devices/, GitHub adds a top folder.
         let in_devices = name.split('/').rev().nth(1) == Some("devices");
         if !in_devices || !name.ends_with(".xml") || file.size() > 5 * 1024 * 1024 {
             continue;
@@ -798,7 +793,6 @@ mod tests {
         std::fs::write(old.join("devices.json"), "{}").unwrap();
         assert_eq!(move_legacy(&old, &new), Some((old.clone(), new.clone())));
         assert!(new.join("devices.json").exists() && new.join("cache").is_dir() && !old.exists());
-        // Ein vorhandener neuer Ordner wird nie überschrieben.
         std::fs::create_dir_all(&old).unwrap();
         assert_eq!(move_legacy(&old, &new), None);
         assert!(old.exists());
@@ -815,7 +809,6 @@ mod tests {
             ("laser", "geheim")
         );
         assert_eq!(device.camera_refresh_ms, 500);
-        // VisiCut's 0 (every 50 ms) keeps the picture still here.
         assert_eq!(LaserDevice::fau().camera_refresh_ms, 0);
         let path = std::env::temp_dir().join(format!(
             "visicutr-devices-{}.vcrdevices",
@@ -828,7 +821,6 @@ mod tests {
         let mut invalid = device.clone();
         invalid.camera_refresh_ms = 10;
         assert!(invalid.validate().is_err());
-        // Older device lists without the fields still load.
         let mut value = serde_json::to_value(LaserDevice::default()).unwrap();
         for key in ["camera_user", "camera_password", "camera_refresh_ms"] {
             value.as_object_mut().unwrap().remove(key);
@@ -935,7 +927,6 @@ mod tests {
         store.devices[1].camera_password = "geheim".into();
         store.save(&dir).unwrap();
         assert_eq!(DeviceStore::load(&dir).unwrap(), store);
-        // Camera passwords: readable only by the user.
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -953,7 +944,6 @@ mod tests {
                 .ends_with(".tmp"))
         );
         let export = dir.join("export.json");
-        // Exports leave the camera passwords out.
         export_and_reimport(&export, &store.without_passwords().devices);
         store.devices[1].name = store.devices[0].name.clone();
         assert!(matches!(store.save(&dir), Err(DeviceError::Duplicate(_))));
@@ -971,28 +961,21 @@ mod tests {
             selected: 1,
             ..DeviceStore::default()
         };
-        // Kopien bekommen freie Namen und landen am Ende.
         assert_eq!(store.duplicate(0), 3);
         assert_eq!(store.duplicate(0), 4);
         let names: Vec<_> = store.devices.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(names, ["A", "B", "C", "A (2)", "A (3)"]);
         assert_eq!(store.devices[3].hostname, store.devices[0].hostname);
-        // Ein Gerät vor dem aktiven: das aktive (B) rückt nach.
         assert_eq!(store.remove(0), Some(0));
         assert_eq!(
             (store.selected, store.devices[store.selected].name.as_str()),
             (0, "B")
         );
-        // Das letzte dahinter: das aktive bleibt, die Auswahl rückt auf das
-        // neue letzte.
         assert_eq!(store.remove(3), Some(2));
         assert_eq!(store.devices[store.selected].name, "B");
-        // Das aktive selbst: das davor wird aktiv, an Position 0 das nächste.
         assert_eq!(store.remove(0), Some(0));
         assert_eq!((store.selected, store.devices[0].name.as_str()), (0, "C"));
-        // Das letzte in der Liste: die Auswahl rückt auf das neue letzte.
         assert_eq!(store.remove(1), Some(0));
-        // Das einzige Gerät bleibt; ungültige Positionen ändern nichts.
         assert_eq!(store.remove(0), None);
         assert_eq!(store.remove(5), None);
         assert_eq!(store.devices.len(), 1);

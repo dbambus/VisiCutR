@@ -143,8 +143,6 @@ fn part_files(
         .map(str::to_string)
         .collect();
 
-    // Objects chosen one by one (Einzeln) become Id filters (Group for
-    // groups, whose shapes VisiCut sees); objects without id get one.
     let mut object_filter = |index: usize, edits: &mut Vec<(std::ops::Range<usize>, String)>| {
         let node = nodes.get(index)?;
         let group = node.has_tag_name("g");
@@ -178,7 +176,6 @@ fn part_files(
 
     let mut mappings = Vec::new();
     if part.steps.is_empty() {
-        // „Gesamt“: an empty filter set selects every object.
         mappings.push(mapping(
             Some(&[]),
             Some(profile(part.operation, &part.raster, order, false)),
@@ -207,8 +204,6 @@ fn part_files(
         mappings.push(mapping(Some(filters), None));
     }
 
-    // Root in millimetres: the content keeps its user units inside a group
-    // that maps them to the part's size, as VisiCutR draws it.
     let matrix = user_to_mm(part, &source, root)?;
     let start = root.range().start;
     let tag_end = xml::start_tag_end(&source, start);
@@ -463,7 +458,6 @@ mod tests {
         );
     }
 
-    // px units, a viewBox with another aspect ratio (meet) and no ids.
     const SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200" viewBox="0 0 100 100"><rect x="10" y="10" width="30" height="20" fill="none" stroke="#ff0000"/><circle cx="70" cy="50" r="15" fill="#000000"/><path d="M 10 80 L 90 80" stroke="#0000ff" fill="none"/></svg>"##;
 
     fn project(steps: Vec<JobStep>) -> Project {
@@ -493,7 +487,6 @@ mod tests {
         let (imported, warnings) = round_trip(&original);
         assert!(warnings.iter().any(|w| w.contains("Laser-Einstellungen")));
         let place = |p: &Project| [p.x_mm, p.y_mm, p.width_mm, p.height_mm].map(f64::from);
-        // The composed PLF document starts at the bed origin, in mm.
         let width: f64 = imported
             .svg
             .split("width=\"")
@@ -570,7 +563,6 @@ mod tests {
             &mut transform,
         )
         .unwrap();
-        // Java reads plain decimals only.
         let numbers: Vec<&str> = transform
             .split("<double>")
             .skip(1)
@@ -588,7 +580,6 @@ mod tests {
         let operations: Vec<Operation> = imported.steps.iter().map(|s| s.operation).collect();
         assert_eq!(operations, vec![Operation::Cut, Operation::Engrave]);
         assert_eq!(imported.steps[0].filters.as_ref().map(Vec::len), Some(1));
-        // The rest is the circle; the blue line is ignored.
         assert_eq!(imported.steps[1].objects, vec![1]);
     }
 

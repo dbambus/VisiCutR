@@ -42,7 +42,6 @@ pub fn stash(dir: &Path, project: &Project, previous: Option<&Path>) -> std::io:
             None => free_name(dir, &project.name),
         },
     };
-    // Auch ein unveränderter Stand wird neu geschrieben und damit der neueste.
     write(&path, &bytes)?;
     for old in states(dir).into_iter().skip(LIMIT) {
         let _ = std::fs::remove_file(old);
@@ -174,19 +173,15 @@ mod tests {
         assert!(!is_cached(&dir, &std::env::temp_dir().join("x.vcr")));
         let loaded: Project = serde_json::from_slice(&std::fs::read(&first).unwrap()).unwrap();
         assert_eq!(loaded.name, project.name);
-        // Unverändert: dieselbe Datei.
         assert_eq!(stash(&dir, &project, None).unwrap(), first);
-        // Geändert, aus keinem Zwischenstand geöffnet: neue Datei.
         project.x_mm += 1.0;
         let second = stash(&dir, &project, None).unwrap();
         assert_eq!(
             second.file_name().unwrap(),
             "Schild_ Tür_Tor (ungesichert 2).vcr"
         );
-        // Aus dem ersten geöffnet und geändert: der erste wird überschrieben.
         project.x_mm += 1.0;
         assert_eq!(stash(&dir, &project, Some(&first)).unwrap(), first);
-        // Ein Pfad außerhalb des Zwischenspeichers wird nie überschrieben.
         let outside =
             std::env::temp_dir().join(format!("visicut-outside-{}.vcr", std::process::id()));
         project.x_mm += 1.0;
@@ -204,11 +199,8 @@ mod tests {
         for i in 0..LIMIT + 2 {
             project.x_mm = i as f32;
             stash(&dir, &project, None).unwrap();
-            // Unterscheidbare Änderungszeiten auch bei grober Auflösung.
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        // Die zwei ältesten Stände (x = 0 und 1) sind gelöscht; freie Namen
-        // werden wiederverwendet.
         let mut kept: Vec<f32> = states(&dir)
             .iter()
             .map(|p| {
@@ -239,7 +231,6 @@ mod tests {
         set_resume(&dir, Some(&path)).unwrap();
         set_resume(&dir, None).unwrap();
         assert_eq!(take_resume(&dir), None);
-        // Leeren vergisst auch den Merker.
         set_resume(&dir, Some(&path)).unwrap();
         clear(&dir).unwrap();
         assert_eq!(take_resume(&dir), None);

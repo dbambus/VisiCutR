@@ -141,7 +141,6 @@ pub fn drag_handle(
     let dy = (pointer[1] - fixed[1]) * sy;
     let (nw, nh) = match (sx != 0.0, sy != 0.0) {
         (true, true) if proportional => {
-            // Projektion auf die Diagonale zur gezogenen Ecke.
             let t = ((dx * w + dy * h) / (w * w + h * h)).max(MIN_SIZE_MM / w.min(h));
             (w * t, h * t)
         }
@@ -291,7 +290,6 @@ mod tests {
         assert_eq!(zoom_in(ZOOM_MAX), ZOOM_MAX);
         assert_eq!(zoom_out(ZOOM_MIN), ZOOM_MIN);
         assert_eq!(zoom_in(1.1), 1.25);
-        // 1:1 bei 96 dpi: Bett passt mit 1 Punkt je mm, also gut 3,8-fach.
         assert!((actual_size_zoom(1.0) - 3.7795).abs() < 1e-3);
         assert_eq!(actual_size_zoom(100.0), ZOOM_MIN);
     }
@@ -303,16 +301,12 @@ mod tests {
     #[test]
     fn corner_handles_keep_the_opposite_corner_and_the_ratio() {
         let rect = [10.0, 20.0, 40.0, 20.0];
-        // Unten rechts nach außen: oben links bleibt, Verhältnis 2 : 1.
         let r = drag_handle(rect, [1.0, 1.0], [90.0, 60.0], true);
         assert!(close(r, [10.0, 20.0, 80.0, 40.0]), "{r:?}");
-        // Oben links nach innen: unten rechts (50, 40) bleibt.
         let r = drag_handle(rect, [0.0, 0.0], [30.0, 30.0], true);
         assert!(close(r, [30.0, 30.0, 20.0, 10.0]), "{r:?}");
-        // Ohne Kette folgt die Ecke dem Zeiger.
         let r = drag_handle(rect, [1.0, 0.0], [70.0, 0.0], false);
         assert!(close(r, [10.0, 0.0, 60.0, 40.0]), "{r:?}");
-        // Über die feste Ecke hinaus bleibt die kleinste Größe.
         let r = drag_handle(rect, [1.0, 1.0], [0.0, 0.0], true);
         assert!(
             r[2] >= 0.1 - 1e-6 && r[3] >= 0.1 - 1e-6 && r[0] == 10.0 && r[1] == 20.0,
@@ -327,7 +321,6 @@ mod tests {
         assert!(close(r, [10.0, 20.0, 60.0, 20.0]), "{r:?}");
         let r = drag_handle(rect, [0.0, 0.5], [30.0, 0.0], false);
         assert!(close(r, [30.0, 20.0, 20.0, 20.0]), "{r:?}");
-        // Mit Kette wächst die Höhe um die Mitte (y = 30) mit.
         let r = drag_handle(rect, [1.0, 0.5], [90.0, 0.0], true);
         assert!(close(r, [10.0, 10.0, 80.0, 40.0]), "{r:?}");
         let r = drag_handle(rect, [0.5, 0.0], [0.0, 0.0], true);
@@ -337,10 +330,8 @@ mod tests {
     #[test]
     fn rotation_is_clockwise_on_screen_and_snaps() {
         let c = [0.0, 0.0];
-        // Von rechts nach unten (y nach unten): 90° im Uhrzeigersinn.
         assert!((drag_rotation(c, [10.0, 0.0], [0.0, 10.0], false) - 90.0).abs() < 1e-4);
         assert!((drag_rotation(c, [10.0, 0.0], [0.0, -10.0], false) + 90.0).abs() < 1e-4);
-        // Über ±180° hinweg bleibt der Winkel klein.
         let a = drag_rotation(c, [-10.0, 1.0], [-10.0, -1.0], false);
         assert!(a.abs() < 15.0, "{a}");
         assert_eq!(drag_rotation(c, [10.0, 0.0], [10.0, 2.0], true), 15.0);
@@ -356,7 +347,6 @@ mod tests {
 
     #[test]
     fn grid_and_ruler_steps_stay_readable() {
-        // Raster und Lineal folgen dem Zoom in der Reihe 1 – 2 – 5.
         assert_eq!(grid_step_mm(0.85), 10.0);
         assert_eq!(grid_step_mm(1.7), 5.0);
         assert_eq!(grid_step_mm(3.4), 2.0);
@@ -366,7 +356,6 @@ mod tests {
         assert_eq!(ruler_step_mm(3.4), 20.0);
         assert_eq!(ruler_step_mm(6.8), 10.0);
         assert_eq!(ruler_step_mm(0.01), 1000.0);
-        // Beschriftung liegt immer auf einer Rasterlinie.
         for scale in [0.3, 0.85, 1.7, 3.4, 6.8, 13.0, 40.0] {
             let ratio = ruler_step_mm(scale) / grid_step_mm(scale);
             assert!((ratio - ratio.round()).abs() < 1e-4, "{scale}: {ratio}");
@@ -395,7 +384,6 @@ mod tests {
         assert!(!nudge(&mut p, 0.0, -1.0));
         assert!(nudge(&mut p, 10_000.0, 10_000.0));
         assert_eq!((p.x_mm, p.y_mm), (900.0, 540.0));
-        // Ein Motiv größer als das Bett bleibt am Ursprung.
         p.width_mm = 1200.0;
         assert!(nudge(&mut p, 5.0, 0.0));
         assert_eq!(p.x_mm, 0.0);
@@ -403,14 +391,12 @@ mod tests {
 
     #[test]
     fn the_empty_page_may_reach_beyond_the_bed() {
-        // A4 page, drawing from 10 to 30 mm across and 10 to 20 mm down.
         let mut p = Project {
             svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 210 297"><rect x="10" y="10" width="20" height="10"/></svg>"#.into(),
             width_mm: 210.0,
             height_mm: 297.0,
             ..motif()
         };
-        // usvg measures in px (96 DPI), hence the tolerance.
         let at =
             |p: &Project, x: f32, y: f32| (p.x_mm - x).abs() < 1e-3 && (p.y_mm - y).abs() < 1e-3;
         assert!(nudge(&mut p, 10_000.0, 10_000.0));

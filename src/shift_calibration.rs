@@ -116,7 +116,6 @@ pub fn project(base: &Project, power_percent: f32) -> Project {
     Project {
         name: tr("Zeilenversatz-Test").into(),
         svg,
-        // Room for the overscan of 35 mm at full speed on both sides.
         x_mm: 50.0,
         y_mm: 20.0,
         width_mm: width() as f32,
@@ -232,7 +231,6 @@ mod tests {
                 .iter()
                 .any(|w| w.contains("Zeilenversatz"))
         );
-        // Blocks of one row differ only by their shift.
         let mut plain = project.clone();
         plain.steps.iter_mut().for_each(|s| s.engrave_shift_px = 0);
         assert_ne!(

@@ -361,8 +361,6 @@ impl PreviewUi {
             | State::Ready { fingerprint, .. }
             | State::Failed { fingerprint, .. } => *fingerprint,
         };
-        // Hashing a large SVG every frame during playback is wasteful; the
-        // project can only change through user input anyway.
         let now = ctx.input(|i| i.time);
         if self.playback.playing && now - self.last_check < 0.25 {
             return;
@@ -395,7 +393,6 @@ pub fn fingerprint(project: &Project) -> u64 {
         }
     }
     let mut writer = HashWriter(Default::default());
-    // Streaming avoids copying a large embedded SVG.
     let _ = serde_json::to_writer(&mut writer, project);
     writer.0.finish()
 }
@@ -613,7 +610,6 @@ pub fn revealed_rows(program: &Program, frame: &Frame, bounds: [f64; 4]) -> Vec<
     let [min_x, min_y, width, height] = bounds;
     let (max_x, max_y) = (min_x + width, min_y + height);
     let row = RASTER_ROW_MM;
-    // Rows run top-down or bottom-up.
     let first_row = program
         .motions
         .iter()
@@ -788,7 +784,6 @@ fn summary(
     let job = &ready.job;
     let mut action = None;
     egui::TopBottomPanel::bottom("preview_actions")
-        // Rand unten, damit der hervorgehobene Knopf nicht abgeschnitten wird.
         .frame(egui::Frame::new().inner_margin(egui::Margin {
             left: 0,
             right: 0,
@@ -797,7 +792,6 @@ fn summary(
         }))
         .show_inside(ui, |ui| {
             ui.horizontal_centered(|ui| {
-                // So hoch wie „An Lasercutter senden …“.
                 if ui
                     .add(egui::Button::new(tr("LTT exportieren …")).min_size(egui::vec2(0.0, 28.0)))
                     .clicked()
@@ -896,7 +890,6 @@ fn summary(
             }
         });
         crate::form::section(ui, tr("Auftrag"), |ui| {
-            // Alle Verfahren in einen Auftrag oder einen je Verfahren.
             ui.checkbox(single_job, tr("Alles in eine Datei"))
                 .on_hover_text(tr(
                     "Alle Verfahren in einem LTT-Auftrag statt einem je Verfahren",
@@ -932,7 +925,6 @@ fn simulation(ui: &mut egui::Ui, ready: &Ready, project: &Project, playback: &mu
     let total = ready.job.estimated_seconds;
     playback.tick(ui.input(|i| i.time), total);
     let width = ui.available_width().max(320.0);
-    // Platz für Steuerleiste, Status und Legende darunter.
     let height = (ui.available_height() - 90.0).max(220.0);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::hover());
     let frame = frame_at(&ready.job.timeline, playback.seconds);
@@ -1070,9 +1062,7 @@ fn paint_simulation(
         Stroke::new(1.0, Color32::from_gray(160)),
         egui::StrokeKind::Outside,
     );
-    // The job preview covers all parts.
     let artwork = view.rect(project.bounds().map(f64::from));
-    // Planned processing, faint.
     if let Some(texture) = &ready.preview {
         painter.image(
             texture.id(),
@@ -1105,7 +1095,6 @@ fn paint_simulation(
                 for revealed in revealed_rows(program, frame, bounds) {
                     let clip = view.rect(revealed);
                     if clip.width() > 0.0 && clip.height() > 0.0 {
-                        // At least one pixel high so single rows stay visible.
                         let clip =
                             clip.expand2(Vec2::new(0.0, (0.5 - clip.height() / 2.0).max(0.0)));
                         painter.with_clip_rect(clip).image(
@@ -1213,7 +1202,6 @@ mod tests {
         let half_entry = frame_at(&timeline, run.entry_end_seconds / 2.0).unwrap();
         assert!((half_entry.position[0] - 5.0).abs() < 1e-9);
         assert!((half_entry.position[1] - 5.0).abs() < 1e-9);
-        // Middle of the first raster line (2 s long).
         let middle = frame_at(&timeline, run.entry_end_seconds + 1.0).unwrap();
         assert_eq!(middle.kind, MotionKind::Raster);
         assert_eq!(middle.motion_index, Some(0));
@@ -1242,7 +1230,6 @@ mod tests {
         let rows = revealed_rows(program, &first, bounds);
         assert_eq!(rows[0][3], 0.0);
         assert!((rows[1][2] - 10.0).abs() < 1e-9);
-        // During the line change the first row is complete.
         let dwell = frame_at(&timeline, run.entry_end_seconds + 2.2).unwrap();
         assert_eq!(dwell.kind, MotionKind::Dwell);
         let rows = revealed_rows(program, &dwell, bounds);
@@ -1305,10 +1292,8 @@ mod tests {
         assert_eq!(bytes(512), "512 Byte");
         assert_eq!(bytes(12_345), "12,3 kB");
         assert_eq!(bytes(2_000_000), "2 MB");
-        // The whole 1000 × 600 mm bed, even for a small part.
         let mut project = Project::default();
         assert_eq!(viewport(&project, None), [-20.0, -12.0, 1020.0, 612.0]);
-        // Parts and motions beyond the bed stay visible.
         project.x_mm = 950.0;
         assert_eq!(viewport(&project, None), [-21.0, -12.0, 1071.0, 612.0]);
         assert!(viewport(&project, Some([0.0, -10.0, 10.0, 0.0]))[1] < -10.0);

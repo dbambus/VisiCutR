@@ -29,10 +29,8 @@ pub fn to_pdf(path: &Path) -> Result<Vec<u8>, ImportError> {
             "-dNOPAUSE",
             "-sDEVICE=pdfwrite",
             "-dEPSCrop",
-            // Text becomes outlines, which is what a laser cutter follows anyway.
             "-dNoOutputFonts",
         ])
-        // `%` would start a page-number template in Ghostscript's output name.
         .arg(format!(
             "-sOutputFile={}",
             output.0.display().to_string().replace('%', "%%")
@@ -48,7 +46,6 @@ pub fn to_pdf(path: &Path) -> Result<Vec<u8>, ImportError> {
         let mut text = Vec::new();
         if let Some(stderr) = stderr.as_mut() {
             let _ = stderr.take(MAX_MESSAGES).read_to_end(&mut text);
-            // Keep draining so that Ghostscript never blocks on a full pipe.
             let _ = std::io::copy(stderr, &mut std::io::sink());
         }
         String::from_utf8_lossy(&text).into_owned()
@@ -105,7 +102,6 @@ pub fn find() -> Option<PathBuf> {
             let Some(base) = std::env::var_os(variable) else {
                 continue;
             };
-            // Ghostscript installs to e.g. C:\Program Files\gs\gs10.04.0\bin.
             let mut versions: Vec<PathBuf> = std::fs::read_dir(Path::new(&base).join("gs"))
                 .map(|entries| entries.flatten().map(|e| e.path()).collect())
                 .unwrap_or_default();

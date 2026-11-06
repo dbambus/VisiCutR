@@ -459,7 +459,6 @@ fn remnants(mask: &[bool], grid: &Grid, options: &Options) -> Vec<Remnant> {
             (ring, area)
         })
         .collect();
-    // Umrisse und Löcher sind gegenläufig; der größte Ring ist ein Umriss.
     let Some(outer_sign) = rings
         .iter()
         .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
@@ -488,7 +487,6 @@ fn remnants(mask: &[bool], grid: &Grid, options: &Options) -> Vec<Remnant> {
         if area.abs() / px2 < MIN_HOLE_MM2 {
             continue;
         }
-        // Mittelpunkt einer Pixelkante des Lochs liegt sicher nicht auf dem Umriss.
         let probe = [
             (ring[0][0] + ring[1][0]) / 2.0,
             (ring[0][1] + ring[1][1]) / 2.0,
@@ -573,8 +571,6 @@ pub fn add_part(project: &Project, remnants: &[Remnant]) -> Result<Project, Remn
     if remnants.is_empty() {
         return Err(RemnantError::NoneFound);
     }
-    // Nur das Rechteck um die Reststücke: ein bettgroßes Teil ließe für
-    // später hinzugefügte Teile keinen freien Platz mehr.
     let [x, y, w, h] = union_bounds(remnants);
     let (mut result, _) = crate::compose::add_part(
         project,
@@ -582,11 +578,8 @@ pub fn add_part(project: &Project, remnants: &[Remnant]) -> Result<Project, Remn
         &svg_area(remnants, [x, y], [w.max(0.1), h.max(0.1)]),
         Vec::new(),
     )?;
-    // An der erkannten Stelle, nicht neben dem bisherigen Motiv.
     result.x_mm = x as f32;
     result.y_mm = y as f32;
-    // Schneiden; Leistung und Geschwindigkeit setzt die Oberfläche aus dem
-    // Materialprofil (`add_part` übernimmt sie vom bisherigen Teil).
     result.operation = Operation::Cut;
     Ok(result)
 }
@@ -676,7 +669,6 @@ mod tests {
 
     #[test]
     fn cut_out_hole_and_small_scraps() {
-        // Platte mit ausgeschnittenem Loch und ein Krümel unter der Mindestfläche.
         let mut image = photo(&[[10.0, 10.0, 120.0, 80.0], [160.0, 10.0, 10.0, 10.0]]);
         for y in 60..120 {
             for x in 80..160 {
@@ -703,7 +695,6 @@ mod tests {
 
     #[test]
     fn reference_difference_finds_piece_of_bed_colour_brightness() {
-        // Graues Stück auf grauem Bett: gleiche Helligkeit, andere Farbe.
         let bed = RgbaImage::from_pixel(400, 200, Rgba([120, 120, 120, 255]));
         let mut image = bed.clone();
         for y in 40..140 {
@@ -724,7 +715,6 @@ mod tests {
                 && close(w, 100.0, 1.5)
                 && close(h, 50.0, 1.5)
         );
-        // Ohne Unterschied zur Referenz: nichts.
         let empty = detect(&bed, Some(&bed), BED, &Options::default()).unwrap();
         assert!(empty.remnants.is_empty());
     }
@@ -737,7 +727,6 @@ mod tests {
                 image.put_pixel(x, y, Rgba([40, 40, 40, 255]));
             }
         }
-        // Rechter Rand außerhalb des Kamerabilds.
         for y in 0..200 {
             for x in 350..400 {
                 image.put_pixel(x, y, Rgba(OUTSIDE));
@@ -781,7 +770,6 @@ mod tests {
         .unwrap();
         let result = add_part(&project, &found.remnants).unwrap();
         assert_eq!(result.part_count(), 1);
-        // Das Teil umfasst nur das Reststück und liegt an dessen Stelle.
         let [x, y, w, h] = found.remnants[0].bounds();
         assert!((result.x_mm as f64 - x).abs() < 0.01 && (result.y_mm as f64 - y).abs() < 0.01);
         assert!(
@@ -791,7 +779,6 @@ mod tests {
             (20.0..25.0).contains(&x) && (30.0..35.0).contains(&y),
             "{x} {y}"
         );
-        // Daneben ist noch Platz für weitere Teile.
         let small = r#"<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm" viewBox="0 0 10 10"><path d="M0 0H10" stroke="red"/></svg>"#;
         let (_, notes) = crate::compose::add_part(&result, "klein", small, Vec::new()).unwrap();
         assert!(notes.is_empty(), "{notes:?}");

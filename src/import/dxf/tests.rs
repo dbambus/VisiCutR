@@ -92,7 +92,6 @@ fn imports_line_and_circle_in_millimetres() {
     assert_size(&imported.svg, 100.0, 30.0);
     let paths = cut(&imported.svg);
     assert_eq!(paths.len(), 2);
-    // DXF Y points up: y = 0 is the bottom edge of the drawing.
     assert!(near(paths[0][0][0], 0.0) && near(paths[0][0][1], 30.0));
     assert!(near(paths[0][1][0], 100.0) && near(paths[0][1][1], 30.0));
     assert_eq!(paths[1].first(), paths[1].last());
@@ -105,7 +104,6 @@ fn imports_line_and_circle_in_millimetres() {
 
 #[test]
 fn lwpolyline_bulges_become_arcs() {
-    // Two half circles: a closed circle of radius 5 around (5, 0).
     let imported = import(&drawing(
         MM,
         "",
@@ -131,7 +129,6 @@ fn inserts_rotated_and_scaled_blocks() {
         "|0|BLOCK|8|0|2|Strich|70|0|10|1|20|0|0|LINE|8|0|10|1|20|0|11|11|21|0|0|ENDBLK",
         "|0|LINE|8|0|10|0|20|0|11|1|21|0|0|INSERT|8|0|2|Strich|10|20|20|20|41|2|42|2|50|90",
     ));
-    // The block line (base point 1,0) runs 20 mm upwards from the insertion point.
     assert_size(&imported.svg, 20.0, 40.0);
     let paths = cut(&imported.svg);
     let line = &paths[1];
@@ -192,7 +189,6 @@ fn preserves_layers_and_colours_for_mapping() {
             "|0|LINE|8|Aus|10|0|20|50|11|10|21|50",
         ),
     ));
-    // Layer table order, hidden layer skipped.
     let schnitt = imported.svg.find(r#"inkscape:label="Schnitt""#).unwrap();
     let gravur = imported.svg.find(r#"inkscape:label="Gravur""#).unwrap();
     assert!(schnitt < gravur);
@@ -238,7 +234,6 @@ fn preserves_layers_and_colours_for_mapping() {
 
 #[test]
 fn mirrors_entities_with_negative_extrusion() {
-    // Circle centre (10, 0) in an OCS with Z down lies at x = -10 in the WCS.
     let imported = import(&drawing(
         MM,
         "",
@@ -256,7 +251,6 @@ fn mirrors_entities_with_negative_extrusion() {
             .iter()
             .all(|p| near((p[0] - 2.0).hypot(p[1] - 2.0), 2.0))
     );
-    // Polyline (0,1)→(3,1) becomes (0,1)→(-3,1).
     assert!(near(paths[2][0][0], 12.0) && near(paths[2][1][0], 9.0));
 }
 
@@ -326,7 +320,6 @@ fn reads_binary_dxf() {
 
 #[test]
 fn flattens_splines_and_draws_ellipses() {
-    // A clamped cubic spline with four control points is one Bézier segment.
     let imported = import(&drawing(
         MM,
         "",
@@ -338,7 +331,6 @@ fn flattens_splines_and_draws_ellipses() {
             "|0|ELLIPSE|8|0|10|30|20|0|11|10|21|0|40|0.5|41|0|42|3.14159265358979",
         ),
     ));
-    // Spline peaks at y = 7.5; the upper half ellipse spans x 20..40, y 0..5.
     assert_size(&imported.svg, 40.0, 7.5);
     let paths = cut(&imported.svg);
     let spline = &paths[0];
@@ -375,7 +367,6 @@ fn emits_text_mtext_hatch_and_linetypes() {
     assert!(svg.contains(">Zeile 1</tspan>") && svg.contains(">Zeile 2</tspan>"));
     assert!(svg.contains(r##"fill="#00ff00" fill-rule="evenodd" stroke="none""##));
     assert!(imported.warnings.is_empty(), "{:?}", imported.warnings);
-    // MTEXT hangs below its top-left insertion point (y = 60).
     let (_, height) = size(svg);
     assert!(height > 59.0 && height < 61.0, "{height}");
     let objects = attributes(svg).unwrap();
@@ -385,8 +376,6 @@ fn emits_text_mtext_hatch_and_linetypes() {
 
 #[test]
 fn self_inserting_blocks_stop_at_the_instance_limit() {
-    // Depth and array size are limited per INSERT; without a total the
-    // nested 1000 × 100 arrays ran practically for ever.
     let start = std::time::Instant::now();
     let error = import_bytes(
         drawing(
@@ -405,7 +394,6 @@ fn self_inserting_blocks_stop_at_the_instance_limit() {
 
 #[test]
 fn flattened_curves_have_a_segment_limit() {
-    // Enlarged a billion times every knot interval splits to full depth.
     let mut path = geom::PathBuilder::new(geom::Affine::scale(1e9, 1e9));
     let knots: Vec<f64> = (0..200).map(f64::from).collect();
     path.curve(&|t: f64| [t.sin(), (3.0 * t).cos()], &knots);

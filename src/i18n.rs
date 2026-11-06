@@ -180,12 +180,10 @@ mod tests {
             let source = std::fs::read_to_string(&path).unwrap();
             for marker in ["tr(", "tr!("] {
                 for (start, _) in source.match_indices(marker) {
-                    // Nur `tr(` selbst, nicht etwa `attr(`.
                     let before = source[..start].chars().next_back();
                     if before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
                         continue;
                     }
-                    // rustfmt bricht lange Aufrufe nach der Klammer um.
                     let rest = source[start + marker.len()..].trim_start();
                     if let Some(rest) = rest.strip_prefix('"') {
                         keys.insert(literal(rest));
@@ -205,7 +203,6 @@ mod tests {
                 '"' => break,
                 '\\' => match chars.next() {
                     Some('n') => key.push('\n'),
-                    // Zeilenfortsetzung: Umbruch und Einrückung entfallen.
                     Some('\n' | '\r') => {
                         while chars.peek().is_some_and(|c| c.is_whitespace()) {
                             chars.next();

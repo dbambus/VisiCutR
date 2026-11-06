@@ -344,8 +344,6 @@ impl DeviceUi {
         project: &mut Project,
         status: &mut String,
     ) -> Option<Action> {
-        // Laufende Aktualisierung wie VisiCuts RefreshCameraThread: nach jedem
-        // Bild die eingestellte Pause, nach Fehlern länger (ab 10 s).
         let refresh = self.device().camera_refresh_ms;
         let pause = std::time::Duration::from_millis(u64::from(refresh));
         match poll(&mut self.camera_loading, ctx) {
@@ -397,8 +395,6 @@ impl DeviceUi {
                 self.calibration = None;
             }
         }
-        // Die Kalibrierseite wird erst gelasert: der Dialog wartet mit seinen
-        // Punkten, bis „Kalibrieren …“ ihn wieder öffnet.
         match &action {
             Some(Action::CalibrationPage(_)) => {
                 if let Some(c) = &mut self.calibration {
@@ -497,7 +493,6 @@ impl DeviceUi {
         let ctx = ui.ctx().clone();
         let mut calibrate = false;
         let mut shift_test = false;
-        // Ergebnis von „Suchen“: eine Kamera wird übernommen, mehrere zur Wahl.
         if let Some(receiver) = &self.camera_search {
             match receiver.try_recv() {
                 Ok(urls) => {
@@ -520,8 +515,6 @@ impl DeviceUi {
         let searching = self.camera_search.is_some();
         let mut search = false;
         let found = std::mem::take(&mut self.camera_found);
-        // Die Geräteliste füllt die Seite, ihre Symbolleiste sitzt unten wie
-        // bei den Materialien (Platz für die Knopfzeile bleibt frei).
         let spacing = ui.spacing().item_spacing.y;
         let row = ui.spacing().interact_size.y;
         let columns = (ui.available_height() - row - 6.0 * spacing - 8.0).max(240.0);
@@ -558,8 +551,6 @@ impl DeviceUi {
                             }
                         });
                     });
-                    // Trennstrich so hoch wie die Liste; `separator()` nähme die ganze
-                    // Höhe und schöbe die Knopfzeile aus dem Bild.
                     let (line, _) =
                         ui.allocate_exact_size(egui::vec2(12.0, columns), Sense::hover());
                     ui.painter().vline(
@@ -569,8 +560,6 @@ impl DeviceUi {
                     );
                     ui.vertical(|ui| {
                         let device = &mut draft.devices[editing];
-                        // Ein Raster für alle Abschnitte: die Felder fluchten in
-                        // einer Spalte, auch bei aufgeklappter „Maschine“.
                         egui::Grid::new("device")
                             .num_columns(2)
                             .min_col_width(machine_label_width(ui))
@@ -645,13 +634,11 @@ impl DeviceUi {
                                 shift_test |= machine_rows(ui, &mut device.machine);
                             }
                         });
-                        // Kamera als eigener Bereich, abgesetzt von den Lasereinstellungen.
                         ui.add_space(14.0);
                         ui.separator();
                         ui.add_space(4.0);
                         ui.heading(format!("📷 {}", tr("Kamera")));
                         ui.add_space(4.0);
-                        // Wie im VisiCut-Dialog: URL mit „Suchen“, Anmeldung, Zeiten.
                         egui::Grid::new("device_camera")
                             .num_columns(2)
                             .min_col_width(machine_label_width(ui))
@@ -701,7 +688,6 @@ impl DeviceUi {
                                         .range(0..=3_600_000),
                                 )
                                 .on_hover_text(camera_refresh_help());
-                            // 1 … 49 ms gibt es nicht; wie in VisiCut gelten mindestens 50 ms.
                             if (response.lost_focus() || response.drag_stopped())
                                 && (1..device::MIN_CAMERA_REFRESH_MS)
                                     .contains(&device.camera_refresh_ms)
@@ -751,7 +737,6 @@ impl DeviceUi {
             .as_mut()
             .filter(|c| c.parked && c.device.name == draft.devices[editing].name);
         if calibrate && let Some(c) = parked {
-            // Zurück nach dem Lasern: gleich ein neues Foto mit den Kreuzen.
             let shot = c.device.clone();
             c.parked = false;
             c.problem = None;
@@ -766,7 +751,6 @@ impl DeviceUi {
                     ..Default::default()
                 });
             let shot = device.clone();
-            // Ohne gespeicherte Linse das Profil der FAU-Kamera vorschlagen.
             let lens = match points.lens.as_ref().map(|l| l.profile.as_str()) {
                 Some("generic") => LensChoice::Generic,
                 _ => LensChoice::RaspberryPiV2,
@@ -798,7 +782,6 @@ impl DeviceUi {
                 best: [shift_calibration::CENTER_BLOCK; 10],
             });
         }
-        // Die Auswahl bleibt, bis eine neue Suche startet oder das Fenster schließt.
         if search {
             let (tx, rx) = channel();
             std::thread::spawn(move || {
@@ -809,8 +792,6 @@ impl DeviceUi {
         } else {
             self.camera_found = found;
         }
-        // Sofort sichern statt Entwurf: sonst ging z. B. eine neue Kamera-URL
-        // beim Verlassen der Seite verloren und „Kamera“ lud weiter die alte.
         let editing_field = ctx.memory(|m| m.focused().is_some()) || ctx.dragged_id().is_some();
         if draft != self.store && !editing_field {
             self.save(draft.clone(), project, status);
@@ -881,7 +862,6 @@ impl DeviceUi {
         if !self.save(store, project, status) {
             return None;
         }
-        // Eine offene Verwaltung zeigt die neue Liste.
         self.draft = None;
         Some(replaced)
     }
@@ -927,7 +907,6 @@ impl DeviceUi {
                 ui.spinner()
                     .on_hover_text(tr!("Lädt „{name}“ …", name = name));
             }
-            // Exportiert die gesicherte Liste, nicht den Entwurf.
             if ui.button(tr("Exportieren …")).clicked()
                 && let Some(path) = rfd::FileDialog::new()
                     .add_filter(tr("VisiCutR-Lasercutter"), &["vcrdevices"])
@@ -1212,8 +1191,6 @@ fn fitted(c: &Calibration) -> Option<CameraCalibration> {
 fn set_grid(c: &mut Calibration, grid: Grid) {
     let grid = grid.points();
     let size = c.picture.as_ref().map(|p| p.1);
-    // Vorhersage aus der gespeicherten Kalibrierung (an den Passmarken
-    // nachgeführt), sonst aus den aktuellen Punkten.
     let expected = c
         .expected
         .clone()
@@ -1302,7 +1279,6 @@ fn detect_crosses(c: &mut Calibration) {
         .reference_points
         .len()
         .min(c.points.view_points.len());
-    // Pixel je mm an jedem Punkt aus den aktuellen Punkten, sonst geschätzt.
     let h = camera::homography(&CameraCalibration {
         reference_points: c.points.reference_points[..n].to_vec(),
         view_points: c.points.view_points[..n].to_vec(),
@@ -1589,8 +1565,6 @@ fn calibration_window(
             let size = Vec2::new(image.width() as f32, image.height() as f32);
             c.picture = Some((texture(ctx, "Kalibrierfoto", &image), size));
             c.markers = camera::find_markers(&image);
-            // Mit vorhandener Kalibrierung: Punkte dorthin, wo die Kreuze jetzt
-            // zu erwarten sind (an den Passmarken nachgeführt), und gleich suchen.
             c.expected = c
                 .device
                 .camera_calibration
@@ -1607,7 +1581,6 @@ fn calibration_window(
                     .collect();
                 detect_crosses(c);
             }
-            // Place missing markers where an uncalibrated camera would see them.
             while c.points.view_points.len() < c.points.reference_points.len() {
                 let r = c.points.reference_points[c.points.view_points.len()];
                 c.points
@@ -1618,8 +1591,6 @@ fn calibration_window(
         Some(Err(e)) => c.problem = Some(e),
         None => {}
     }
-    // Eigenes Fenster des Betriebssystems (frei verschiebbar, auch auf einen
-    // anderen Bildschirm); ohne Unterstützung dafür innerhalb des Hauptfensters.
     let title = tr!("Kamera kalibrieren · {device}", device = c.device.name);
     let mut open = true;
     ctx.show_viewport_immediate(
@@ -1660,10 +1631,8 @@ fn calibration_body(
     ui.horizontal_top(|ui| {
         let space = Vec2::new(
             (ui.available_width() - PANEL_WIDTH - 12.0).max(200.0),
-            // Platz für die Knopfzeile darunter.
             (ui.available_height() - ui.spacing().interact_size.y - 18.0).max(420.0),
         );
-        // Spalte links neben dem Foto.
         ui.vertical(|ui| {
             ui.set_width(PANEL_WIDTH);
             calibration_panel(ui, c, space.y);
@@ -1674,8 +1643,6 @@ fn calibration_body(
         if let Some((texture, size)) = &c.picture {
             let size = *size;
             let fit = (rect.width() / size.x).min(rect.height() / size.y);
-            // Zoomen: Zwei-Finger-Zoom oder ⌘/Strg + Mausrad um den Mauszeiger,
-            // Verschieben: Scrollen oder mit rechter/mittlerer Maustaste ziehen.
             if response.hovered() {
                 let (factor, scroll) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta));
                 let pointer = response.hover_pos().unwrap_or(rect.center());
@@ -1693,7 +1660,6 @@ fn calibration_body(
                     Some(c.center.unwrap_or(size / 2.0) - response.drag_delta() / (fit * c.zoom));
             }
             let scale = fit * c.zoom;
-            // Nicht über den Bildrand hinaus verschieben.
             let half = rect.size() / (2.0 * scale);
             let center = c.center.unwrap_or(size / 2.0);
             let center = Vec2::new(
@@ -1719,9 +1685,8 @@ fn calibration_body(
             let to_screen = |p: [f64; 2]| image.min + Vec2::new(p[0] as f32, p[1] as f32) * scale;
             let primary = response.clicked() || response.dragged_by(egui::PointerButton::Primary);
             if let (Some(pointer), true) = (response.interact_pointer_pos(), primary) {
-                if response.drag_started_by(egui::PointerButton::Primary) || response.clicked() {
-                    // Grab the nearest marker, otherwise move the selected one.
-                    if let Some((i, _)) = c
+                if (response.drag_started_by(egui::PointerButton::Primary) || response.clicked())
+                    && let Some((i, _)) = c
                         .points
                         .view_points
                         .iter()
@@ -1729,9 +1694,8 @@ fn calibration_body(
                         .map(|(i, p)| (i, to_screen(*p).distance(pointer)))
                         .filter(|(_, d)| *d < 16.0)
                         .min_by(|a, b| a.1.total_cmp(&b.1))
-                    {
-                        c.selected = i;
-                    }
+                {
+                    c.selected = i;
                 }
                 if let Some(p) = c.points.view_points.get_mut(c.selected) {
                     let local = (pointer - image.min) / scale;
@@ -1744,7 +1708,6 @@ fn calibration_body(
             if response.drag_stopped() || response.clicked() {
                 c.quality = None;
             }
-            // Pfeiltasten: gewählten Marker um einen Bildschirmpunkt verschieben (⇧: zehn).
             if response.hovered() && !ui.ctx().wants_keyboard_input() {
                 let step = ui.input(|i| {
                     let n = if i.modifiers.shift { 10.0 } else { 1.0 };

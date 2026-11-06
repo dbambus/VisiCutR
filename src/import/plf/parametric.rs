@@ -218,8 +218,6 @@ impl Renderer<'_> {
             if self.psvg
                 && let Some(expression) = &default
             {
-                // VisiCut evaluates PSVG defaults as JavaScript with the
-                // previous parameters as variables and German decimal commas.
                 self.scope = result
                     .iter()
                     .map(|p| (p.name.clone(), p.value.to_js()))
@@ -275,7 +273,6 @@ impl Renderer<'_> {
                     (Value::Null, None)
                 }
             };
-            // `type="Integer(1,2,4)"`: only these values.
             let options = kind
                 .find('(')
                 .filter(|_| kind.trim_end().ends_with(')'))
@@ -787,7 +784,6 @@ fn convert(text: &str, inside: bool) -> Result<String, ImportError> {
                     {
                         out.push_str(&word);
                     }
-                    // Outside `${…}` a bare word is a Thymeleaf token literal.
                     _ => out.push_str(&js_string_literal(&word)),
                 }
             }

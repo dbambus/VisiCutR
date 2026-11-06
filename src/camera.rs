@@ -477,7 +477,6 @@ pub fn fit_lens(calibration: &CameraCalibration, start: Lens) -> Lens {
         c.lens = Some(lens.clone());
         residuals(&c).map_or(f64::MAX, |r| r.iter().map(|d| d * d).sum())
     };
-    // Grob absuchen, dann mit Goldenem Schnitt verfeinern.
     let search = |lens: &mut Lens, k2: bool| {
         let get = |l: &Lens| if k2 { l.k2 } else { l.k1 };
         let set = |l: &mut Lens, v: f64| if k2 { l.k2 = v } else { l.k1 = v };
@@ -677,8 +676,6 @@ impl Areas {
             runs.extend(row);
         }
         row_start.push(runs.len());
-        // Vereinigen mit überlappenden gleichen Läufen der Zeile darüber; die
-        // Wurzel ist immer der früheste Lauf.
         let mut parent: Vec<usize> = (0..runs.len()).collect();
         fn root(parent: &mut [usize], mut i: usize) -> usize {
             while parent[i] != i {
@@ -766,8 +763,6 @@ pub fn find_markers(image: &RgbaImage) -> Vec<[f64; 2]> {
             *v = 0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32;
         }
     });
-    // Schwelle: Mitte zwischen hellstem und dunkelstem Wert der Umgebung
-    // (Blöcke, je 3 × 3 Blöcke um den Pixel); kontrastarme Flächen sind hell.
     let block = (w.max(h) / 125).max(8);
     let (bw, bh) = (w.div_ceil(block), h.div_ceil(block));
     let mut range = vec![(f32::MAX, f32::MIN); bw * bh];
@@ -820,7 +815,6 @@ pub fn find_markers(image: &RgbaImage) -> Vec<[f64; 2]> {
             (gap.min[0] + gap.max[0]) as f64 / 2.0,
             (gap.min[1] + gap.max[1]) as f64 / 2.0,
         ];
-        // Heller Kreisring: rund, mittig hohl, sinnvolle Größe.
         if d < 0.008 * largest
             || d > largest / 15.0
             || gw / gh > 1.8
@@ -830,7 +824,6 @@ pub fn find_markers(image: &RgbaImage) -> Vec<[f64; 2]> {
         {
             continue;
         }
-        // In der Mitte der dunkle Punkt …
         let Some((true, dot)) = areas.at(c[0].round() as usize, c[1].round() as usize) else {
             continue;
         };
@@ -841,7 +834,6 @@ pub fn find_markers(image: &RgbaImage) -> Vec<[f64; 2]> {
         {
             continue;
         }
-        // … außen herum der dunkle Ring.
         let ring = (0..16)
             .filter(|k| {
                 let a = *k as f64 * std::f64::consts::TAU / 16.0;
@@ -938,8 +930,6 @@ pub fn find_cross(gray: &Gray, around: [f64; 2], radius: f64, arm: f64) -> Optio
         .iter()
         .cloned()
         .fold((0.0f32, [0.0; 2]), |a, b| if b.0 > a.0 { b } else { a });
-    // Blass gelaserte Kreuze haben wenig Kontrast: es zählt, dass das Kreuz
-    // sich klar vom Zweitbesten abseits davon abhebt.
     let second = scores
         .iter()
         .filter(|(_, p)| (p[0] - best.1[0]).abs().max((p[1] - best.1[1]).abs()) > 1.5 * arm)
@@ -948,7 +938,6 @@ pub fn find_cross(gray: &Gray, around: [f64; 2], radius: f64, arm: f64) -> Optio
     if best.0 < 3.0 || best.0 < 1.8 * second {
         return None;
     }
-    // Feinlage: Schwerpunkt der Dunkelheit quer zu den Armen.
     let [x, y] = best.1;
     let (mut sx, mut wx, mut sy, mut wy) = (0.0, 0.0, 0.0, 0.0);
     let mut t = 3.0;
@@ -1016,7 +1005,6 @@ fn fit_affine(from: &[[f64; 2]], to: &[[f64; 2]]) -> Option<Matrix> {
             if det.abs() < 1e-9 {
                 return None;
             }
-            // Spalten: Bild der x- und y-Einheit aus den beiden Kantenvektoren.
             let inv = [
                 [(r[1] - p[1]) / det, -(r[0] - p[0]) / det],
                 [-(q[1] - p[1]) / det, (q[0] - p[0]) / det],
@@ -1062,13 +1050,10 @@ pub fn tracked_mapping(
         if let Some((i, _)) = nearest {
             used[i] = true;
             bed.push(*marker);
-            // Nachführen auf unverzerrten Pixeln.
             expected.push(transform(&base.h, *marker));
             seen.push(base.undistort(found[i]));
         }
     }
-    // Ab 5 Marken die schlechteste verwerfen, solange sie nicht passt (z. B.
-    // eine Marke auf dem Portal, das seit der Kalibrierung verfahren ist).
     let tolerance = 0.004 * picture.width().max(picture.height()) as f64;
     while seen.len() >= 5 {
         let Ok(h) = homography(&CameraCalibration {
@@ -1201,12 +1186,10 @@ mod tests {
     #[test]
     fn finds_cross_centre_but_not_ticks_or_paper_corners() {
         cross_on_paper(120.0);
-        // Blass gelasert, kaum Kontrast zum grauen Papier.
         cross_on_paper(18.0);
     }
 
     fn cross_on_paper(depth: f64) {
-        // Papier (hell) mit Ecke bei (60, 60), Kreuz um (150.3, 120.6), Striche darunter.
         let (cx, cy) = (150.3, 120.6);
         let picture = RgbaImage::from_fn(300, 220, |x, y| {
             let (x, y) = (x as f64 + 0.5, y as f64 + 0.5);
@@ -1232,7 +1215,6 @@ mod tests {
             (found[0] - cx).abs() < 0.3 && (found[1] - cy).abs() < 0.3,
             "{found:?}"
         );
-        // Nur Papierecke und Striche in Reichweite: nichts.
         assert_eq!(find_cross(&gray, [60.0, 60.0], 20.0, 11.5), None);
         assert_eq!(find_cross(&gray, [cx, cy + 26.0], 6.0, 11.5), None);
     }
@@ -1259,7 +1241,6 @@ mod tests {
                 "{f:?} vs {e:?}"
             );
         }
-        // Kalibrierung: 1 mm = 1.5 px; die Marken liegen dabei bei centers.
         let mut calibration = CameraCalibration {
             reference_points: vec![[0.0, 0.0], [1000.0, 0.0], [1000.0, 600.0], [0.0, 600.0]],
             view_points: vec![[0.0, 0.0], [1500.0, 0.0], [1500.0, 900.0], [0.0, 900.0]],
@@ -1268,7 +1249,6 @@ mod tests {
         };
         calibration.marker_points = markers_on_bed(&centers, &calibration).unwrap();
         assert!((calibration.marker_points[0][0] - 200.0 / 1.5).abs() < 1e-6);
-        // Deckel anders geschlossen: alles 40 px nach rechts, 25 px nach unten.
         let moved: Vec<_> = centers.iter().map(|c| [c[0] + 40.0, c[1] + 25.0]).collect();
         let picture = picture_with_markers(&moved);
         for keep in [4, 3, 2] {
@@ -1282,12 +1262,9 @@ mod tests {
                 "{keep}: {p:?}"
             );
         }
-        // Ohne Passmarken im Bild bleibt die Kalibrierung.
         let (m, matched) = tracked_mapping(&calibration, &picture_with_markers(&[])).unwrap();
         let p = m.to_pixel([500.0, 300.0]);
         assert!(matched == 0 && (p[0] - 750.0).abs() < 1e-6 && (p[1] - 450.0).abs() < 1e-6);
-        // Eine fünfte Marke, die sich anders bewegt hat (z. B. auf dem Portal),
-        // wird verworfen.
         let mut five = calibration.clone();
         five.marker_points
             .push(markers_on_bed(&[[750.0, 80.0]], &calibration).unwrap()[0]);
@@ -1325,7 +1302,6 @@ mod tests {
                 "{p:?} {back:?}"
             );
         }
-        // Kamerabild eines 5 × 3-Rasters durch die verzeichnende Linse.
         let h: Matrix = [[2.3, 0.05, 350.0], [-0.04, 2.35, 380.0], [1e-5, 2e-5, 1.0]];
         let reference: Vec<[f64; 2]> = [50.0, 300.0, 550.0]
             .iter()
@@ -1350,7 +1326,6 @@ mod tests {
             .into_iter()
             .fold(0.0, f64::max);
         assert!(without > 5.0 && with < 0.2, "{without} {with}");
-        // Die Abbildung trifft auch Punkte zwischen den Kreuzen.
         let m = mapping(&calibration).unwrap();
         let (p, q) = (
             m.to_pixel([160.0, 420.0]),
@@ -1370,7 +1345,6 @@ mod tests {
 
     #[test]
     fn fau_homography_matches_stored_visicut_matrix() {
-        // Matrix stored by VisiCut in FAU-LTT-iLaser-4000.xml (any scale).
         let stored: Matrix = [
             [
                 -0.002279943143889108,
@@ -1445,7 +1419,6 @@ mod tests {
 
     #[test]
     fn discovery_collects_visicam_answers() {
-        // Two fake cameras on loopback answer the request; one sends junk.
         let mut targets = Vec::new();
         let mut threads = Vec::new();
         for answer in [
@@ -1473,7 +1446,6 @@ mod tests {
     fn camera_login_is_sent_as_http_basic_like_visicut() {
         assert_eq!(basic_auth("", "geheim"), None);
         assert_eq!(basic_auth("laser", ""), None);
-        // A one-shot HTTP server that answers only with the right header.
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/bild.png", listener.local_addr().unwrap());
         let server = std::thread::spawn(move || {
@@ -1552,7 +1524,6 @@ mod tests {
             height_mm: 600.0,
             ..Default::default()
         };
-        // Two strokes per cross plus 1 + 2 + ... + 6 ticks.
         assert_eq!(
             crate::geometry::contours(&project).unwrap().len(),
             6 * 2 + 21

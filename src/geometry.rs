@@ -61,8 +61,6 @@ impl fmt::Display for GeometryError {
             }
             Self::NoCuttablePaths => tr("Keine schneidbaren Vektorpfade in der SVG").to_string(),
             Self::TooManyPoints => tr("Zu viele Vektorpunkte").to_string(),
-            // Masks and filters cannot be cut: a mask only sets transparency
-            // and a filter changes the picture, so neither defines a cut line.
             Self::Mask => tr(
                 "Masken können nicht geschnitten werden, weil sie nur Transparenz festlegen und keine \
                 Schnittlinie ergeben; Maske entfernen oder Objekt vorher in Pfade umwandeln",
@@ -262,8 +260,6 @@ fn view_box_transform(source: &str, size: usvg::Size, project: &Project) -> Opti
     let slice = words.next() == Some("slice");
     let (mut sx, mut sy) = (w / vw, h / vh);
     if align != "none" {
-        // Sizes that only differ by f32 rounding (38.1 mm is not exact) mean
-        // equal scales and no centring, as in Java's independent x/y scales.
         let s = if (sx - sy).abs() <= 1e-6 * sx.abs() {
             sx
         } else if slice {
@@ -286,7 +282,6 @@ fn view_box_transform(source: &str, size: usvg::Size, project: &Project) -> Opti
         "xMaxYMax" => (x + dw, y + dh),
         _ => (x + dw / 2.0, y + dh / 2.0),
     };
-    // Back to usvg's pixel units; `flatten_path` divides them out again.
     let (kx, ky) = (f64::from(size.width()) / w, f64::from(size.height()) / h);
     Some([sx * kx, 0.0, 0.0, sy * ky, tx * kx, ty * ky])
 }
@@ -447,12 +442,10 @@ pub fn object_outline(project: &Project, index: usize) -> Result<Vec<Contour>, G
         parts: Vec::new(),
         ..project.clone()
     };
-    // Rasterbilder haben keine Konturen (dort meldet `contours` einen Fehler).
     let outline = contours(&alone).unwrap_or_default();
     if !outline.is_empty() {
         return Ok(outline);
     }
-    // Sonst der Rahmen der gezeichneten Pixel.
     let rendered = crate::svg::render(&alone.svg)?;
     let (w, h) = (
         rendered.pixmap.width() as usize,
@@ -516,7 +509,6 @@ pub fn object_at(outlines: &[Vec<Contour>], point: Point, tolerance: f64) -> Opt
             if !closed {
                 continue;
             }
-            // Ray casting (even-odd).
             let mut inside = false;
             for s in contour.windows(2) {
                 let (a, b) = (s[0], s[1]);
@@ -565,8 +557,6 @@ pub fn outline_contours(project: &Project) -> Result<Vec<Contour>, GeometryError
         let flattened = tree.to_string(&usvg::WriteOptions::default());
         tree = usvg::Tree::from_str(&flattened, &options)?;
     }
-    // Each object's own area, oriented consistently; together with the
-    // non-zero rule their rings then form the union.
     let mut rings: Vec<Vec<[f64; 2]>> = Vec::new();
     let mut add = |subpaths: Vec<(Contour, bool)>, rule: FillRule| {
         let shape: Vec<Vec<[f64; 2]>> = subpaths
@@ -580,7 +570,6 @@ pub fn outline_contours(project: &Project) -> Result<Vec<Contour>, GeometryError
     };
     collect_areas(tree.root(), project, tree.size(), &even_odd, &mut add);
     let union = rings.simplify_shape(FillRule::NonZero);
-    // Each area is its outer ring followed by its holes.
     let mut result: Vec<Contour> = union
         .into_iter()
         .flat_map(|area| area.into_iter().enumerate().map(|(i, ring)| (ring, i > 0)))
@@ -594,8 +583,6 @@ pub fn outline_contours(project: &Project) -> Result<Vec<Contour>, GeometryError
     if result.is_empty() {
         return Err(GeometryError::NoArea);
     }
-    // Outer rings first, from the top left, so the order does not depend on
-    // the overlay library.
     result.sort_by(|a, b| {
         let key = |c: &Contour| {
             c.iter().fold([f64::MAX, f64::MAX], |m, p| {
@@ -616,7 +603,6 @@ pub fn outline_contours(project: &Project) -> Result<Vec<Contour>, GeometryError
 /// top vertex from which an edge leads downwards (the leftmost of several).
 fn java_ring(mut ring: Contour, hole: bool) -> Contour {
     let n = ring.len();
-    // Shoelace sum with y downwards: negative is counter-clockwise on screen.
     let area: f64 = (0..n)
         .map(|i| {
             let (a, b) = (ring[i], ring[(i + 1) % n]);
@@ -626,7 +612,6 @@ fn java_ring(mut ring: Contour, hole: bool) -> Contour {
     if (area < 0.0) == hole {
         ring.reverse();
     }
-    // Within 1e-6 mm, so rounding in the transform does not pick a corner.
     let top = ring.iter().map(|p| p[1]).fold(f64::MAX, f64::min) + 1e-6;
     let start = (0..n)
         .filter(|&i| ring[i][1] <= top && ring[(i + 1) % n][1] > top)
@@ -652,7 +637,6 @@ fn with_ids(svg: &str) -> Option<String> {
         .descendants()
         .filter(|n| n.is_element() && n.attribute("id").is_none())
         .map(|n| {
-            // Right behind the tag name as written (prefix included).
             let start = n.range().start + 1;
             start
                 + svg[start..]
@@ -764,8 +748,6 @@ fn contours_with_fonts(
         }
     }
     check_clip_references(&document)?;
-    // Text is cut along its glyph outlines, like the Java importer does. Glyphs
-    // usvg cannot place would otherwise vanish silently, so they are reported.
     let missing = Mutex::new(Vec::new());
     let options = usvg::Options {
         fontdb: fonts,
@@ -777,9 +759,6 @@ fn contours_with_fonts(
     font_problem(&missing)?;
     let view_box = view_box_transform(&source, tree.size(), project);
     if contains_text(tree.root()) {
-        // usvg keeps glyph outlines relative to their <text> element (the flattened
-        // paths carry an identity transform); writing the tree back out places them
-        // under their ancestors' transforms like ordinary paths.
         let flattened = tree.to_string(&usvg::WriteOptions::default());
         tree = usvg::Tree::from_str(&flattened, &options)?;
     }
@@ -1089,7 +1068,6 @@ fn clip_shapes(
     for node in group.children() {
         match node {
             usvg::Node::Group(group) => clip_shapes(group, base, project, size, shapes)?,
-            // The clip geometry counts whatever its fill or stroke, like SVG's clip-path.
             usvg::Node::Path(path) if path.is_visible() => {
                 let rings: Vec<Contour> = flatten_path(
                     path.data(),
@@ -1174,8 +1152,6 @@ fn visit(
                     continue;
                 }
                 let subpaths = flatten_path(path.data(), transform, project, size);
-                // Like Java's SVGShape/DashedShape: the dash pattern is applied in the path's
-                // user space, so it scales with the element's transform and the viewBox.
                 let dash = path.stroke().and_then(|stroke| {
                     let pattern = dash_pattern(stroke.dasharray()?)?;
                     let metric = user_length_metric(path.abs_transform(), project, size)?;
@@ -1202,7 +1178,6 @@ fn visit(
             usvg::Node::Image(_) => {
                 return Err(GeometryError::ImageNotCuttable);
             }
-            // `contours` re-imports text as paths before visiting.
             usvg::Node::Text(_) => {
                 return Err(GeometryError::TextNotConverted);
             }
@@ -1220,7 +1195,6 @@ fn flatten_path(
     project: &Project,
     size: usvg::Size,
 ) -> Vec<(Contour, bool)> {
-    // Java: translate(x, y) · scale(document → mm), applied in double.
     let (sx, sy) = (
         f64::from(project.width_mm) / f64::from(size.width()),
         f64::from(project.height_mm) / f64::from(size.height()),
@@ -1245,9 +1219,6 @@ fn flatten_path(
         }
         match segment {
             tiny_skia::PathSegment::MoveTo(point) => {
-                // tiny-skia inserts a MoveTo to the subpath start when drawing
-                // goes on after Close; Java2D (and so VisiCut) keeps cutting
-                // from that point without lifting the laser.
                 if after_close && point == start_point {
                     after_close = false;
                     current = start;
@@ -1433,10 +1404,8 @@ fn flatten_curve(points: &[Point], out: &mut Contour) {
 
 fn subdivide_flat(curve: &mut [f64], level: u32, out: &mut Vec<[f64; 2]>) {
     let flatness_sq = if curve.len() == 6 {
-        // QuadCurve2D.getFlatnessSq
         pt_seg_dist_sq(curve[0], curve[1], curve[4], curve[5], curve[2], curve[3])
     } else {
-        // CubicCurve2D.getFlatnessSq
         pt_seg_dist_sq(curve[0], curve[1], curve[6], curve[7], curve[2], curve[3]).max(
             pt_seg_dist_sq(curve[0], curve[1], curve[6], curve[7], curve[4], curve[5]),
         )
@@ -1563,7 +1532,6 @@ mod dash_tests {
         assert_dashes(&paths, &[(0.0, 3.0), (8.0, 5.0), (18.0, 5.0), (28.0, 2.0)]);
         let paths = cut(&line(r#"stroke-dasharray="5 5" stroke-dashoffset="-2""#)).unwrap();
         assert_dashes(&paths, &[(2.0, 5.0), (12.0, 5.0), (22.0, 5.0)]);
-        // Offsets larger than the pattern wrap around.
         let paths = cut(&line(r#"stroke-dasharray="5 5" stroke-dashoffset="22""#)).unwrap();
         assert_dashes(&paths, &[(0.0, 3.0), (8.0, 5.0), (18.0, 5.0), (28.0, 2.0)]);
     }
@@ -1572,7 +1540,6 @@ mod dash_tests {
     fn repeats_odd_dasharrays() {
         let paths = cut(&line(r#"stroke-dasharray="5""#)).unwrap();
         assert_dashes(&paths, &[(0.0, 5.0), (10.0, 5.0), (20.0, 5.0)]);
-        // "4 2 1" becomes "4 2 1 4 2 1": on 4, off 2, on 1, off 4, on 2, off 1.
         let paths = cut(&line(r#"stroke-dasharray="4,2,1""#)).unwrap();
         assert_dashes(
             &paths,
@@ -1591,7 +1558,6 @@ mod dash_tests {
     #[test]
     fn dashes_run_continuously_around_closed_shapes() {
         let paths = cut(r#"<rect width="10" height="10" fill="none" stroke="black" stroke-dasharray="6 4" stroke-dashoffset="3"/>"#).unwrap();
-        // Perimeter 40: [0,3] and [37,40] join into one dash across the start corner.
         assert_eq!(paths.len(), 4, "{paths:?}");
         assert!(
             paths.iter().all(|p| (length(p) - 6.0).abs() < 1e-3),
@@ -1604,7 +1570,6 @@ mod dash_tests {
         assert_eq!(across_start.first(), Some(&[10.0, 13.0]));
         assert_eq!(across_start.last(), Some(&[13.0, 10.0]));
 
-        // A dash longer than the perimeter keeps the whole closed outline.
         let paths = cut(
             r#"<rect width="10" height="10" fill="none" stroke="black" stroke-dasharray="50 5"/>"#,
         )
@@ -1616,7 +1581,6 @@ mod dash_tests {
 
     #[test]
     fn scales_dash_lengths_with_viewbox_and_transforms() {
-        // viewBox halves the user space: 5 user units become 10 mm.
         let paths = cut_with_viewbox(
             r#"viewBox="0 0 50 30""#,
             r#"<path d="M0 0H20" fill="none" stroke="black" stroke-dasharray="5 5"/>"#,
@@ -1643,7 +1607,6 @@ mod dash_tests {
             let paths = cut(&line(attributes)).unwrap();
             assert_dashes(&paths, &[(0.0, 30.0)]);
         }
-        // dasharray only affects strokes; a fill-only shape is cut along its full outline.
         let paths =
             cut(r#"<rect width="10" height="10" fill="black" stroke-dasharray="2 2"/>"#).unwrap();
         assert_eq!(paths.len(), 1);
@@ -1700,7 +1663,6 @@ mod tests {
         let (min_y, max_y) = glyph
             .iter()
             .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p[1]), b.max(p[1])));
-        // A 20 mm "H" sits on the baseline at y = 30 mm, starting at x = 20 mm.
         assert!(min_x >= 20.0 && max_x < 40.0, "x {min_x}..{max_x}");
         assert!(max_y <= 30.5 && max_y > 29.0, "y max {max_y}");
         assert!(min_y > 10.0 && min_y < 25.0, "y min {min_y}");
@@ -1711,13 +1673,11 @@ mod tests {
     fn keeps_cutting_after_close_and_zero_width_strokes() {
         let project = Project { svg: r##"<svg xmlns="http://www.w3.org/2000/svg" width="70mm" height="50mm" viewBox="0 0 70 50"><path d="M 5 5 L 25 5 L 25 20 Z L 40 40" fill="none" stroke="#f00"/><rect x="50" y="5" width="10" height="10" fill="none" stroke="#f00" stroke-width="0"/><rect x="50" y="30" width="10" height="10" style="fill:none;stroke:#f00;stroke-width:0.0"/></svg>"##.into(), x_mm: 0.0, y_mm: 0.0, width_mm: 70.0, height_mm: 50.0, ..Default::default() };
         let paths = contours(&project).unwrap();
-        // Java2D continues the contour after Z without lifting: one path of five points.
         assert_eq!(paths.len(), 3, "{paths:?}");
         assert_eq!(paths[0].len(), 5);
         let near = |p: Point, q: [f64; 2]| (p[0] - q[0]).abs() < 1e-9 && (p[1] - q[1]).abs() < 1e-9;
         assert!(near(paths[0][3], [5.0, 5.0]), "{:?}", paths[0]);
         assert!(near(paths[0][4], [40.0, 40.0]), "{:?}", paths[0]);
-        // Hairline strokes of width 0 are cut like in VisiCut.
         assert!(near(paths[1][0], [50.0, 5.0]), "{:?}", paths[1]);
         assert!(near(paths[2][0], [50.0, 30.0]), "{:?}", paths[2]);
         assert_eq!(
@@ -1728,8 +1688,6 @@ mod tests {
 
     #[test]
     fn maps_user_units_to_mm_exactly() {
-        // 1 user unit = 1 mm: the coordinates must come out exact in f64, not
-        // with the f32 rounding of usvg's viewBox transform.
         let project = Project { svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="70mm" height="50mm" viewBox="0 0 70 50"><g transform="translate(3 4)"><rect x="10" y="20" width="30" height="10"/></g></svg>"#.into(), x_mm: 100.0, y_mm: 200.0, width_mm: 70.0, height_mm: 50.0, ..Default::default() };
         let paths = contours(&project).unwrap();
         assert_eq!(paths[0][0], [113.0, 224.0]);
@@ -1802,12 +1760,10 @@ mod clip_tests {
 
     #[test]
     fn keeps_the_part_of_a_square_inside_the_clip() {
-        // The square spans mm 20..60; the clip covers mm 10..30 in both axes.
         let paths = cut(&format!(
             r#"{CLIP}<rect x="10" y="10" width="40" height="40" fill="none" stroke="black" clip-path="url(#c)"/>"#
         ))
         .unwrap();
-        // Top and left edge inside the clip, 10 mm each.
         assert_eq!(paths.len(), 1, "{paths:?}");
         assert!((length(&paths[0]) - 20.0).abs() < 1e-3, "{paths:?}");
         assert!(
@@ -1820,7 +1776,6 @@ mod clip_tests {
 
     #[test]
     fn keeps_closed_shapes_that_lie_inside_unchanged() {
-        // User 2..7 is mm 12..17: entirely inside, so the closed outline stays whole.
         let paths = cut(&format!(
             r#"{CLIP}<rect x="2" y="2" width="5" height="5" fill="none" stroke="black" clip-path="url(#c)"/>"#
         ))
@@ -1832,14 +1787,12 @@ mod clip_tests {
 
     #[test]
     fn path_entirely_outside_the_clip_gives_nothing() {
-        // User 70..90 is mm 80..100, outside the clip.
         let error = cut(&format!(
             r#"{CLIP}<path d="M70 5H90" stroke="black" clip-path="url(#c)"/>"#
         ))
         .unwrap_err();
         assert!(matches!(error, GeometryError::NoCuttablePaths), "{error}");
 
-        // Inside the group, the outside path is dropped and the inside one kept.
         let paths = cut(&format!(
             r#"{CLIP}<g clip-path="url(#c)"><path d="M70 5H90" stroke="black"/><path d="M5 5H15" stroke="black"/></g>"#
         ))
@@ -1908,7 +1861,6 @@ mod clip_tests {
             "{xs:?}"
         );
         assert!((xs.iter().cloned().fold(f64::MIN, f64::max) - 30.0).abs() < 0.01);
-        // The image has no contours: its rectangle instead (pixel accurate).
         let image = object_outline(&project, 1).unwrap();
         let expected = [
             [50.0, 20.0],
@@ -1950,9 +1902,6 @@ mod clip_tests {
 
     #[test]
     fn outline_rings_start_and_turn_like_java_area() {
-        // Square with a square hole: the outer ring from its top left corner
-        // downwards (counter-clockwise on screen), the hole from its top
-        // right corner downwards (clockwise).
         let rings = outline_of(
             r#"<path d="M 10 10 H 90 V 90 H 10 Z M 70 30 H 30 V 70 H 70 Z" fill="black"/>"#,
         )
@@ -1966,14 +1915,12 @@ mod clip_tests {
         };
         assert_eq!(start(&rings[0]), [[10.0, 10.0], [10.0, 90.0]]);
         assert_eq!(start(&rings[1]), [[70.0, 30.0], [70.0, 70.0]]);
-        // A triangle starts at its apex, then down the left side.
         let triangle = outline_of(r#"<path d="M 50 10 L 90 90 L 10 90 Z" fill="black"/>"#).unwrap();
         assert_eq!(start(&triangle[0]), [[50.0, 10.0], [10.0, 90.0]]);
     }
 
     #[test]
     fn outline_keeps_the_even_odd_hole_of_an_unfilled_shape() {
-        // Only stroked, so usvg has no fill and no fill rule; the hole stays.
         for style in [
             r#"fill="none" fill-rule="evenodd""#,
             r#"style="fill:none;fill-rule:evenodd""#,
@@ -1984,7 +1931,6 @@ mod clip_tests {
             .unwrap();
             assert_eq!(rings.len(), 2, "{style}: {rings:?}");
         }
-        // Without evenodd the inner square (same direction) is filled.
         let rings = outline_of(
             r#"<path d="M 10 10 H 90 V 90 H 10 Z M 30 30 H 70 V 70 H 30 Z" fill="none" stroke="red"/>"#,
         )
@@ -1994,21 +1940,17 @@ mod clip_tests {
 
     #[test]
     fn outline_unites_overlapping_shapes_into_one_ring() {
-        // Two 20 × 20 squares overlapping by 10 mm, both only stroked: one
-        // L-free ring of 30 × 20 mm, the shared lines inside are gone.
         let rings = outline_of(
             r#"<rect x="10" y="10" width="20" height="20" fill="none" stroke="red"/><rect x="20" y="10" width="20" height="20" fill="none" stroke="red"/>"#,
         )
         .unwrap();
         assert_eq!(rings.len(), 1, "{rings:?}");
-        // The overlay works on a fine integer grid: well below 0.001 mm.
         assert!(
             (area(&rings[0]) - 600.0).abs() < 1e-3,
             "{} {rings:?}",
             area(&rings[0])
         );
         assert_eq!(rings[0].first(), rings[0].last());
-        // A circle inside a frame disappears; a separate one stays.
         let rings = outline_of(
             r#"<rect x="10" y="10" width="40" height="40" fill="none" stroke="red"/><circle cx="30" cy="30" r="5" fill="none" stroke="red"/><circle cx="80" cy="80" r="5" fill="none" stroke="red"/>"#,
         )
@@ -2018,7 +1960,6 @@ mod clip_tests {
 
     #[test]
     fn outline_keeps_holes_lines_add_nothing_and_images_count_as_rectangles() {
-        // A frame with an even-odd hole keeps the hole as second ring.
         let rings = outline_of(
             r#"<path d="M 10 10 H 50 V 50 H 10 Z M 20 20 H 40 V 40 H 20 Z" fill-rule="evenodd" stroke="red"/>"#,
         )
@@ -2039,7 +1980,6 @@ mod clip_tests {
         let square = |x: f64, y: f64, s: f64| {
             vec![vec![[x, y], [x + s, y], [x + s, y + s], [x, y + s], [x, y]]]
         };
-        // A frame, a small square inside it and an open line.
         let outlines = vec![
             square(0.0, 0.0, 100.0),
             square(20.0, 20.0, 10.0),

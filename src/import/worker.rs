@@ -146,7 +146,6 @@ fn run_in_worker(executable: &Path, job: &Job, limit: Duration) -> Result<Output
     {
         use std::os::unix::process::CommandExt;
         // SAFETY: setrlimit is async-signal-safe and touches no memory of
-        // the parent.
         unsafe {
             command.pre_exec(|| {
                 let limit = libc::rlimit {
@@ -169,8 +168,6 @@ fn run_in_worker(executable: &Path, job: &Job, limit: Duration) -> Result<Output
             .read_to_end(&mut output)
             .map(|_| output)
     });
-    // The worker reads everything before it starts; a worker that dies
-    // early only makes this write fail.
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(&input);
     }

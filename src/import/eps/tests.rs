@@ -61,9 +61,7 @@ fn rectangle_and_circle_keep_colours_and_bounding_box_size() {
 #[test]
 fn bounding_box_sets_viewbox_and_flips_the_y_axis() {
     let svg = svg(RECT_AND_CIRCLE);
-    // BoundingBox 10 10 154 82: the lower left corner is the origin, y points down.
     assert!(svg.contains("viewBox=\"0 0 144 72\""), "{svg}");
-    // (20, 20) → (10, 82 - 20); the rectangle then runs 100 pt to the right.
     assert!(svg.contains("M10 62 L110 62"), "{svg}");
     assert!(svg.contains("stroke-width=\"2\""), "{svg}");
 }
@@ -95,7 +93,6 @@ fn repeat_and_for_loops_draw_every_iteration() {
         0 1 3 { 5 mul 0 moveto 4 0 rlineto stroke } for\n");
     assert_eq!(svg.matches("fill=\"#000000\"").count(), 3, "{svg}");
     assert_eq!(svg.matches("stroke=\"#000000\"").count(), 4, "{svg}");
-    // The last iteration starts at x = 15 pt, y = 100 pt (SVG y points down).
     assert!(svg.contains("M15 100 L19 100"), "{svg}");
 }
 
@@ -114,7 +111,6 @@ fn dictionaries_procedures_and_conditionals() {
 
 #[test]
 fn roll_and_arithmetic_on_the_operand_stack() {
-    // 0.1 0.2 0.3 3 1 roll leaves 0.2 on top.
     let svg = svg(b"%%BoundingBox: 0 0 100 100\n\
         0.1 0.2 0.3 3 1 roll setgray newpath 0 0 moveto 10 0 lineto stroke\n\
         0.25 0.5 add setgray newpath 0 0 moveto 10 0 lineto stroke\n");
@@ -124,7 +120,6 @@ fn roll_and_arithmetic_on_the_operand_stack() {
 
 #[test]
 fn translate_and_scale_apply_to_path_and_line_width() {
-    // Scale after translate: user points are scaled first, then moved by (10, 20).
     let svg = svg(b"%%BoundingBox: 0 0 100 100\n\
         10 20 translate 2 2 scale newpath 0 0 moveto 5 0 lineto stroke\n");
     assert!(svg.contains("M10 80 L20 80"), "{svg}");

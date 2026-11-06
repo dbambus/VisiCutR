@@ -77,7 +77,6 @@ struct State {
 }
 
 thread_local! {
-    // Each script runs on its own worker thread, so this state is per run.
     static STATE: RefCell<State> = RefCell::new(State::default());
 }
 
@@ -212,7 +211,6 @@ fn js_move(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsV
 
 fn js_line(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let (x, y) = coordinates("Line", args, context)?;
-    // VisiCut starts a shape at the origin when it begins with a line.
     if !STATE.with(|s| s.borrow().started) {
         add_point('M', 0.0, 0.0)?;
     }
@@ -311,10 +309,6 @@ pub fn to_svg(drawing: &Drawing) -> Result<(String, Vec<String>), ImportError> {
     let top = y0.min(0.0);
     let width = (x1 - left).max(1.0);
     let height = (y1 - top).max(1.0);
-    // One path per segment; the id carries what the job needs (see
-    // `geometry::laser_script`): `laserscript-<n>`, then `_e<power>:<speed>`
-    // per `set` before it (`n`: not set), `_j` when joined and on the last
-    // path `_t<power>:<speed>` per `set` after the last line.
     let setting = |(power, speed): &Setting| {
         let value = |v: &Option<f64>| v.map_or("n".to_string(), number);
         format!("{}:{}", value(power), value(speed))
@@ -367,9 +361,6 @@ mod tests {
 
     #[test]
     fn set_splits_the_drawing_and_keeps_every_call() {
-        // Power before drawing, a speed change between two lines (joined),
-        // a focus change (no value for the job, still a split) and one more
-        // power change after the last line.
         let drawing = run(
             "set('power', 0); set('speed', 10); move(0, 0); line(1, 0); \
              set('speed', 20); line(2, 0); set('focus', 3); move(5, 5); line(6, 5); \

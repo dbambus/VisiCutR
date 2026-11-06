@@ -130,7 +130,6 @@ impl Bitmap {
             .map(|pixel| {
                 let [r, g, b, a] = pixel.0.map(u32::from);
                 let value = (299 * r + 587 * g + 114 * b) / 1000;
-                // Auf Weiß verrechnen, damit transparente Bereiche Hintergrund sind.
                 ((value * a + 255 * (255 - a)) / 255) as u8
             })
             .collect();
@@ -238,8 +237,6 @@ pub(crate) fn trace(mask: &[bool], width: usize, height: usize) -> Vec<Vec<[f64;
                     ring.push([px as f64, py as f64]);
                     px += DIRECTIONS[dir].0;
                     py += DIRECTIONS[dir].1;
-                    // Bei zwei Möglichkeiten (zwei Pixel berühren sich diagonal)
-                    // wird die Rechtskurve gewählt, damit die Pixel verbunden bleiben.
                     let mut next = None;
                     for candidate in 0..4 {
                         if candidate == (dir + 2) % 4
@@ -255,11 +252,9 @@ pub(crate) fn trace(mask: &[bool], width: usize, height: usize) -> Vec<Vec<[f64;
                     }
                     match next {
                         Some(candidate) => dir = candidate,
-                        // Ohne weitere Kante ist der Startpunkt erreicht.
                         None => break,
                     }
                 }
-                // Der kleinste Umriss eines Pixels hat vier Ecken.
                 if ring.len() >= 4 {
                     rings.push(ring);
                 }
@@ -292,7 +287,6 @@ pub(crate) fn simplify_closed(ring: &[[f64; 2]], tolerance: f64) -> Vec<[f64; 2]
     let mut second = ring[far..].to_vec();
     second.push(ring[0]);
     let second = douglas_peucker(&second, tolerance);
-    // Beide Züge enden an Gitterpunkten, die im Ergebnis doppelt vorkommen würden.
     let mut result = first;
     result.extend_from_slice(&second[1..second.len() - 1]);
     result
@@ -438,7 +432,6 @@ mod tests {
         assert_eq!(normal.len(), 1);
         assert_eq!(signed_area(&normal[0]).abs(), 16.0);
 
-        // Invertiert: der helle Rand mit dem dunklen Quadrat als Loch.
         let inverted = image.contours(&Options {
             invert: true,
             ..exact()

@@ -240,36 +240,12 @@ pub fn embed_external_images(source: &str, base_dir: &Path) -> Imported {
             }
             let href = attribute.value().trim();
             let shown = shorten(href);
-            let candidates = match classify(href) {
-                Href::Skip => continue,
-                Href::Remote => {
-                    warnings.push(tr!(
-                        "Bild „{name}“ wird nicht aus dem Netz geladen; \
-                         bitte als Datei speichern und neu verknüpfen",
-                        name = shown
-                    ));
+            let path = match find_image(href, &shown, absref, base_dir) {
+                Ok(path) => path,
+                Err(warning) => {
+                    warnings.extend(warning);
                     continue;
                 }
-                Href::Unsupported => {
-                    warnings.push(tr!(
-                        "Bild „{name}“: Adresse wird nicht unterstützt",
-                        name = shown
-                    ));
-                    continue;
-                }
-                Href::Paths(paths) => paths,
-            };
-            let mut candidates = candidates
-                .into_iter()
-                .chain(absref.map(PathBuf::from))
-                .filter(|path| !is_network_path(path))
-                .map(|path| base_dir.join(path));
-            let Some(path) = candidates.find(|path| path.is_file()) else {
-                warnings.push(tr!(
-                    "Bild „{name}“ nicht gefunden und nicht eingebettet",
-                    name = shown
-                ));
-                continue;
             };
             let embedded = cache
                 .entry(path.clone())
@@ -311,6 +287,60 @@ pub fn embed_external_images(source: &str, base_dir: &Path) -> Imported {
             }
         }
     }
+    let svg = apply_edits(source, edits, length);
+    Imported {
+        svg,
+        warnings,
+        ..Default::default()
+    }
+}
+
+/// The local file an image `href` (or Inkscape's `absref`) points to,
+/// relative to `base_dir`. `Err` carries the warning for the image `shown`,
+/// or `None` for references that are not files (`#id`, `data:`).
+fn find_image(
+    href: &str,
+    shown: &str,
+    absref: Option<&str>,
+    base_dir: &Path,
+) -> Result<PathBuf, Option<String>> {
+    let candidates = match classify(href) {
+        Href::Skip => return Err(None),
+        Href::Remote => {
+            return Err(Some(tr!(
+                "Bild „{name}“ wird nicht aus dem Netz geladen; \
+                 bitte als Datei speichern und neu verknüpfen",
+                name = shown
+            )));
+        }
+        Href::Unsupported => {
+            return Err(Some(tr!(
+                "Bild „{name}“: Adresse wird nicht unterstützt",
+                name = shown
+            )));
+        }
+        Href::Paths(paths) => paths,
+    };
+    let mut candidates = candidates
+        .into_iter()
+        .chain(absref.map(PathBuf::from))
+        .filter(|path| !is_network_path(path))
+        .map(|path| base_dir.join(path));
+    candidates.find(|path| path.is_file()).ok_or_else(|| {
+        Some(tr!(
+            "Bild „{name}“ nicht gefunden und nicht eingebettet",
+            name = shown
+        ))
+    })
+}
+
+/// `source` with the attribute values in `edits` replaced; `length` is the
+/// length of the result.
+fn apply_edits(
+    source: &str,
+    mut edits: Vec<(std::ops::Range<usize>, String)>,
+    length: usize,
+) -> String {
     edits.sort_by_key(|(range, _)| range.start);
     let mut svg = String::with_capacity(length);
     let mut position = 0;
@@ -320,11 +350,7 @@ pub fn embed_external_images(source: &str, base_dir: &Path) -> Imported {
         position = range.end;
     }
     svg.push_str(&source[position..]);
-    Imported {
-        svg,
-        warnings,
-        ..Default::default()
-    }
+    svg
 }
 
 enum Href {

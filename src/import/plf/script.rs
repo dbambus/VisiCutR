@@ -72,6 +72,7 @@ impl Engine {
         match result {
             Some(result) => result.map_err(|e| describe(&e)),
             None => {
+                // The interrupted script left its frame on the VM stack.
                 self.aborted = true;
                 Err(ImportError::ScriptTimeout(self.limit))
             }
@@ -105,6 +106,7 @@ where
         .map_err(ImportError::ScriptStart)?;
     match receiver.recv_timeout(limit + GRACE) {
         Ok(result) => result,
+        // The worker is left behind; Boa cannot be interrupted from outside.
         Err(mpsc::RecvTimeoutError::Timeout) => Err(ImportError::ScriptTimeout(limit)),
         Err(mpsc::RecvTimeoutError::Disconnected) => Err(ImportError::ScriptAborted),
     }

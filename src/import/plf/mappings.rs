@@ -184,6 +184,7 @@ fn parse_value(node: Node) -> Value {
             .parse::<f64>()
             .map(Value::Number)
             .unwrap_or_else(|_| Value::Unsupported(class.into())),
+        // Ohne Klasse: Farbe mit Komponenten oder Text.
         "" if child(node, "red").is_some() => color(node)
             .map(Value::Color)
             .unwrap_or_else(|| Value::Unsupported("Farbe".into())),
@@ -281,6 +282,7 @@ pub fn translate(
     parts: &[Placed],
     composed: Result<Vec<ObjectAttributes>, crate::mapping::MappingError>,
 ) -> Translation {
+    // Called only when the PLF file has a mappings.xml somewhere.
     let mut out = Translation::default();
     let composed = match composed {
         Ok(objects) => objects,
@@ -331,6 +333,8 @@ pub fn translate(
             }
             Some(Ok(entries)) => entries,
         };
+        // Bedingungen kennt VisiCutR nur für SVG-Teile so wie VisiCut.
+        // Zuordnungen ohne Bedingung (alle Objekte oder Rest) gelten für jedes Teil.
         let unconditional = entries
             .iter()
             .all(|e| e.filters.as_ref().is_none_or(Vec::is_empty));
@@ -355,6 +359,8 @@ pub fn translate(
         ));
     }
     if out.steps.is_empty() {
+        // Ohne Schritt würde VisiCutR das ganze Motiv bearbeiten. Ein leerer
+        // Schritt verhindert das, wie VisiCut keine Objekte ohne Zuordnung schneidet.
         out.steps.push(JobStep::new(Operation::Cut));
         out.warnings.push(
             tr(
@@ -391,6 +397,7 @@ fn translate_part(
     composed: &[ObjectAttributes],
     out: &mut Translation,
 ) {
+    // Filter umwandeln. Ein Fehler betrifft nur den Eintrag mit diesem Filter.
     let converted: Vec<Result<Option<Vec<Filter>>, ImportError>> = entries
         .iter()
         .map(|entry| match &entry.filters {
@@ -412,6 +419,7 @@ fn translate_part(
         }
     }
 
+    // Rest des Teils (VisiCut: alles, was kein Filtersatz erfasst).
     let rest_wanted = entries
         .iter()
         .any(|e| e.profile.is_some() && e.filters.is_none());
@@ -463,6 +471,7 @@ fn translate_part(
         let expected: Vec<usize> = selected.iter().map(|i| i + offset).collect();
         let mut step = JobStep::new(operation);
         step.raster = raster;
+        // „Kontur“ (useOutline): nur der Rand der gemeinsamen Fläche.
         step.outline = matches!(
             profile,
             Profile::Vector {
@@ -471,7 +480,10 @@ fn translate_part(
             }
         );
         match filters {
+            // Die Bedingungen gelten im ganzen Motiv nur dann genauso, wenn sie
+            // im ganzen Motiv dieselben Objekte treffen wie in diesem Teil.
             Some(list) if matching(&list, composed) == expected => step.filters = Some(list),
+            // Ohne Bedingung: alle Objekte dieses Teils.
             Some(list) if list.is_empty() => step.objects = expected,
             Some(_) => {
                 out.warnings.push(tr!(
@@ -528,6 +540,8 @@ fn convert(
             let width: f64 = text
                 .parse()
                 .map_err(|_| ImportError::StrokeWidthNotANumber(text.clone()))?;
+            // VisiCut vergleicht eine Zeichenkette nie mit der Zahl und trifft
+            // daher nichts. Übernommen wird der erkennbare Wert.
             warnings.push(tr!(
                 "Teil „{part}“: Die Linienstärke {text} ist als Text gespeichert; \
                  VisiCut wendet einen solchen Filter nicht an, übernommen als Zahl",
@@ -568,6 +582,7 @@ fn profile_settings(
             ));
         }
     };
+    // Gravuren übernehmen die Auflösungen des iLaser 4000 (166 … 1000 DPI).
     let raster_dpi = |dpi: f64, warnings: &mut Vec<String>| match RASTER_DPIS
         .iter()
         .find(|&&d| (f64::from(d) - dpi).abs() < 1.0)
@@ -693,6 +708,8 @@ pub fn import_templates(
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(ImportError::Zip)?;
         let name = file.name().map_err(ImportError::Zip)?.to_string();
+        // Einstellungsarchive legen Zuordnungen in mappings/ ab, GitHub davor
+        // einen Ordner.
         let in_mappings = name.split('/').rev().nth(1) == Some("mappings");
         if !in_mappings || !name.ends_with(".xml") || file.size() > 5 * 1024 * 1024 {
             continue;
@@ -839,6 +856,7 @@ mod tests {
                 dithering: Some("FloydSteinberg".into()),
             })
         );
+        // Fehlt `a`, ist der Filtersatz null (Rest).
         assert_eq!(entries[1].filters, None);
         assert_eq!(
             entries[2].filters.as_ref().unwrap()[0].value,
@@ -906,6 +924,8 @@ mod tests {
 
     #[test]
     fn parts_without_a_mapping_cut_nothing() {
+        // A file with a mapping elsewhere: the part without one gets no step,
+        // and the empty placeholder step keeps VisiCutR from cutting the motif.
         let placed = [Placed {
             name: "a.svg".into(),
             objects: Some(vec![ObjectAttributes::default()]),
@@ -939,6 +959,7 @@ mod tests {
     #[test]
     fn visicut_mappings_become_templates_from_files_and_archives() {
         use std::io::Write;
+        // Rule, rest (outline) and 3D engraving; no name: the file name counts.
         let (templates, warnings) = import_templates(SET.as_bytes(), "Holz.xml").unwrap();
         assert_eq!(templates.len(), 1);
         let template = &templates[0];
@@ -969,6 +990,7 @@ mod tests {
         assert!(template.ignore.is_empty());
         assert!(!warnings.is_empty(), "Linienstärke als Text wird gemeldet");
 
+        // A filter set without profile is an ignore rule; the set's name wins.
         let ignore = SET
             .replace(
                 "</linked-list>\n</com",
@@ -982,6 +1004,7 @@ mod tests {
         assert_eq!(templates[0].name, "Mit Ignorieren");
         assert_eq!(templates[0].rules.len(), 3);
         assert_eq!(templates[0].ignore[0][0].attribute, Attribute::Type);
+        // "Gravur-Ebene" is unknown: that entry is skipped with a warning.
         let (templates, warnings) = import_templates(
             include_str!("testdata/zuordnung.xml").as_bytes(),
             "datei.xml",

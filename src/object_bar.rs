@@ -40,6 +40,8 @@ const SIZE: f32 = 34.0;
 /// Weiße, abgerundete Leiste mit Rahmen, waagerecht zentriert; `add` füllt
 /// sie von links nach rechts.
 pub fn bar<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    // egui kennt die Breite erst nach dem Zeichnen: die des letzten Bildes
+    // zentriert die Leiste.
     let id = ui.id().with("object_bar_width");
     let width = ui.data(|d| d.get_temp::<f32>(id));
     ui.horizontal(|ui| {
@@ -264,6 +266,8 @@ pub fn paint(painter: &egui::Painter, icon: Icon, rect: Rect, color: Color32) {
             filled(&[(6.5, -6.5), (1.5, -5.5), (5.5, -1.5)]);
         }
         Icon::Link | Icon::Unlink => {
+            // Wie das übliche Kettensymbol: zwei zur Mitte offene Glieder,
+            // verbunden durch einen Steg; schräg nach rechts oben gedreht.
             let linked = icon == Icon::Link;
             let (sin, cos) = (-45.0_f32).to_radians().sin_cos();
             let turn = |(x, y): (f32, f32)| (x * cos - y * sin, x * sin + y * cos);
@@ -275,6 +279,7 @@ pub fn paint(painter: &egui::Painter, icon: Icon, rect: Rect, color: Color32) {
             for side in [-1.0_f32, 1.0] {
                 let mut points = vec![(side * open, -r)];
                 for i in 0..=16 {
+                    // Von oben über die Außenseite nach unten.
                     let a = (-90.0 + side * 180.0 * i as f32 / 16.0).to_radians();
                     points.push((side * center + r * a.cos(), r * a.sin()));
                 }
@@ -285,6 +290,7 @@ pub fn paint(painter: &egui::Painter, icon: Icon, rect: Rect, color: Color32) {
             if linked {
                 path(&[turn((-2.8, 0.0)), turn((2.8, 0.0))], false);
             } else {
+                // Bruchstriche quer im Spalt.
                 path(&[turn((-0.9, -4.0)), turn((-0.9, -6.0))], false);
                 path(&[turn((0.9, 4.0)), turn((0.9, 6.0))], false);
             }
@@ -297,6 +303,7 @@ pub fn paint(painter: &egui::Painter, icon: Icon, rect: Rect, color: Color32) {
                 })
                 .collect();
             path(&arc, false);
+            // Pfeilspitze am Anfang des Bogens, im Uhrzeigersinn.
             let (ex, ey) = arc[0];
             filled(&[
                 (ex - 3.5, ey - 1.0),
@@ -340,6 +347,8 @@ pub fn paint(painter: &egui::Painter, icon: Icon, rect: Rect, color: Color32) {
             );
         }
         Icon::Undo | Icon::Redo => {
+            // Bogen von oben über rechts nach unten, Pfeil links oben;
+            // Wiederholen gespiegelt.
             let m = if icon == Icon::Redo { -1.0 } else { 1.0 };
             let arc = (0..=20).map(|i| {
                 let a = (-90.0 + 180.0 * i as f32 / 20.0).to_radians();

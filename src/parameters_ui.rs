@@ -110,6 +110,7 @@ fn field(ui: &mut egui::Ui, parameter: &mut Parameter) -> bool {
                 return false;
             }
         };
+        // Tippen und Ziehen erst am Ende übernehmen, nicht bei jedem Schritt.
         response.lost_focus()
             || response.drag_stopped()
             || (response.changed() && !response.has_focus() && !response.dragged())

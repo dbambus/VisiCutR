@@ -32,7 +32,10 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String
             .unwrap_or_else(|| panic!("{}: {key} fehlt", dir.display()))
     };
     let number = |key: &str| -> f32 { get(key).parse().unwrap() };
+    // Rust reads `rust_file` (default: the Java file); anything but SVG goes
+    // through the app's importers (DXF, EPS, PDF, raster, G-code, PLF).
     let rust_file = dir.join(case.get("rust_file").unwrap_or_else(|| get("svg")));
+    // Parametric SVG (`.parametric.svg`) goes through its importer like in the app.
     let plain_svg = rust_file.extension().is_some_and(|e| e == "svg")
         && !rust_file.to_string_lossy().ends_with(".parametric.svg");
     let imported = if plain_svg {
@@ -45,11 +48,15 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String
             .map_err(|e| format!("Rust-Import lehnt ab: {e}"))?
     };
     let svg_text = imported.svg.clone();
+    // Without width_mm/height_mm both sides derive the size from the file
+    // (Rust like the app's import: usvg size at 96 DPI).
     let natural = || {
         let preview = visicut_core::svg::render(&svg_text).unwrap();
         (preview.width_mm, preview.height_mm)
     };
     let scale: f32 = case.get("scale").map_or(1.0, |s| s.parse().unwrap());
+    // `place=bbox`: the top left corner of the geometry goes to x/y.
+    // A PLF part keeps its place relative to the bed (offset of a cropped part).
     let (mut x_mm, mut y_mm) = (
         number("x_mm") + imported.offset_mm[0] as f32,
         number("y_mm") + imported.offset_mm[1] as f32,
@@ -76,11 +83,13 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String
         width_mm,
         height_mm,
         operation,
+        // Java's defaults where a case (PLF) gives its values per step.
         power_percent: case.get("power").map_or(20.0, |p| p.parse().unwrap()),
         speed_percent: case.get("speed").map_or(100.0, |p| p.parse().unwrap()),
         passes: case.get("passes").map_or(1, |p| p.parse().unwrap()),
         thickness_mm: case.get("thickness_mm").map_or(0.0, |t| t.parse().unwrap()),
         raster: raster(dir, case),
+        // VisiCut's orders under their Java names; INNER_FIRST is "Klassisch".
         cut_order: match case.get("order").map_or("INNER_FIRST", String::as_str) {
             "INNER_FIRST" => CutOrder::VisiCut,
             "FILE" => CutOrder::File,
@@ -92,12 +101,16 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String
         rotary_diameter_mm: case
             .get("rotary_diameter_mm")
             .map_or(100.0, |d| d.parse().unwrap()),
+        // VisiCut schneidet doppelte Linien mehrfach.
         remove_duplicate_lines: false,
+        // VisiCut vergleicht Farben exakt.
         similar_colors: false,
         ..Project::default()
     };
     let outline = case.get("outline").is_some_and(|o| o == "true");
     if rust_file.extension().is_some_and(|e| e == "plf") {
+        // The PLF's mappings as steps; `settings` gives their laser values in
+        // part and mapping order, like the Java harness.
         let settings: Vec<&str> = case
             .get("settings")
             .map_or("", String::as_str)
@@ -127,11 +140,13 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String
             visicut_core::compose::add_extra_parts(&mut project, imported.extra_parts)?;
         }
     } else if let Some(mappings) = case.get("mappings") {
+        // "filters -> power:speed[:passes]; …" in mapping order (README).
         project.steps = mappings
             .split(';')
             .map(|entry| {
                 let (filters, values) = entry.split_once("->").unwrap();
                 let v: Vec<&str> = values.trim().split(':').collect();
+                // An optional `cut:`, `mark:`, `engrave:` … in front of the filters.
                 let (operation, filters) = match filters.trim().split_once(':') {
                     Some((op, rest)) if operation_named(op).is_some() => {
                         (operation_named(op).unwrap(), rest.trim())
@@ -152,6 +167,7 @@ fn project(dir: &Path, case: &HashMap<String, String>) -> Result<Project, String
             })
             .collect();
     } else if case.contains_key("additional") || outline {
+        // Further parameter sets need a step; filters `[]` select every object.
         project.steps = vec![JobStep {
             filters: Some(Vec::new()),
             power_percent: project.power_percent,
@@ -247,7 +263,9 @@ fn raster(dir: &Path, case: &HashMap<String, String>) -> RasterSettings {
         color_shift: case.get("color_shift").map_or(0, |v| v.parse().unwrap()),
         bidirectional: !flag("unidirectional"),
         bottom_up: flag("bottom_up"),
+        // Java's LTT driver only offers 500 DPI.
         dpi: 500,
+        // Java has no stamp shoulder.
         shoulder_mm: 0.0,
     }
 }
@@ -304,6 +322,7 @@ fn ltt_output_matches_java_byte_for_byte() {
                         ));
                     }
                 }
+                // A missing reference is a setup problem, never a documented deviation.
                 Err(Outcome::MissingReference(message)) => failures.push(message),
                 Err(Outcome::Different(message)) => match known {
                     Some(reason) => deviations.push(format!("{message}\n  bekannt: {reason}")),
@@ -356,6 +375,7 @@ fn variants(case: &HashMap<String, String>) -> Vec<(String, HashMap<String, Stri
         _ => "",
     };
     for (key, value) in list.split(',').filter_map(|v| v.trim().split_once('=')) {
+        // File-name safe on every system (no `:` on Windows).
         let suffix: String = format!("@{key}-{value}")
             .chars()
             .map(|c| {
@@ -386,6 +406,8 @@ fn compare(
     suffix: &str,
 ) -> Result<(), Outcome> {
     let java_error = fs::read_to_string(dir.join(format!("expected{suffix}.error"))).ok();
+    // `expect=reject`: both sides must refuse the job (e.g. engraving rows
+    // outside the bed).
     let reject = case.get("expect").is_some_and(|e| e == "reject");
     let expected_file = match fs::read(dir.join(format!("expected{suffix}.ltt"))) {
         Ok(_) if reject => {
@@ -421,6 +443,8 @@ fn compare(
     }
     let mut actual = prepared.jobs[0].bytes.as_slice();
     let mut expected = expected_file.as_slice();
+    // `compare=header`: only up to the first raster line, for documented
+    // deliberate differences in the lines (reason in case.properties).
     if case.get("compare").is_some_and(|c| c == "header") {
         let header = |bytes: &[u8]| {
             bytes
@@ -432,6 +456,7 @@ fn compare(
         actual = &actual[..header(actual).max(expected.len()).min(actual.len())];
     }
     if let Some(diff) = difference(actual, expected) {
+        // Kept for inspection next to the build output.
         let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}.ltt"));
         fs::write(&path, actual).unwrap();
         return Err(Outcome::Different(format!(

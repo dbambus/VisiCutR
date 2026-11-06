@@ -270,6 +270,7 @@ impl Machine {
 
     fn stroke(&mut self) {
         if self.path.drawn() {
+            // Line widths are in user space and scale with the CTM.
             let width = if self.state.line_width > 0.0 {
                 self.state.line_width * graphics::scale_of(self.state.ctm)
             } else {
@@ -294,6 +295,7 @@ impl Machine {
         }
         let (s, c) = start.to_radians().sin_cos();
         let first = self.device_point(x + r * c, y + r * s, op)?;
+        // As in PostScript, an existing current point is joined to the arc.
         if self.path.current().is_some() {
             self.path.line_to(first);
         } else {
@@ -311,6 +313,7 @@ impl Machine {
     /// Runs one operator. Anything not listed here is unsupported.
     fn operator(&mut self, name: &str) -> Result<(), EpsError> {
         match name {
+            // Operand stack
             "pop" => {
                 self.pop_any(name)?;
             }
@@ -359,6 +362,7 @@ impl Machine {
                 }
             }
 
+            // Dictionaries
             "def" => {
                 let value = self.pop_any(name)?;
                 let key = self.pop_key(name)?;
@@ -372,6 +376,7 @@ impl Machine {
                 self.operands.push(value);
             }
 
+            // Arithmetic
             "add" | "sub" | "mul" | "div" => {
                 let b = self.pop_num(name)?;
                 let a = self.pop_num(name)?;
@@ -412,6 +417,7 @@ impl Machine {
                 self.push_num(degrees.to_radians().cos(), name)?;
             }
 
+            // Comparison and booleans, for `if` and `ifelse`
             "eq" | "ne" => {
                 let b = self.pop_any(name)?;
                 let a = self.pop_any(name)?;
@@ -436,6 +442,7 @@ impl Machine {
             "true" => self.operands.push(Obj::Bool(true)),
             "false" => self.operands.push(Obj::Bool(false)),
 
+            // Control
             "if" => {
                 let body = self.pop_proc(name)?;
                 if self.pop_bool(name)? {
@@ -481,9 +488,12 @@ impl Machine {
                 } => self.exec_name(&inner)?,
                 other => self.operands.push(other),
             },
+            // Pages end here; further pages are not imported.
             "showpage" => {}
+            // Procedures are not bound to their operators; nothing to do.
             "bind" => {}
 
+            // Path construction
             "newpath" => self.path.clear(),
             "moveto" => {
                 let [x, y] = self.pop_nums::<2>(name)?;
@@ -516,6 +526,7 @@ impl Machine {
                 self.path.curve_to(c1, c2, end);
             }
             "rcurveto" => {
+                // Each displacement is relative to the point before it.
                 let [dx1, dy1, dx2, dy2, dx3, dy3] = self.pop_nums::<6>(name)?;
                 let start = self.current_point(name)?;
                 let c1 = self.displaced(start, dx1, dy1, name)?;
@@ -540,10 +551,12 @@ impl Machine {
                 self.path.close();
             }
 
+            // Painting: the path is consumed
             "fill" => self.fill(false),
             "eofill" => self.fill(true),
             "stroke" => self.stroke(),
 
+            // Colour, converted to RGB
             "setrgbcolor" => {
                 let [r, g, b] = self.pop_nums::<3>(name)?;
                 self.state.rgb = [r, g, b];
@@ -564,6 +577,7 @@ impl Machine {
                 self.state.line_width = self.pop_num(name)?.abs();
             }
 
+            // Graphics state and transformations
             "gsave" => self.saved.push(self.state.clone()),
             "grestore" => {
                 if let Some(state) = self.saved.pop() {

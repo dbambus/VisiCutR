@@ -63,6 +63,7 @@ fn nesting_depth(text: &str) -> usize {
             .position(|w| w == needle)
             .map_or(bytes.len(), |p| from + p + needle.len())
     };
+    // End of a tag at `from`: the '>' outside quotes, and whether "/>".
     let tag_end = |from: usize| {
         let mut quote = None;
         let mut i = from;
@@ -285,6 +286,7 @@ fn editor_dpi(source: &str) -> f32 {
 
 /// usvg options shared by preview, engraving, cutting and the mapping.
 pub fn options() -> usvg::Options<'static> {
+    // Embedded projects must remain portable: external resources are not resolved.
     usvg::Options {
         image_href_resolver: usvg::ImageHrefResolver {
             resolve_data: usvg::ImageHrefResolver::default_data_resolver(),
@@ -377,6 +379,7 @@ mod tests {
         let deep = |n: usize| format!("<svg>{}{}</svg>", "<g>".repeat(n), "</g>".repeat(n));
         assert!(super::check_nesting(&deep(super::MAX_NESTING - 1)).is_ok());
         assert!(super::check_nesting(&deep(super::MAX_NESTING)).is_err());
+        // 100 000 levels ended the application in roxmltree.
         assert!(matches!(
             super::render(&deep(100_000)),
             Err(super::SvgError::TooDeep)
@@ -402,6 +405,7 @@ mod tests {
             let preview = render(svg).unwrap();
             (preview.width_mm, preview.height_mm)
         };
+        // Unitless without hints: 90 DPI; the same file from Inkscape 0.92: 96 DPI.
         let (w, _) = size(
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="90" height="45"><rect width="9" height="9"/></svg>"#,
         );
@@ -418,6 +422,8 @@ mod tests {
             "<!-- Generator: Adobe Illustrator 24.0.0, SVG Export Plug-In -->\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"72\" height=\"36\"><rect width=\"9\" height=\"9\"/></svg>",
         );
         assert!((w - 25.4).abs() < 1e-4, "{w}");
+        // Absolute units with a viewBox are exact; without a viewBox the user
+        // units count at 90 DPI even if the width is given in mm.
         let (w, h) = size(
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="7cm" height="50mm" viewBox="0 0 70 50"><rect width="9" height="9"/></svg>"#,
         );
@@ -429,6 +435,7 @@ mod tests {
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="90mm" height="45mm"><rect width="9" height="9"/></svg>"#,
         );
         assert!((w - 90.0 * 96.0 / 90.0).abs() < 1e-3, "{w}");
+        // Percent sizes fall back to the viewBox in user units.
         let (w, _) = size(
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 90 45"><rect width="9" height="9"/></svg>"#,
         );

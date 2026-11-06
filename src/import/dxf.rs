@@ -285,9 +285,41 @@ fn write_svg(prims: &[Prim], layer_order: &[String]) -> Result<(String, [f64; 2]
         f: bbox.max[1],
     };
 
-    // Primitives per layer in drawing order; layers as in the LAYER table,
-    // then in order of appearance. Grouped once: files with many layers
-    // would otherwise take layers × primitives comparisons.
+    let (layers, by_layer) = group_by_layer(prims, layer_order);
+
+    let mut svg = format!(
+        concat!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>"#,
+            "\n",
+            r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="{w}mm" height="{h}mm" viewBox="0 0 {w} {h}">"#,
+            "\n"
+        ),
+        w = num(width),
+        h = num(height)
+    );
+    for (index, layer) in layers.iter().enumerate() {
+        let _ = writeln!(
+            svg,
+            r#"<g id="layer{}" inkscape:groupmode="layer" inkscape:label="{}">"#,
+            index + 1,
+            escape(layer)
+        );
+        for prim in by_layer[layer].iter().copied() {
+            write_prim(&mut svg, prim, &flip);
+        }
+        svg.push_str("</g>\n");
+    }
+    svg.push_str("</svg>\n");
+    Ok((svg, [width, height]))
+}
+
+/// Primitives per layer in drawing order; layers as in the LAYER table,
+/// then in order of appearance. Grouped once: files with many layers
+/// would otherwise take layers × primitives comparisons.
+fn group_by_layer<'a>(
+    prims: &'a [Prim],
+    layer_order: &'a [String],
+) -> (Vec<&'a str>, HashMap<&'a str, Vec<&'a Prim>>) {
     let mut by_layer: HashMap<&str, Vec<&Prim>> = HashMap::new();
     let mut appearance: Vec<&str> = Vec::new();
     for prim in prims {
@@ -308,92 +340,74 @@ fn write_svg(prims: &[Prim], layer_order: &[String]) -> Result<(String, [f64; 2]
             layers.push(name);
         }
     }
+    (layers, by_layer)
+}
 
-    let mut svg = format!(
-        concat!(
-            r#"<?xml version="1.0" encoding="UTF-8"?>"#,
-            "\n",
-            r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="{w}mm" height="{h}mm" viewBox="0 0 {w} {h}">"#,
-            "\n"
-        ),
-        w = num(width),
-        h = num(height)
-    );
-    for (index, layer) in layers.iter().enumerate() {
-        let _ = writeln!(
-            svg,
-            r#"<g id="layer{}" inkscape:groupmode="layer" inkscape:label="{}">"#,
-            index + 1,
-            escape(layer)
-        );
-        for prim in by_layer[layer].iter().copied() {
-            match prim {
-                Prim::Path {
-                    stroke,
-                    fill,
-                    width,
-                    dash,
-                    evenodd,
-                    segs,
-                    ..
-                } => {
-                    let _ = write!(svg, r#"<path d="{}""#, path_data(segs, &flip));
-                    match fill {
-                        Some(color) => {
-                            let _ = write!(svg, r#" fill="{}""#, colors::hex(*color));
-                        }
-                        None => svg.push_str(r#" fill="none""#),
-                    }
-                    if *evenodd {
-                        svg.push_str(r#" fill-rule="evenodd""#);
-                    }
-                    match stroke {
-                        Some(color) => {
-                            let _ = write!(
-                                svg,
-                                r#" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round""#,
-                                colors::hex(*color),
-                                num(*width)
-                            );
-                            if let Some(dash) = dash {
-                                let values: Vec<String> = dash.iter().map(|v| num(*v)).collect();
-                                let _ = write!(svg, r#" stroke-dasharray="{}""#, values.join(" "));
-                            }
-                        }
-                        None => svg.push_str(r#" stroke="none""#),
-                    }
-                    svg.push_str("/>\n");
+/// Writes one primitive as an SVG element, `flip` mapping world to SVG
+/// coordinates.
+fn write_prim(svg: &mut String, prim: &Prim, flip: &Affine) {
+    match prim {
+        Prim::Path {
+            stroke,
+            fill,
+            width,
+            dash,
+            evenodd,
+            segs,
+            ..
+        } => {
+            let _ = write!(svg, r#"<path d="{}""#, path_data(segs, flip));
+            match fill {
+                Some(color) => {
+                    let _ = write!(svg, r#" fill="{}""#, colors::hex(*color));
                 }
-                Prim::Text {
-                    fill,
-                    m,
-                    size,
-                    anchor,
-                    lines,
-                    first_baseline,
-                    line_height,
-                    ..
-                } => {
-                    let t = flip.then(*m);
-                    let _ = writeln!(
-                        svg,
-                        r#"<text transform="matrix({} {} {} {} {} {})" fill="{}" {}</text>"#,
-                        precise(t.a),
-                        precise(t.b),
-                        precise(t.c),
-                        precise(t.d),
-                        num(t.e),
-                        num(t.f),
-                        colors::hex(*fill),
-                        text_markup(*size, anchor, lines, *first_baseline, *line_height)
-                    );
-                }
+                None => svg.push_str(r#" fill="none""#),
             }
+            if *evenodd {
+                svg.push_str(r#" fill-rule="evenodd""#);
+            }
+            match stroke {
+                Some(color) => {
+                    let _ = write!(
+                        svg,
+                        r#" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round""#,
+                        colors::hex(*color),
+                        num(*width)
+                    );
+                    if let Some(dash) = dash {
+                        let values: Vec<String> = dash.iter().map(|v| num(*v)).collect();
+                        let _ = write!(svg, r#" stroke-dasharray="{}""#, values.join(" "));
+                    }
+                }
+                None => svg.push_str(r#" stroke="none""#),
+            }
+            svg.push_str("/>\n");
         }
-        svg.push_str("</g>\n");
+        Prim::Text {
+            fill,
+            m,
+            size,
+            anchor,
+            lines,
+            first_baseline,
+            line_height,
+            ..
+        } => {
+            let t = flip.then(*m);
+            let _ = writeln!(
+                svg,
+                r#"<text transform="matrix({} {} {} {} {} {})" fill="{}" {}</text>"#,
+                precise(t.a),
+                precise(t.b),
+                precise(t.c),
+                precise(t.d),
+                num(t.e),
+                num(t.f),
+                colors::hex(*fill),
+                text_markup(*size, anchor, lines, *first_baseline, *line_height)
+            );
+        }
     }
-    svg.push_str("</svg>\n");
-    Ok((svg, [width, height]))
 }
 
 fn path_data(segs: &[Seg], m: &Affine) -> String {

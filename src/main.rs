@@ -660,9 +660,9 @@ struct FileState {
 /// Gezeichnete Grafiken der Teile für die Arbeitsfläche.
 struct Textures {
     /// Textur des gewählten Teils.
-    texture: Option<egui::TextureHandle>,
+    active: Option<egui::TextureHandle>,
     /// Texturen der übrigen Teile, parallel zu `project.parts`.
-    part_textures: Vec<Option<egui::TextureHandle>>,
+    parts: Vec<Option<egui::TextureHandle>>,
     /// Objekte in den Farben ihrer Bearbeitung (`ltt::processing_preview`)
     /// und der Stand, für den sie gilt.
     live: Option<(u64, Option<egui::TextureHandle>)>,
@@ -695,8 +695,8 @@ impl VisiCutR {
         let mut app = Self {
             project: Project::default(),
             textures: Textures {
-                texture: None,
-                part_textures: Vec::new(),
+                active: None,
+                parts: Vec::new(),
                 live: None,
             },
             origin_bottom_left: None,
@@ -1254,8 +1254,8 @@ impl VisiCutR {
         self.project.name = tr("Neues Projekt").into();
         self.project.material.clear();
         self.devices.apply(&mut self.project);
-        self.textures.texture = None;
-        self.textures.part_textures.clear();
+        self.textures.active = None;
+        self.textures.parts.clear();
         self.file.path = None;
         self.file.cached = None;
         self.file.dirty = false;
@@ -1271,18 +1271,18 @@ impl VisiCutR {
     fn snapshot(&self) -> Snapshot {
         Snapshot {
             project: self.project.clone(),
-            texture: self.textures.texture.clone(),
-            part_textures: self.textures.part_textures.clone(),
+            texture: self.textures.active.clone(),
+            part_textures: self.textures.parts.clone(),
         }
     }
 
     /// Texturen aller Teile in Listenreihenfolge.
     fn all_textures(&self) -> Vec<Option<egui::TextureHandle>> {
-        let mut all = self.textures.part_textures.clone();
+        let mut all = self.textures.parts.clone();
         if self.project.has_artwork() {
             all.insert(
                 self.project.active_part.min(all.len()),
-                self.textures.texture.clone(),
+                self.textures.active.clone(),
             );
         }
         all
@@ -1292,13 +1292,13 @@ impl VisiCutR {
     /// (Wählen, Hinzufügen, Entfernen) auf das gewählte und die übrigen Teile.
     fn arrange_textures(&mut self, mut all: Vec<Option<egui::TextureHandle>>) {
         if !self.project.has_artwork() || all.is_empty() {
-            self.textures.texture = None;
-            self.textures.part_textures.clear();
+            self.textures.active = None;
+            self.textures.parts.clear();
             return;
         }
         let active = self.project.active_part.min(all.len() - 1);
-        self.textures.texture = all.remove(active);
-        self.textures.part_textures = all;
+        self.textures.active = all.remove(active);
+        self.textures.parts = all;
     }
 
     /// Texturen für alle Teile von `project`; Grafiken, die schon angezeigt
@@ -1315,8 +1315,8 @@ impl VisiCutR {
         ),
         String,
     > {
-        let existing: Vec<(&str, &egui::TextureHandle)> = std::iter::once(&self.textures.texture)
-            .chain(&self.textures.part_textures)
+        let existing: Vec<(&str, &egui::TextureHandle)> = std::iter::once(&self.textures.active)
+            .chain(&self.textures.parts)
             .zip(
                 std::iter::once(self.project.svg.as_str())
                     .chain(self.project.parts.iter().map(|p| p.svg.as_str())),
@@ -1362,12 +1362,12 @@ impl VisiCutR {
 
     /// Kopiert das gewählte Teil um 5 mm versetzt als neues Teil.
     fn duplicate_part(&mut self) {
-        if self.textures.texture.is_none() {
+        if self.textures.active.is_none() {
             return;
         }
         self.checkpoint();
         let mut all = self.all_textures();
-        all.push(self.textures.texture.clone());
+        all.push(self.textures.active.clone());
         let mut part = self.project.active();
         part.x_mm += 5.0;
         part.y_mm += 5.0;
@@ -1380,7 +1380,7 @@ impl VisiCutR {
     /// Kopiert das gewählte Teil, auch als Text in die Zwischenablage des
     /// Systems: so kommt es mit ⌘V auch in ein anderes VisiCutR-Fenster.
     fn copy_part(&mut self, ctx: &egui::Context) {
-        if self.textures.texture.is_none() {
+        if self.textures.active.is_none() {
             return;
         }
         let part = self.project.active();
@@ -1414,7 +1414,7 @@ impl VisiCutR {
             Ok(((texture, part_textures), project)) => {
                 self.checkpoint();
                 self.project = project;
-                (self.textures.texture, self.textures.part_textures) = (texture, part_textures);
+                (self.textures.active, self.textures.parts) = (texture, part_textures);
                 self.file.dirty = true;
                 self.messages.status = tr("Teil eingefügt · Widerrufen macht es rückgängig").into();
             }
@@ -1459,8 +1459,8 @@ impl VisiCutR {
         // Die neue Grafik ersetzt alle Teile.
         self.project.parts.clear();
         self.project.active_part = 0;
-        self.textures.part_textures.clear();
-        self.textures.texture = Some(ctx.load_texture(
+        self.textures.parts.clear();
+        self.textures.active = Some(ctx.load_texture(
             "SVG",
             color_image(preview.pixmap),
             egui::TextureOptions::LINEAR,
@@ -1496,8 +1496,7 @@ impl VisiCutR {
         self.project.y_mm += imported.offset_mm[1] as f32;
         if !imported.extra_parts.is_empty() {
             visicut_core::compose::add_extra_parts(&mut self.project, imported.extra_parts)?;
-            (self.textures.texture, self.textures.part_textures) =
-                self.textures_for(ctx, &self.project)?;
+            (self.textures.active, self.textures.parts) = self.textures_for(ctx, &self.project)?;
         }
         self.messages.status = tr!(
             "{file} importiert · Originalmaße übernommen",
@@ -1547,8 +1546,7 @@ impl VisiCutR {
                 .map_err(|e| tr!("Ungültiges Projekt: {error}", error = e))?;
             // Entwürfe ohne Motiv oder außerhalb des Betts lassen sich öffnen.
             project.validate_document()?;
-            (self.textures.texture, self.textures.part_textures) =
-                self.textures_for(ctx, &project)?;
+            (self.textures.active, self.textures.parts) = self.textures_for(ctx, &project)?;
             self.project = project;
             if visicut_core::i18n::is_default_text("Material wählen", &self.project.material) {
                 self.project.material.clear();
@@ -2001,7 +1999,7 @@ impl VisiCutR {
                 .unwrap_or(0)
         };
         self.project = project;
-        (self.textures.texture, self.textures.part_textures) = textures;
+        (self.textures.active, self.textures.parts) = textures;
         for index in old_steps..self.project.steps.len() {
             // Steps of the existing motif keep its parameters.
             if self.project.steps[index]
@@ -2075,7 +2073,7 @@ impl VisiCutR {
     /// Teile bleibt ein leeres Projekt, Material, Gerät und Einstellungen
     /// bleiben.
     fn delete_part(&mut self) {
-        if self.textures.texture.is_none() {
+        if self.textures.active.is_none() {
             return;
         }
         self.checkpoint();
@@ -2111,8 +2109,8 @@ impl VisiCutR {
 
     fn restore(&mut self, snapshot: Snapshot) {
         self.project = snapshot.project;
-        self.textures.texture = snapshot.texture;
-        self.textures.part_textures = snapshot.part_textures;
+        self.textures.active = snapshot.texture;
+        self.textures.parts = snapshot.part_textures;
         self.file.dirty = true;
     }
 
@@ -2826,7 +2824,7 @@ impl VisiCutR {
             | Command::RotateRight
             | Command::RotateBy
             | Command::FlipHorizontal
-            | Command::FlipVertical => self.textures.texture.is_some() && !self.busy(),
+            | Command::FlipVertical => self.textures.active.is_some() && !self.busy(),
             Command::OpenRecent(_) => !self.busy(),
             Command::ClearRecent => !self.settings.recent.is_empty(),
             Command::ClearCache => !session::states(&session::dir()).is_empty(),
@@ -2834,7 +2832,7 @@ impl VisiCutR {
             Command::Paste | Command::PasteInPlace => self.copied.is_some() && !self.busy(),
             Command::Undo => self.history.can_undo() && !self.busy(),
             Command::Redo => self.history.can_redo() && !self.busy(),
-            Command::ExportPlf => self.textures.texture.is_some() && !self.busy(),
+            Command::ExportPlf => self.textures.active.is_some() && !self.busy(),
             Command::ToggleCamera => self.devices.has_camera(),
             Command::RefreshCamera => self.devices.camera_shown() && !self.devices.camera_loading(),
             Command::Remnants => self.devices.has_camera() && !self.busy(),
@@ -3013,7 +3011,7 @@ impl VisiCutR {
             self.paste_part(ctx, pasted, false);
         }
         // Pfeiltasten verschieben das Motiv, solange kein Eingabefeld aktiv ist.
-        if self.textures.texture.is_none() {
+        if self.textures.active.is_none() {
             return;
         }
         let (dx, dy) = ctx.input_mut(|i| {
@@ -3448,7 +3446,7 @@ impl VisiCutR {
 
     /// Aufklappfeld „Drehen“ der Objektleiste: freier Winkel und 90°-Schritte.
     fn rotate_panel(&mut self, ui: &mut egui::Ui, clicked: &mut Option<Command>) {
-        let editable = self.textures.texture.is_some() && !self.busy();
+        let editable = self.textures.active.is_some() && !self.busy();
         ui.horizontal(|ui| {
             ui.label(tr("Winkel"));
             // Feste Breite und kein Ziehen: anklicken, Zahl tippen, Enter dreht.
@@ -3534,7 +3532,7 @@ impl VisiCutR {
         if self.textures.live.as_ref().is_some_and(|(k, _)| *k == key) {
             return;
         }
-        let texture = (self.textures.texture.is_some())
+        let texture = (self.textures.active.is_some())
             .then(|| ltt::processing_preview_sized(&self.project, max_px, min_line_px).ok())
             .flatten()
             .and_then(|png| resvg::tiny_skia::Pixmap::decode_png(&png).ok())
@@ -3582,7 +3580,7 @@ impl VisiCutR {
             .rect_filled(ui.available_rect_before_wrap(), 0.0, form::CANVAS);
         ui.add_space(10.0);
         self.object_bar(ui, &mut clicked);
-        if self.textures.texture.is_none() && !self.devices.camera_shown() {
+        if self.textures.active.is_none() && !self.devices.camera_shown() {
             self.empty_state(ui, &mut clicked);
         } else {
             self.bed(ui, &mut clicked);
@@ -3635,7 +3633,7 @@ impl VisiCutR {
                         }
                         self.file.name_draft = None;
                     }
-                } else if self.textures.texture.is_some() {
+                } else if self.textures.active.is_some() {
                     let title = ui
                         .add(
                             egui::Label::new(
@@ -3801,7 +3799,7 @@ impl VisiCutR {
     /// öffnen ein Aufklappfeld.
     fn object_bar(&mut self, ui: &mut egui::Ui, clicked: &mut Option<Command>) {
         use object_bar::Icon;
-        let editable = self.textures.texture.is_some() && !self.busy();
+        let editable = self.textures.active.is_some() && !self.busy();
         let hover = |ui: &egui::Ui, command: Command| {
             let mut text = command.title().trim_end_matches(" …").to_owned();
             if let Some(shortcut) = command.shortcut() {
@@ -3955,7 +3953,7 @@ impl VisiCutR {
             self.rulers(ui.painter(), view);
             let painter = ui.painter().with_clip_rect(shown);
             self.paint_bed(&painter, view);
-            match self.textures.texture.as_ref().map(egui::TextureHandle::id) {
+            match self.textures.active.as_ref().map(egui::TextureHandle::id) {
                 Some(texture) => self.motif_on_bed(ui, &painter, view, texture, clicked),
                 None => {
                     let open = ui
@@ -4141,7 +4139,7 @@ impl VisiCutR {
             .map(|(k, part)| {
                 let index = k + usize::from(k >= self.project.active_part);
                 let rect = view.to_screen([part.x_mm, part.y_mm, part.width_mm, part.height_mm]);
-                match self.textures.part_textures.get(k).and_then(Option::as_ref) {
+                match self.textures.parts.get(k).and_then(Option::as_ref) {
                     _ if live.is_some() => {}
                     Some(texture) => {
                         painter.image(texture.id(), rect, uv, Color32::WHITE);

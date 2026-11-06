@@ -402,7 +402,6 @@ fn profile_table(ui: &mut egui::Ui, material: &mut Material, drop: &mut Option<u
             ui.end_row();
             for (g, (thickness, members)) in groups.iter().enumerate() {
                 if g > 0 {
-                    // Luft zwischen den Stärken.
                     ui.add_space(6.0);
                     ui.end_row();
                 }

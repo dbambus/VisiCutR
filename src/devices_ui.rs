@@ -625,7 +625,6 @@ impl DeviceUi {
                             section_title(ui, |ui| {
                                 let size = egui::Vec2::splat(ui.spacing().icon_width);
                                 let (_, icon) = ui.allocate_exact_size(size, Sense::click());
-                                // Kleines Dreieck wie im CollapsingHeader.
                                 let (small, _) = ui.spacing().icon_rectangles(icon.rect);
                                 egui::collapsing_header::paint_default_icon(
                                     ui,

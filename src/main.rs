@@ -3350,7 +3350,6 @@ impl VisiCutR {
                     "Anklicken und Winkel eingeben; positive Winkel drehen im Uhrzeigersinn",
                 ));
             let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            // Nur ganzzahlige Drehungen.
             self.rotate_deg = self.rotate_deg.round();
             if (ui
                 .add_enabled(editable && self.rotate_deg != 0.0, egui::Button::new("✔"))
@@ -3738,7 +3737,6 @@ impl VisiCutR {
             object_bar::separator(ui);
             tool(ui, Icon::Undo, Command::Undo);
             tool(ui, Icon::Redo, Command::Redo);
-            // Ringsum gleicher Rand um den Inhalt.
             let popup_frame = egui::Frame::popup(ui.style()).inner_margin(egui::Margin::same(14));
             let panel = |response: &egui::Response, id: egui::Id| {
                 egui::Popup::from_toggle_button_response(response)
@@ -3813,7 +3811,6 @@ impl VisiCutR {
 
     /// Arbeitsbett mit Linealen, Raster, Kamerabild und Motiv.
     fn bed(&mut self, ui: &mut egui::Ui, clicked: &mut Option<Command>) {
-        // Probleme mit der Lage des Motivs stehen rot über dem Arbeitsbett.
         const RULER: f32 = 30.0;
         const MARGIN: f32 = 14.0;
         let bed_mm = Vec2::new(self.project.bed_width_mm, self.project.bed_height_mm);

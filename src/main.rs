@@ -286,6 +286,110 @@ impl LabOffer {
     }
 }
 
+/// Antwort im Dialog der FabLab-Einstellungen.
+#[derive(Clone, Copy, PartialEq)]
+enum LabAnswer {
+    /// Noch keine; der Dialog bleibt offen, solange er nicht geschlossen wird.
+    Open,
+    Apply,
+    Cancel,
+}
+
+/// Überschrift des Dialogs mit dem Namen des FabLabs.
+fn lab_offer_title(ui: &mut egui::Ui, offer: &LabOffer) {
+    ui.vertical_centered(|ui| {
+        ui.label(
+            egui::RichText::new(if offer.update {
+                tr("Neue FabLab-Einstellungen")
+            } else {
+                tr("FabLab-Einstellungen übernehmen")
+            })
+            .font(form::bold(20.0)),
+        );
+        ui.add_space(4.0);
+        ui.weak(&offer.name);
+    });
+}
+
+/// Was übernommen wird: Lasercutter, Materialien, Vorlagen, Suche beim Start.
+fn lab_offer_choices(ui: &mut egui::Ui, offer: &mut LabOffer) {
+    let settings = &offer.settings;
+    ui.checkbox(
+        &mut offer.devices,
+        tr!("{count} Lasercutter", count = settings.devices.len()),
+    );
+    indented_caption(ui, tr("Ersetzt Lasercutter gleichen Namens."));
+    if let Some(library) = &settings.library {
+        ui.checkbox(
+            &mut offer.materials,
+            tr!(
+                "{materials} Materialien mit {profiles} Laserwerten",
+                materials = library.materials.len(),
+                profiles = settings.profile_count()
+            ),
+        );
+        indented_caption(
+            ui,
+            tr("Ersetzt die Materialbibliothek samt eigener Änderungen."),
+        );
+    }
+    if !settings.templates.is_empty() {
+        ui.checkbox(
+            &mut offer.templates,
+            tr!(
+                "{count} Zuordnungen als Vorlagen",
+                count = settings.templates.len()
+            ),
+        );
+    }
+    ui.add_space(6.0);
+    ui.checkbox(
+        &mut offer.watch,
+        tr("Beim Start nach neuen Fassungen suchen"),
+    );
+    if !settings.warnings.is_empty() {
+        ui.add_space(6.0);
+        egui::CollapsingHeader::new(tr!("{count} Hinweise", count = settings.warnings.len())).show(
+            ui,
+            |ui| {
+                for warning in &settings.warnings {
+                    form::caption(ui, warning.clone());
+                }
+            },
+        );
+    }
+}
+
+/// „Übernehmen“ und „Abbrechen“ bzw. „Später“.
+fn lab_offer_buttons(ui: &mut egui::Ui, offer: &LabOffer) -> LabAnswer {
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let apply = ui
+            .add_enabled(
+                offer.devices || offer.materials || offer.templates || offer.watch,
+                form::primary_button(tr("Übernehmen")),
+            )
+            .clicked();
+        let cancel = ui
+            .add(
+                egui::Button::new(if offer.update {
+                    tr("Später")
+                } else {
+                    tr("Abbrechen")
+                })
+                .min_size(egui::vec2(0.0, 28.0)),
+            )
+            .clicked();
+        if apply {
+            LabAnswer::Apply
+        } else if cancel {
+            LabAnswer::Cancel
+        } else {
+            LabAnswer::Open
+        }
+    })
+    .inner
+}
+
 /// Aktionen, die ungesicherte Änderungen verwerfen würden.
 enum Replace {
     New,
@@ -363,6 +467,44 @@ impl ViewGroup {
             Self::Fit => &[Command::ZoomFit],
         }
     }
+}
+
+/// Wie viele Ansichtsgruppen von links neben den Titel passen; reicht der
+/// Platz nicht für alle, bleibt Raum für das Menü „…“.
+fn fitting_groups(ui: &egui::Ui, groups: &[(ViewGroup, Vec<&str>)]) -> usize {
+    let spacing = ui.spacing().item_spacing.x;
+    let padding = ui.spacing().button_padding.x * 2.0;
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let text_width = |text: &str| {
+        ui.fonts_mut(|f| {
+            f.layout_no_wrap(text.to_owned(), font.clone(), Color32::BLACK)
+                .size()
+                .x
+        })
+    };
+    let widths: Vec<f32> = groups
+        .iter()
+        .map(|(group, texts)| {
+            let extra = if *group == ViewGroup::Zoom { 6.0 } else { 0.0 };
+            texts
+                .iter()
+                .map(|t| text_width(t) + padding + spacing)
+                .sum::<f32>()
+                + extra
+        })
+        .collect();
+    let available = ui.available_width() - 24.0;
+    let overflow = text_width("…") + padding + spacing;
+    let mut shown = groups.len();
+    while shown > 0 {
+        let needed: f32 =
+            widths[..shown].iter().sum::<f32>() + if shown < groups.len() { overflow } else { 0.0 };
+        if needed <= available {
+            break;
+        }
+        shown -= 1;
+    }
+    shown
 }
 
 /// Reihenfolge im Fenster „Tastenkürzel“.
@@ -673,31 +815,69 @@ struct Navigation {
     show_shortcuts: bool,
 }
 
+/// Lädt die Einstellungen und stellt ihre Sprache ein.
+fn load_settings() -> settings::AppSettings {
+    // Erster Start nach der Umbenennung: Einstellungen von VisiCutRust übernehmen.
+    let moved = visicut_core::device::migrate_legacy_config();
+    let mut settings = settings::AppSettings::load();
+    if let Some((old, new)) = &moved {
+        settings.moved_config(old, new);
+        let _ = settings.save();
+    }
+    i18n::set_language(settings.language());
+    settings
+}
+
+/// Helles Erscheinungsbild, Schriften und Tastaturzoom der Oberfläche.
+fn apply_appearance(ctx: &egui::Context) {
+    // Die Oberfläche ist hell: auch die Titelleiste hell, nicht schwarz auf
+    // dunklem Hintergrund.
+    ctx.set_theme(egui::ThemePreference::Light);
+    // Die Titelleiste richtet winit nach dem Windows-Theme; egui gibt die
+    // Vorgabe nicht von selbst weiter.
+    ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Light));
+    ctx.set_visuals(egui::Visuals::light());
+    form::apply_style(ctx);
+    form::apply_fonts(ctx);
+    // Strg+Plus/Minus/0 zoomen die Arbeitsfläche, nicht die Oberfläche.
+    ctx.options_mut(|o| o.zoom_with_keyboard = false);
+}
+
 impl VisiCutR {
     fn new(cc: &eframe::CreationContext<'_>, launch: instance::Launch) -> Self {
-        // Erster Start nach der Umbenennung: Einstellungen von VisiCutRust übernehmen.
-        let moved = visicut_core::device::migrate_legacy_config();
-        let mut settings = settings::AppSettings::load();
-        if let Some((old, new)) = &moved {
-            settings.moved_config(old, new);
-            let _ = settings.save();
-        }
-        i18n::set_language(settings.language());
-        // Die Oberfläche ist hell: auch die Titelleiste hell, nicht schwarz auf
-        // dunklem Hintergrund.
-        cc.egui_ctx.set_theme(egui::ThemePreference::Light);
-        // Die Titelleiste richtet winit nach dem Windows-Theme; egui gibt die
-        // Vorgabe nicht von selbst weiter.
-        cc.egui_ctx
-            .send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Light));
-        cc.egui_ctx.set_visuals(egui::Visuals::light());
-        form::apply_style(&cc.egui_ctx);
-        form::apply_fonts(&cc.egui_ctx);
-        // Strg+Plus/Minus/0 zoomen die Arbeitsfläche, nicht die Oberfläche.
-        cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        let settings = load_settings();
+        apply_appearance(&cc.egui_ctx);
         let (devices, device_error) = devices_ui::DeviceUi::load();
         let (jobs, material_error) = jobs_ui::JobUi::load();
-        let mut app = Self {
+        let mut app = Self::initial(settings, devices, jobs);
+        app.reset_project();
+        app.preview.single_job = app.settings.single_job;
+        app.start_due_checks();
+        if let Some(error) = device_error {
+            app.report(tr!(
+                "Geräteliste nicht lesbar, FAU-Standard wird verwendet: {error}",
+                error = error
+            ));
+        } else if let Some(error) = material_error {
+            app.report(error);
+        }
+        #[cfg(feature = "screenshot")]
+        app.apply_screenshot_arguments();
+        if !launch.standalone {
+            app.listen_as_instance(&cc.egui_ctx);
+        }
+        app.open_at_launch(&cc.egui_ctx, launch);
+        cc.egui_ctx.request_repaint();
+        app
+    }
+
+    /// Zustand vor dem ersten Bild: leeres Projekt, nichts offen.
+    fn initial(
+        settings: settings::AppSettings,
+        devices: devices_ui::DeviceUi,
+        jobs: jobs_ui::JobUi,
+    ) -> Self {
+        Self {
             project: Project::default(),
             textures: Textures {
                 active: None,
@@ -764,20 +944,23 @@ impl VisiCutR {
             inkscape: None,
             #[cfg(feature = "screenshot")]
             capture: None,
-        };
-        app.reset_project();
-        app.preview.single_job = app.settings.single_job;
+        }
+    }
+
+    /// Startet die fälligen Prüfungen auf ein neues Release und neue
+    /// FabLab-Einstellungen.
+    fn start_due_checks(&mut self) {
         // Alle 14 Tage im Hintergrund nach einem neuen Release fragen.
-        if !app.settings.update_check_disabled
+        if !self.settings.update_check_disabled
             && visicut_core::update::is_due(
-                app.settings.last_update_check,
+                self.settings.last_update_check,
                 visicut_core::update::now_secs(),
             )
         {
-            app.start_update_check(false);
+            self.start_update_check(false);
         }
         // Einmal am Tag nach einer neuen Fassung der FabLab-Einstellungen fragen.
-        if let Some(lab) = app
+        if let Some(lab) = self
             .settings
             .lab
             .clone()
@@ -788,71 +971,70 @@ impl VisiCutR {
                 let _ =
                     tx.send(visicut_core::lab::download(&lab.name, &lab.url).map_err(String::from));
             });
-            app.background.lab_check = Some(rx);
+            self.background.lab_check = Some(rx);
         }
-        if let Some(error) = device_error {
-            app.report(tr!(
-                "Geräteliste nicht lesbar, FAU-Standard wird verwendet: {error}",
-                error = error
-            ));
-        } else if let Some(error) = material_error {
-            app.report(error);
-        }
-        #[cfg(feature = "screenshot")]
+    }
+
+    /// `--capture BILD.png` und `--page …` für Bildschirmaufnahmen.
+    #[cfg(feature = "screenshot")]
+    fn apply_screenshot_arguments(&mut self) {
         let arguments: Vec<String> = std::env::args().skip(1).collect();
-        #[cfg(feature = "screenshot")]
         if let Some(index) = arguments
             .iter()
             .position(|argument| argument == "--capture")
         {
-            app.capture = arguments
+            self.capture = arguments
                 .get(index + 1)
                 .map(|path| (PathBuf::from(path), 0));
         }
         // Reiter für die Aufnahme: `--page preview|materials|job|general|devices`.
-        #[cfg(feature = "screenshot")]
         if let Some(index) = arguments.iter().position(|argument| argument == "--page") {
             match arguments.get(index + 1).map(String::as_str) {
-                Some("preview") => app.navigation.show_preview = true,
-                Some("devices") => app.show_settings(SettingsPage::Devices),
-                Some("materials") => app.show_settings(SettingsPage::Materials),
-                Some("job") => app.show_settings(SettingsPage::Job),
-                Some("general") => app.show_settings(SettingsPage::General),
-                Some("addins") => app.show_settings(SettingsPage::AddIns),
+                Some("preview") => self.navigation.show_preview = true,
+                Some("devices") => self.show_settings(SettingsPage::Devices),
+                Some("materials") => self.show_settings(SettingsPage::Materials),
+                Some("job") => self.show_settings(SettingsPage::Job),
+                Some("general") => self.show_settings(SettingsPage::General),
+                Some("addins") => self.show_settings(SettingsPage::AddIns),
                 _ => {}
             }
         }
-        if !launch.standalone {
-            // Für das Illustrator-Skript und das CorelDRAW-Makro.
-            if let Ok(program) = std::env::current_exe()
-                && let Err(e) =
-                    addins::remember_program(&visicut_core::device::config_dir(), &program)
-            {
-                eprintln!("Programmpfad nicht gespeichert: {e}");
-            }
-            let ctx = cc.egui_ctx.clone();
-            match instance::Listener::start(&visicut_core::device::config_dir(), move || {
-                ctx.request_repaint()
-            }) {
-                Ok(listener) => app.background.instance = Some(listener),
-                Err(e) => eprintln!("Einzelinstanz nicht verfügbar: {e}"),
-            }
+    }
+
+    /// Nimmt Dateien späterer Starts entgegen und merkt sich den
+    /// Programmpfad für die Erweiterungen.
+    fn listen_as_instance(&mut self, ctx: &egui::Context) {
+        // Für das Illustrator-Skript und das CorelDRAW-Makro.
+        if let Ok(program) = std::env::current_exe()
+            && let Err(e) = addins::remember_program(&visicut_core::device::config_dir(), &program)
+        {
+            eprintln!("Programmpfad nicht gespeichert: {e}");
         }
+        let ctx = ctx.clone();
+        match instance::Listener::start(&visicut_core::device::config_dir(), move || {
+            ctx.request_repaint()
+        }) {
+            Ok(listener) => self.background.instance = Some(listener),
+            Err(e) => eprintln!("Einzelinstanz nicht verfügbar: {e}"),
+        }
+    }
+
+    /// Öffnet, was beim Start verlangt wurde: Beispiel, übergebene Dateien
+    /// oder den ungesicherten Stand des letzten Beendens.
+    fn open_at_launch(&mut self, ctx: &egui::Context, launch: instance::Launch) {
         // Unter macOS kommen per Doppelklick geöffnete Dateien als Ereignis.
         let opened = open_files::take();
-        open_files::watch(&cc.egui_ctx);
+        open_files::watch(ctx);
         if launch.demo {
-            app.perform(&cc.egui_ctx, Replace::Demo);
+            self.perform(ctx, Replace::Demo);
         } else if !launch.request.files.is_empty() {
-            app.open_request(&cc.egui_ctx, launch.request);
+            self.open_request(ctx, launch.request);
         } else if !opened.is_empty() {
-            app.open_files(&cc.egui_ctx, opened);
+            self.open_files(ctx, opened);
         } else if let Some(path) = session::take_resume(&session::dir()) {
             // Sonst der beim letzten Beenden ungesicherte Stand.
-            app.perform(&cc.egui_ctx, Replace::Open(path));
+            self.perform(ctx, Replace::Open(path));
         }
-        cc.egui_ctx.request_repaint();
-        app
     }
 
     /// Sichert Sprache und Verlauf; ein Fehler steht nur in der Statuszeile.
@@ -961,8 +1143,7 @@ impl VisiCutR {
         let Some(mut offer) = self.background.lab_offer.take() else {
             return;
         };
-        let mut apply = false;
-        let mut cancel = false;
+        let mut answer = LabAnswer::Open;
         let outer = egui::Frame::popup(&ctx.style()).inner_margin(5.0);
         let modal = egui::Modal::new(egui::Id::new("lab"))
             .frame(outer)
@@ -973,93 +1154,17 @@ impl VisiCutR {
                     .inner_margin(egui::Margin::symmetric(18, 14))
                     .show(ui, |ui| {
                         ui.set_width(460.0);
-                        ui.vertical_centered(|ui| {
-                            ui.label(
-                                egui::RichText::new(if offer.update {
-                                    tr("Neue FabLab-Einstellungen")
-                                } else {
-                                    tr("FabLab-Einstellungen übernehmen")
-                                })
-                                .font(form::bold(20.0)),
-                            );
-                            ui.add_space(4.0);
-                            ui.weak(&offer.name);
-                        });
+                        lab_offer_title(ui, &offer);
                         ui.add_space(10.0);
-                        let settings = &offer.settings;
-                        ui.checkbox(
-                            &mut offer.devices,
-                            tr!("{count} Lasercutter", count = settings.devices.len()),
-                        );
-                        indented_caption(ui, tr("Ersetzt Lasercutter gleichen Namens."));
-                        if let Some(library) = &settings.library {
-                            ui.checkbox(
-                                &mut offer.materials,
-                                tr!(
-                                    "{materials} Materialien mit {profiles} Laserwerten",
-                                    materials = library.materials.len(),
-                                    profiles = settings.profile_count()
-                                ),
-                            );
-                            indented_caption(
-                                ui,
-                                tr("Ersetzt die Materialbibliothek samt eigener Änderungen."),
-                            );
-                        }
-                        if !settings.templates.is_empty() {
-                            ui.checkbox(
-                                &mut offer.templates,
-                                tr!(
-                                    "{count} Zuordnungen als Vorlagen",
-                                    count = settings.templates.len()
-                                ),
-                            );
-                        }
-                        ui.add_space(6.0);
-                        ui.checkbox(
-                            &mut offer.watch,
-                            tr("Beim Start nach neuen Fassungen suchen"),
-                        );
-                        if !settings.warnings.is_empty() {
-                            ui.add_space(6.0);
-                            egui::CollapsingHeader::new(tr!(
-                                "{count} Hinweise",
-                                count = settings.warnings.len()
-                            ))
-                            .show(ui, |ui| {
-                                for warning in &settings.warnings {
-                                    form::caption(ui, warning.clone());
-                                }
-                            });
-                        }
+                        lab_offer_choices(ui, &mut offer);
                         ui.add_space(12.0);
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            apply = ui
-                                .add_enabled(
-                                    offer.devices
-                                        || offer.materials
-                                        || offer.templates
-                                        || offer.watch,
-                                    form::primary_button(tr("Übernehmen")),
-                                )
-                                .clicked();
-                            cancel = ui
-                                .add(
-                                    egui::Button::new(if offer.update {
-                                        tr("Später")
-                                    } else {
-                                        tr("Abbrechen")
-                                    })
-                                    .min_size(egui::vec2(0.0, 28.0)),
-                                )
-                                .clicked();
-                        });
+                        answer = lab_offer_buttons(ui, &offer);
                     });
             });
-        if apply {
-            self.adopt_lab(offer);
-        } else if !cancel && !modal.should_close() {
-            self.background.lab_offer = Some(offer);
+        match answer {
+            LabAnswer::Apply => self.adopt_lab(offer),
+            LabAnswer::Open if !modal.should_close() => self.background.lab_offer = Some(offer),
+            _ => {}
         }
     }
 
@@ -3620,185 +3725,177 @@ impl VisiCutR {
     /// Titel, Gerät und Ansichtsschalter über dem Arbeitsbett.
     fn canvas_header(&mut self, ui: &mut egui::Ui, clicked: &mut Option<Command>) {
         ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                // Projektname: Doppelklick zum Umbenennen, ⏎ oder Klick
-                // daneben übernimmt, Esc bricht ab.
-                if let Some(draft) = &mut self.file.name_draft {
-                    let field = ui.add(
-                        egui::TextEdit::singleline(draft)
-                            .font(egui::FontId::proportional(20.0))
-                            .desired_width(320.0),
-                    );
-                    field.request_focus();
-                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                        self.file.name_draft = None;
-                    } else if field.lost_focus() {
-                        let name = draft.trim().to_owned();
-                        if !name.is_empty() && name != self.project.name {
-                            self.project.name = name;
-                            self.file.dirty = true;
-                        }
-                        self.file.name_draft = None;
-                    }
-                } else if self.textures.active.is_some() {
-                    let title = ui
-                        .add(
-                            egui::Label::new(
-                                egui::RichText::new(self.project.name.as_str())
-                                    .size(20.0)
-                                    .strong(),
-                            )
-                            .sense(egui::Sense::click()),
-                        )
-                        .on_hover_text(tr("Doppelklick zum Umbenennen"));
-                    if title.double_clicked() {
-                        self.file.name_draft = Some(self.project.name.clone());
-                    }
-                } else {
-                    ui.label(
-                        egui::RichText::new(tr("Arbeitsbereich"))
-                            .size(20.0)
-                            .strong(),
-                    );
-                }
-                ui.weak(format!(
-                    "{} · {} × {} mm{}",
-                    self.devices.device().name,
-                    self.project.bed_width_mm,
-                    self.project.bed_height_mm,
-                    if self.project.rotary_axis {
-                        format!(" · {}", tr("Rotationseinheit"))
-                    } else {
-                        String::new()
-                    }
-                ));
-            });
+            ui.vertical(|ui| self.canvas_title(ui));
             // Gruppen von links nach rechts; was nicht neben den Titel passt,
             // wandert von rechts beginnend in das Menü „…“.
             let camera = format!("📷 {}", tr("Kamera"));
             let zoom = format!("{:.0} %", self.canvas.zoom * 100.0);
-            let has_camera = self.devices.has_camera();
-            let mut groups: Vec<(ViewGroup, Vec<&str>)> = Vec::new();
-            if has_camera {
-                groups.push((ViewGroup::Remnants, vec![Command::Remnants.title()]));
-                let mut texts = vec![camera.as_str()];
-                if self.devices.camera_shown() {
-                    texts.push("⟳");
-                }
-                groups.push((ViewGroup::Camera, texts));
-            }
-            groups.push((ViewGroup::Grid, vec![tr("Raster")]));
-            groups.push((ViewGroup::Zoom, vec!["−", &zoom, "+"]));
-            groups.push((ViewGroup::Actual, vec!["1:1"]));
-            groups.push((ViewGroup::Fit, vec![tr("Zurücksetzen")]));
-            let spacing = ui.spacing().item_spacing.x;
-            let padding = ui.spacing().button_padding.x * 2.0;
-            let font = egui::TextStyle::Button.resolve(ui.style());
-            let text_width = |text: &str| {
-                ui.fonts_mut(|f| {
-                    f.layout_no_wrap(text.to_owned(), font.clone(), Color32::BLACK)
-                        .size()
-                        .x
-                })
-            };
-            let widths: Vec<f32> = groups
-                .iter()
-                .map(|(group, texts)| {
-                    let extra = if *group == ViewGroup::Zoom { 6.0 } else { 0.0 };
-                    texts
-                        .iter()
-                        .map(|t| text_width(t) + padding + spacing)
-                        .sum::<f32>()
-                        + extra
-                })
-                .collect();
-            let available = ui.available_width() - 24.0;
-            let overflow = text_width("…") + padding + spacing;
-            let mut shown = groups.len();
-            while shown > 0 {
-                let needed: f32 = widths[..shown].iter().sum::<f32>()
-                    + if shown < groups.len() { overflow } else { 0.0 };
-                if needed <= available {
-                    break;
-                }
-                shown -= 1;
-            }
+            let groups = self.view_groups(&camera, &zoom);
+            let shown = fitting_groups(ui, &groups);
             let hidden: Vec<ViewGroup> = groups[shown..].iter().map(|(g, _)| *g).collect();
             let visible: Vec<ViewGroup> = groups[..shown].iter().map(|(g, _)| *g).collect();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let mut chosen = Vec::new();
                 if !hidden.is_empty() {
-                    let more = ui.button("…").on_hover_text(tr("Weitere Ansichtsoptionen"));
-                    egui::Popup::menu(&more).show(|ui| {
-                        let mut picked = None;
-                        for group in &hidden {
-                            for command in group.commands() {
-                                if *command == Command::RefreshCamera
-                                    && !self.devices.camera_shown()
-                                {
-                                    continue;
-                                }
-                                self.menu_item(ui, *command, &mut picked);
-                            }
-                        }
-                        chosen.extend(picked);
-                    });
+                    chosen.extend(self.more_view_options(ui, &hidden));
                 }
-                let tool = |ui: &mut egui::Ui, command: Command, text: &str| {
-                    let mut hover = command.title().to_owned();
-                    if let Some(shortcut) = command.shortcut() {
-                        hover += &format!(" ({})", ui.ctx().format_shortcut(&shortcut));
-                    }
-                    ui.add_enabled(self.enabled(command), egui::Button::new(text))
-                        .on_hover_text(hover)
-                        .clicked()
-                        .then_some(command)
-                };
-                // Umschalter wie die Symbolschalter unter macOS.
-                let toggle = |ui: &mut egui::Ui, command: Command, text: &str, on: bool| {
-                    ui.add_enabled(self.enabled(command), egui::Button::new(text).selected(on))
-                        .on_hover_text(command.title())
-                        .clicked()
-                        .then_some(command)
-                };
-                for group in visible.iter().rev() {
-                    match group {
-                        ViewGroup::Fit => {
-                            chosen.extend(tool(ui, Command::ZoomFit, tr("Zurücksetzen")))
-                        }
-                        ViewGroup::Actual => chosen.extend(tool(ui, Command::ZoomActual, "1:1")),
-                        ViewGroup::Zoom => {
-                            chosen.extend(tool(ui, Command::ZoomIn, "+"));
-                            ui.label(&zoom);
-                            chosen.extend(tool(ui, Command::ZoomOut, "−"));
-                            ui.add_space(6.0);
-                        }
-                        ViewGroup::Grid => chosen.extend(toggle(
-                            ui,
-                            Command::ToggleGrid,
-                            tr("Raster"),
-                            self.canvas.show_grid,
-                        )),
-                        ViewGroup::Camera => {
-                            if self.devices.camera_loading() {
-                                ui.spinner();
-                            } else if self.devices.camera_shown() {
-                                chosen.extend(tool(ui, Command::RefreshCamera, "⟳"));
-                            }
-                            let shown = self.devices.camera_shown();
-                            chosen.extend(toggle(ui, Command::ToggleCamera, &camera, shown));
-                        }
-                        // Reststücke im Kamerabild erkennen.
-                        ViewGroup::Remnants => {
-                            chosen.extend(tool(ui, Command::Remnants, Command::Remnants.title()))
-                        }
-                    }
-                }
+                chosen.extend(self.view_tools(ui, &visible, &camera, &zoom));
                 if let Some(command) = chosen.pop() {
                     *clicked = Some(command);
                 }
             });
         });
+    }
+
+    /// Projektname und Gerät über dem Arbeitsbett.
+    fn canvas_title(&mut self, ui: &mut egui::Ui) {
+        // Projektname: Doppelklick zum Umbenennen, ⏎ oder Klick
+        // daneben übernimmt, Esc bricht ab.
+        if let Some(draft) = &mut self.file.name_draft {
+            let field = ui.add(
+                egui::TextEdit::singleline(draft)
+                    .font(egui::FontId::proportional(20.0))
+                    .desired_width(320.0),
+            );
+            field.request_focus();
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.file.name_draft = None;
+            } else if field.lost_focus() {
+                let name = draft.trim().to_owned();
+                if !name.is_empty() && name != self.project.name {
+                    self.project.name = name;
+                    self.file.dirty = true;
+                }
+                self.file.name_draft = None;
+            }
+        } else if self.textures.active.is_some() {
+            let title = ui
+                .add(
+                    egui::Label::new(
+                        egui::RichText::new(self.project.name.as_str())
+                            .size(20.0)
+                            .strong(),
+                    )
+                    .sense(egui::Sense::click()),
+                )
+                .on_hover_text(tr("Doppelklick zum Umbenennen"));
+            if title.double_clicked() {
+                self.file.name_draft = Some(self.project.name.clone());
+            }
+        } else {
+            ui.label(
+                egui::RichText::new(tr("Arbeitsbereich"))
+                    .size(20.0)
+                    .strong(),
+            );
+        }
+        ui.weak(format!(
+            "{} · {} × {} mm{}",
+            self.devices.device().name,
+            self.project.bed_width_mm,
+            self.project.bed_height_mm,
+            if self.project.rotary_axis {
+                format!(" · {}", tr("Rotationseinheit"))
+            } else {
+                String::new()
+            }
+        ));
+    }
+
+    /// Ansichtsgruppen von links nach rechts mit den Texten ihrer Knöpfe.
+    fn view_groups<'a>(&self, camera: &'a str, zoom: &'a str) -> Vec<(ViewGroup, Vec<&'a str>)> {
+        let mut groups: Vec<(ViewGroup, Vec<&str>)> = Vec::new();
+        if self.devices.has_camera() {
+            groups.push((ViewGroup::Remnants, vec![Command::Remnants.title()]));
+            let mut texts = vec![camera];
+            if self.devices.camera_shown() {
+                texts.push("⟳");
+            }
+            groups.push((ViewGroup::Camera, texts));
+        }
+        groups.push((ViewGroup::Grid, vec![tr("Raster")]));
+        groups.push((ViewGroup::Zoom, vec!["−", zoom, "+"]));
+        groups.push((ViewGroup::Actual, vec!["1:1"]));
+        groups.push((ViewGroup::Fit, vec![tr("Zurücksetzen")]));
+        groups
+    }
+
+    /// Menü „…“ mit den Ansichtsgruppen, die nicht in die Leiste passen.
+    fn more_view_options(&self, ui: &mut egui::Ui, hidden: &[ViewGroup]) -> Option<Command> {
+        let more = ui.button("…").on_hover_text(tr("Weitere Ansichtsoptionen"));
+        let mut picked = None;
+        egui::Popup::menu(&more).show(|ui| {
+            for group in hidden {
+                for command in group.commands() {
+                    if *command == Command::RefreshCamera && !self.devices.camera_shown() {
+                        continue;
+                    }
+                    self.menu_item(ui, *command, &mut picked);
+                }
+            }
+        });
+        picked
+    }
+
+    /// Knöpfe der sichtbaren Ansichtsgruppen, von rechts nach links; liefert
+    /// die angeklickten Befehle.
+    fn view_tools(
+        &self,
+        ui: &mut egui::Ui,
+        visible: &[ViewGroup],
+        camera: &str,
+        zoom: &str,
+    ) -> Vec<Command> {
+        let mut chosen = Vec::new();
+        let tool = |ui: &mut egui::Ui, command: Command, text: &str| {
+            let mut hover = command.title().to_owned();
+            if let Some(shortcut) = command.shortcut() {
+                hover += &format!(" ({})", ui.ctx().format_shortcut(&shortcut));
+            }
+            ui.add_enabled(self.enabled(command), egui::Button::new(text))
+                .on_hover_text(hover)
+                .clicked()
+                .then_some(command)
+        };
+        // Umschalter wie die Symbolschalter unter macOS.
+        let toggle = |ui: &mut egui::Ui, command: Command, text: &str, on: bool| {
+            ui.add_enabled(self.enabled(command), egui::Button::new(text).selected(on))
+                .on_hover_text(command.title())
+                .clicked()
+                .then_some(command)
+        };
+        for group in visible.iter().rev() {
+            match group {
+                ViewGroup::Fit => chosen.extend(tool(ui, Command::ZoomFit, tr("Zurücksetzen"))),
+                ViewGroup::Actual => chosen.extend(tool(ui, Command::ZoomActual, "1:1")),
+                ViewGroup::Zoom => {
+                    chosen.extend(tool(ui, Command::ZoomIn, "+"));
+                    ui.label(zoom);
+                    chosen.extend(tool(ui, Command::ZoomOut, "−"));
+                    ui.add_space(6.0);
+                }
+                ViewGroup::Grid => chosen.extend(toggle(
+                    ui,
+                    Command::ToggleGrid,
+                    tr("Raster"),
+                    self.canvas.show_grid,
+                )),
+                ViewGroup::Camera => {
+                    if self.devices.camera_loading() {
+                        ui.spinner();
+                    } else if self.devices.camera_shown() {
+                        chosen.extend(tool(ui, Command::RefreshCamera, "⟳"));
+                    }
+                    let shown = self.devices.camera_shown();
+                    chosen.extend(toggle(ui, Command::ToggleCamera, camera, shown));
+                }
+                // Reststücke im Kamerabild erkennen.
+                ViewGroup::Remnants => {
+                    chosen.extend(tool(ui, Command::Remnants, Command::Remnants.title()))
+                }
+            }
+        }
+        chosen
     }
 
     /// Objektleiste wie in Bambu Studio: Hinzufügen, Transformieren,
@@ -4355,12 +4452,37 @@ impl VisiCutR {
         texture: egui::TextureId,
         clicked: &mut Option<Command>,
     ) {
-        use egui::CursorIcon;
         let shift = ui.input(|i| i.modifiers.shift);
+        self.resize_handles(ui, motif, view, shift);
+        // Drehanfasser über der Mitte, bei wenig Platz darunter.
+        let above = motif.top() - 22.0 >= view.rect.top();
+        let (edge, knob) = if above {
+            (
+                motif.center_top(),
+                motif.center_top() - Vec2::new(0.0, 22.0),
+            )
+        } else {
+            (
+                motif.center_bottom(),
+                motif.center_bottom() + Vec2::new(0.0, 22.0),
+            )
+        };
+        self.rotate_handle(ui, motif, knob, shift, clicked);
+        let painter = ui.painter();
+        painter.line_segment([edge, knob], HANDLE_STROKE);
+        painter.circle(knob, 4.5, Color32::WHITE, HANDLE_STROKE);
+        // Vorschau der Drehung: Motiv und Rahmen gedreht um die Mitte.
+        if let Some(HandleDrag::Rotate { degrees, .. }) = self.canvas.handle_drag {
+            paint_rotation(ui, motif, texture, knob, degrees);
+        }
+    }
+
+    /// Anfasser an Ecken und Kantenmitten: Ziehen ändert Lage und Größe.
+    fn resize_handles(&mut self, ui: &egui::Ui, motif: Rect, view: BedView, shift: bool) {
+        use egui::CursorIcon;
         let painter = ui.painter();
         let p = &self.project;
         let rect_mm = [p.x_mm, p.y_mm, p.width_mm, p.height_mm];
-        let handle_stroke = Stroke::new(1.0, Color32::from_black_alpha(200));
         for (i, handle) in workspace::HANDLES.into_iter().enumerate() {
             let pos = motif.min + Vec2::new(handle[0], handle[1]) * motif.size();
             let cursor = match handle {
@@ -4397,30 +4519,29 @@ impl VisiCutR {
                 Rect::from_center_size(pos, Vec2::splat(7.0)),
                 1.0,
                 Color32::WHITE,
-                handle_stroke,
+                HANDLE_STROKE,
                 egui::StrokeKind::Middle,
             );
         }
-        // Drehanfasser über der Mitte, bei wenig Platz darunter.
-        let above = motif.top() - 22.0 >= view.rect.top();
-        let (edge, knob) = if above {
-            (
-                motif.center_top(),
-                motif.center_top() - Vec2::new(0.0, 22.0),
-            )
-        } else {
-            (
-                motif.center_bottom(),
-                motif.center_bottom() + Vec2::new(0.0, 22.0),
-            )
-        };
+    }
+
+    /// Drehanfasser bei `knob`: Ziehen merkt den Winkel, Loslassen dreht wie
+    /// „Drehen“ im Inspektor.
+    fn rotate_handle(
+        &mut self,
+        ui: &egui::Ui,
+        motif: Rect,
+        knob: Pos2,
+        shift: bool,
+        clicked: &mut Option<Command>,
+    ) {
         let response = ui
             .interact(
                 Rect::from_center_size(knob, Vec2::splat(16.0)),
                 ui.id().with("rotate"),
                 Sense::drag(),
             )
-            .on_hover_cursor(CursorIcon::Alias)
+            .on_hover_cursor(egui::CursorIcon::Alias)
             .on_hover_text(tr("Ziehen dreht das Motiv; mit Umschalt in 15°-Schritten"));
         if response.drag_started()
             && let Some(start) = response.interact_pointer_pos()
@@ -4454,42 +4575,6 @@ impl VisiCutR {
                 *clicked = Some(Command::RotateBy);
             }
             self.canvas.handle_drag = None;
-        }
-        let painter = ui.painter();
-        painter.line_segment([edge, knob], handle_stroke);
-        painter.circle(knob, 4.5, Color32::WHITE, handle_stroke);
-        // Vorschau der Drehung: Motiv und Rahmen gedreht um die Mitte.
-        if let Some(HandleDrag::Rotate { degrees, .. }) = self.canvas.handle_drag {
-            let angle = degrees.to_radians();
-            egui::Image::new((texture, motif.size()))
-                .rotate(angle, Vec2::splat(0.5))
-                .tint(Color32::from_white_alpha(160))
-                .paint_at(ui, motif);
-            let rotation = egui::emath::Rot2::from_angle(angle);
-            let center = motif.center();
-            let corners: Vec<Pos2> = [
-                motif.left_top(),
-                motif.right_top(),
-                motif.right_bottom(),
-                motif.left_bottom(),
-                motif.left_top(),
-            ]
-            .into_iter()
-            .map(|c| center + rotation * (c - center))
-            .collect();
-            ui.painter().extend(egui::Shape::dashed_line(
-                &corners,
-                Stroke::new(1.0, Color32::from_black_alpha(190)),
-                5.0,
-                3.0,
-            ));
-            ui.painter().text(
-                knob + Vec2::new(12.0, 0.0),
-                egui::Align2::LEFT_CENTER,
-                format!("{degrees:.0}°"),
-                egui::FontId::proportional(12.0),
-                Color32::from_gray(40),
-            );
         }
     }
 
@@ -5158,6 +5243,47 @@ fn command_button(ui: &egui::Ui, command: Command) -> egui::Button<'static> {
     }
 }
 
+/// Gedrehtes Motiv mit gestricheltem Rahmen und Winkel neben dem
+/// Drehanfasser `knob`.
+fn paint_rotation(ui: &egui::Ui, motif: Rect, texture: egui::TextureId, knob: Pos2, degrees: f32) {
+    let angle = degrees.to_radians();
+    egui::Image::new((texture, motif.size()))
+        .rotate(angle, Vec2::splat(0.5))
+        .tint(Color32::from_white_alpha(160))
+        .paint_at(ui, motif);
+    let rotation = egui::emath::Rot2::from_angle(angle);
+    let center = motif.center();
+    let corners: Vec<Pos2> = [
+        motif.left_top(),
+        motif.right_top(),
+        motif.right_bottom(),
+        motif.left_bottom(),
+        motif.left_top(),
+    ]
+    .into_iter()
+    .map(|c| center + rotation * (c - center))
+    .collect();
+    ui.painter().extend(egui::Shape::dashed_line(
+        &corners,
+        Stroke::new(1.0, Color32::from_black_alpha(190)),
+        5.0,
+        3.0,
+    ));
+    ui.painter().text(
+        knob + Vec2::new(12.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        format!("{degrees:.0}°"),
+        egui::FontId::proportional(12.0),
+        Color32::from_gray(40),
+    );
+}
+
+/// Rand der Anfasser.
+const HANDLE_STROKE: Stroke = Stroke {
+    width: 1.0,
+    color: Color32::from_black_alpha(200),
+};
+
 /// Ziehen an einem Anfasser: Lage und Größe (mm) beim Start bzw. Startpunkt
 /// und aktueller Winkel des Drehanfassers.
 #[derive(Clone, Copy)]
@@ -5176,8 +5302,57 @@ impl eframe::App for VisiCutR {
         self.poll_send(ctx);
         self.poll_reading(ctx);
         self.sendable = !self.busy() && self.project.validate().is_ok();
-        // Nullpunkt unten links: Bezugspunkt standardmäßig unten links, wie
-        // am Gerät; eine eigene Wahl bleibt erhalten.
+        self.follow_device_origin();
+        self.handle_close_request(ctx);
+        self.take_dropped_files(ctx);
+        self.take_handed_over(ctx);
+        self.keyboard(ctx);
+        if let Some(object) = self.jobs.take_deleted_object() {
+            self.delete_objects(ctx, &[object]);
+        }
+        self.tool_windows(ctx);
+        if self.navigation.show_preview {
+            self.navigation.show_preview = false;
+            self.preview
+                .request(ctx, &self.project, &mut self.messages.status);
+        }
+        let mut commands = Vec::new();
+        let send_enabled = self.sendable && !self.busy();
+        self.sync_pages(ctx);
+        egui::TopBottomPanel::top("tabs")
+            .frame(
+                egui::Frame::new()
+                    .fill(form::TOPBAR)
+                    .inner_margin(egui::Margin {
+                        left: 6,
+                        right: 10,
+                        top: 0,
+                        bottom: 0,
+                    }),
+            )
+            .show(ctx, |ui| commands.extend(self.top_bar(ui)));
+        self.status_bar(ctx);
+        match self.navigation.page {
+            Page::Prepare => commands.extend(self.prepare_page(ctx)),
+            Page::Preview => commands.extend(self.preview_page(ctx, send_enabled)),
+            Page::Settings => self.settings_tab(ctx),
+        }
+        for command in commands {
+            self.run(ctx, command);
+        }
+        self.dialogs(ctx);
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
+            "{}{} — VisiCutR",
+            self.project.name,
+            if self.file.dirty { " *" } else { "" }
+        )));
+    }
+}
+
+impl VisiCutR {
+    /// Nullpunkt unten links: Bezugspunkt standardmäßig unten links, wie
+    /// am Gerät; eine eigene Wahl bleibt erhalten.
+    fn follow_device_origin(&mut self) {
         let bottom = self.devices.origin_bottom_left();
         if self.origin_bottom_left != Some(bottom) {
             let (from, to) = if bottom {
@@ -5190,6 +5365,11 @@ impl eframe::App for VisiCutR {
             }
             self.origin_bottom_left = Some(bottom);
         }
+    }
+
+    /// Hält das Schließen des Fensters auf, solange gesendet wird oder
+    /// Einstellungen bzw. Änderungen noch nicht gesichert sind.
+    fn handle_close_request(&mut self, ctx: &egui::Context) {
         if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close {
             if self.busy() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -5202,6 +5382,10 @@ impl eframe::App for VisiCutR {
                 self.pending.replace = Some(Replace::Quit);
             }
         }
+    }
+
+    /// Ins Fenster gezogene Dateien öffnen oder hinzufügen.
+    fn take_dropped_files(&mut self, ctx: &egui::Context) {
         let dropped: Vec<PathBuf> = ctx.input(|i| {
             i.raw
                 .dropped_files
@@ -5214,6 +5398,11 @@ impl eframe::App for VisiCutR {
         } else if !dropped.is_empty() && !self.modal_open() {
             self.drop_files(ctx, dropped);
         }
+    }
+
+    /// Öffnet Dateien späterer Starts, der Befehlszeile und des Systems,
+    /// sobald kein Dialog und keine Übertragung mehr wartet.
+    fn take_handed_over(&mut self, ctx: &egui::Context) {
         // Ein späterer Start hat Dateien übergeben: Fenster nach vorn holen.
         // Wartet ein Dialog, bleibt die Anfrage bis zu seinem Ende liegen.
         if self.background.handed_over.is_none()
@@ -5242,31 +5431,12 @@ impl eframe::App for VisiCutR {
             let opened = open_files::take();
             self.open_files(ctx, opened);
         }
-        self.keyboard(ctx);
-        if let Some(object) = self.jobs.take_deleted_object() {
-            self.delete_objects(ctx, &[object]);
-        }
-        match self
-            .compose
-            .windows(ctx, &self.project, self.canvas.visible_mm)
-        {
-            Some(Ok((mut project, notes))) => {
-                // Bearbeiteter Text mit anderer Bearbeitung: Laserwerte aus dem
-                // Profil, ohne Profil Markieren und Gravieren mit 0 %.
-                if let (Some(old), Some(new)) = (&self.project.part_text, &project.part_text)
-                    && project.parts.len() == self.project.parts.len()
-                    && project.active_part == self.project.active_part
-                    && old.operation != new.operation
-                {
-                    let operation = new.operation;
-                    jobs_ui::select_operation(&mut project, operation);
-                    jobs_ui::apply_presets(self.jobs.active(), &mut project);
-                }
-                self.apply_composed(ctx, project, notes)
-            }
-            Some(Err(e)) => self.report(e.to_string()),
-            None => {}
-        }
+    }
+
+    /// Werkzeugfenster (Text und Formen, Vektorisieren, Reststücke, Geräte)
+    /// und Dialoge zu Updates, FabLab-Einstellungen und Tastenkürzeln.
+    fn tool_windows(&mut self, ctx: &egui::Context) {
+        self.compose_window(ctx);
         // Die Rückfrage bei ungesicherten Änderungen stellt `request`.
         if let Some((svg, name)) = self
             .vectorize
@@ -5305,13 +5475,35 @@ impl eframe::App for VisiCutR {
             }
             None => {}
         }
-        if self.navigation.show_preview {
-            self.navigation.show_preview = false;
-            self.preview
-                .request(ctx, &self.project, &mut self.messages.status);
+    }
+
+    /// Fenster für Text und Formen; übernimmt das bearbeitete Projekt.
+    fn compose_window(&mut self, ctx: &egui::Context) {
+        match self
+            .compose
+            .windows(ctx, &self.project, self.canvas.visible_mm)
+        {
+            Some(Ok((mut project, notes))) => {
+                // Bearbeiteter Text mit anderer Bearbeitung: Laserwerte aus dem
+                // Profil, ohne Profil Markieren und Gravieren mit 0 %.
+                if let (Some(old), Some(new)) = (&self.project.part_text, &project.part_text)
+                    && project.parts.len() == self.project.parts.len()
+                    && project.active_part == self.project.active_part
+                    && old.operation != new.operation
+                {
+                    let operation = new.operation;
+                    jobs_ui::select_operation(&mut project, operation);
+                    jobs_ui::apply_presets(self.jobs.active(), &mut project);
+                }
+                self.apply_composed(ctx, project, notes)
+            }
+            Some(Err(e)) => self.report(e.to_string()),
+            None => {}
         }
-        let mut commands = Vec::new();
-        let send_enabled = self.sendable && !self.busy();
+    }
+
+    /// Vorschau, Seitenwechsel und Entwürfe der Einstellungen abgleichen.
+    fn sync_pages(&mut self, ctx: &egui::Context) {
         self.preview.update(
             ctx,
             &self.project,
@@ -5331,18 +5523,10 @@ impl eframe::App for VisiCutR {
             self.settings.single_job = self.preview.single_job;
             self.save_settings();
         }
-        egui::TopBottomPanel::top("tabs")
-            .frame(
-                egui::Frame::new()
-                    .fill(form::TOPBAR)
-                    .inner_margin(egui::Margin {
-                        left: 6,
-                        right: 10,
-                        top: 0,
-                        bottom: 0,
-                    }),
-            )
-            .show(ctx, |ui| commands.extend(self.top_bar(ui)));
+    }
+
+    /// Statuszeile unten mit Meldung und Hinweis auf Änderungen.
+    fn status_bar(&self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("status")
             .frame(
                 egui::Frame::side_top_panel(&ctx.style())
@@ -5363,52 +5547,44 @@ impl eframe::App for VisiCutR {
                     }
                 });
             });
-        match self.navigation.page {
-            Page::Prepare => {
-                egui::SidePanel::left("settings")
-                    .resizable(false)
-                    .exact_width(340.0)
-                    .frame(
-                        egui::Frame::side_top_panel(&ctx.style())
-                            .fill(form::SIDEBAR)
-                            .inner_margin(0.0),
-                    )
-                    .show(ctx, |ui| {
-                        commands.extend(self.device_card(ui));
-                        egui::ScrollArea::vertical()
-                            .show(ui, |ui| commands.extend(self.sidebar(ui)));
-                    });
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(0.0))
-                    .show(ctx, |ui| commands.extend(self.canvas(ui)));
-            }
-            Page::Preview => {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(0.0))
-                    .show(ctx, |ui| {
-                        match self.preview.page(
-                            ui,
-                            &self.project,
-                            &mut self.messages.status,
-                            send_enabled,
-                        ) {
-                            Some(preview_ui::Action::Send) => commands.push(Command::Send),
-                            Some(preview_ui::Action::Export) => commands.push(Command::Export),
-                            None => {}
-                        }
-                    });
-            }
-            Page::Settings => self.settings_tab(ctx),
-        }
-        for command in commands {
-            self.run(ctx, command);
-        }
-        self.dialogs(ctx);
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
-            "{}{} — VisiCutR",
-            self.project.name,
-            if self.file.dirty { " *" } else { "" }
-        )));
+    }
+
+    /// Reiter „Vorbereiten“: Seitenleiste links, Arbeitsfläche in der Mitte.
+    fn prepare_page(&mut self, ctx: &egui::Context) -> Vec<Command> {
+        let mut commands = Vec::new();
+        egui::SidePanel::left("settings")
+            .resizable(false)
+            .exact_width(340.0)
+            .frame(
+                egui::Frame::side_top_panel(&ctx.style())
+                    .fill(form::SIDEBAR)
+                    .inner_margin(0.0),
+            )
+            .show(ctx, |ui| {
+                commands.extend(self.device_card(ui));
+                egui::ScrollArea::vertical().show(ui, |ui| commands.extend(self.sidebar(ui)));
+            });
+        egui::CentralPanel::default()
+            .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(0.0))
+            .show(ctx, |ui| commands.extend(self.canvas(ui)));
+        commands
+    }
+
+    /// Reiter „Vorschau“; liefert „Senden“ oder „Exportieren“.
+    fn preview_page(&mut self, ctx: &egui::Context, send_enabled: bool) -> Option<Command> {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(0.0))
+            .show(ctx, |ui| {
+                match self
+                    .preview
+                    .page(ui, &self.project, &mut self.messages.status, send_enabled)
+                {
+                    Some(preview_ui::Action::Send) => Some(Command::Send),
+                    Some(preview_ui::Action::Export) => Some(Command::Export),
+                    None => None,
+                }
+            })
+            .inner
     }
 }
 

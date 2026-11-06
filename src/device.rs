@@ -8,6 +8,167 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Why a device or device list is invalid or cannot be read.
+#[derive(Debug)]
+pub enum DeviceError {
+    NameMissing,
+    /// The device (by name) has no hostname or port.
+    Address(String),
+    Machine {
+        device: String,
+        error: crate::project::ProjectError,
+    },
+    CameraRefresh(String),
+    CameraPointCount(String),
+    CameraPoints(String),
+    UnknownVersion,
+    NoDevice,
+    SelectedMissing,
+    Duplicate(String),
+    Damaged {
+        path: std::path::PathBuf,
+        error: serde_json::Error,
+    },
+    Io(std::io::Error),
+    Json(serde_json::Error),
+    Xml(roxmltree::Error),
+    Svg(crate::svg::SvgError),
+    InvalidValue(String),
+    NotVisiCutDevice,
+    NoCutter,
+    /// Another driver (its class, or "unknown").
+    UnsupportedDriver(Option<String>),
+    /// Machine geometry that differs from the LTT iLaser 4000.
+    Geometry {
+        name: String,
+        value: f64,
+        expected: f64,
+    },
+    InvalidShift,
+    ShiftCount,
+    InvalidPort,
+    NotText,
+    Zip(zip::result::ZipError),
+    Utf8(std::string::FromUtf8Error),
+    Import(crate::import::ImportError),
+    NoDevicesInArchive,
+    /// No LTT device in the archive; the files skipped.
+    NoLttInArchive(Vec<String>),
+    Download(crate::camera::CameraError),
+}
+
+impl std::fmt::Display for DeviceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text = match self {
+            Self::NameMissing => tr("Gerätename fehlt").to_string(),
+            Self::Address(device) => tr!(
+                "{device}: Hostname und Port müssen gesetzt sein",
+                device = device
+            ),
+            Self::Machine { device, error } => format!("{device}: {error}"),
+            Self::CameraRefresh(device) => tr!(
+                "{device}: Kamera-Aktualisierung muss 0 (aus) oder {min} ms bis 1 h sein",
+                device = device,
+                min = MIN_CAMERA_REFRESH_MS
+            ),
+            Self::CameraPointCount(device) => tr!(
+                "{device}: Kamerakalibrierung benötigt 2 oder mindestens 4 Punktpaare",
+                device = device
+            ),
+            Self::CameraPoints(device) => tr!(
+                "{device}: Kamerapunkte müssen endlich sein",
+                device = device
+            ),
+            Self::UnknownVersion => tr("Unbekannte Version der Geräteliste").to_string(),
+            Self::NoDevice => tr("Mindestens ein Lasercutter muss eingerichtet sein").to_string(),
+            Self::SelectedMissing => tr("Ausgewählter Lasercutter existiert nicht").to_string(),
+            Self::Duplicate(name) => {
+                tr!("Gerätename „{name}“ ist doppelt vorhanden", name = name)
+            }
+            Self::Damaged { path, error } => tr!(
+                "Geräteliste {path} ist beschädigt: {error}",
+                path = path.display(),
+                error = error
+            ),
+            Self::Io(error) => error.to_string(),
+            Self::Json(error) => error.to_string(),
+            Self::Xml(error) => error.to_string(),
+            Self::Svg(error) => error.to_string(),
+            Self::InvalidValue(name) => tr!("Ungültiger Wert für {name}", name = name),
+            Self::NotVisiCutDevice => tr("Keine VisiCut-Gerätedatei").to_string(),
+            Self::NoCutter => tr("Gerätedatei ohne Lasercutter").to_string(),
+            Self::UnsupportedDriver(driver) => tr!(
+                "Nur der LTT iLaser 4000 wird unterstützt (Treiber: {driver})",
+                driver = driver.as_deref().unwrap_or(tr("unbekannt"))
+            ),
+            Self::Geometry {
+                name,
+                value,
+                expected,
+            } => tr!(
+                "{name} = {value} weicht vom LTT iLaser 4000 ab ({expected}); nicht unterstützt",
+                name = name,
+                value = value,
+                expected = expected
+            ),
+            Self::InvalidShift => tr("Ungültiger Wert in engraveShiftList").to_string(),
+            Self::ShiftCount => {
+                tr("engraveShiftList braucht zehn Werte (10 % … 100 %)").to_string()
+            }
+            Self::InvalidPort => tr("Ungültiger Port").to_string(),
+            Self::NotText => tr("Datei ist kein Text").to_string(),
+            Self::Zip(error) => error.to_string(),
+            Self::Utf8(error) => error.to_string(),
+            Self::Import(error) => error.to_string(),
+            Self::NoDevicesInArchive => tr("Archiv enthält keine VisiCut-Geräte").to_string(),
+            Self::NoLttInArchive(skipped) => tr!(
+                "Archiv enthält keinen LTT iLaser 4000 (übersprungen: {skipped})",
+                skipped = skipped.join(", ")
+            ),
+            Self::Download(error) => error.to_string(),
+        };
+        f.write_str(&text)
+    }
+}
+
+impl std::error::Error for DeviceError {}
+
+impl From<std::io::Error> for DeviceError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<crate::svg::SvgError> for DeviceError {
+    fn from(error: crate::svg::SvgError) -> Self {
+        Self::Svg(error)
+    }
+}
+
+impl From<zip::result::ZipError> for DeviceError {
+    fn from(error: zip::result::ZipError) -> Self {
+        Self::Zip(error)
+    }
+}
+
+impl From<crate::import::ImportError> for DeviceError {
+    fn from(error: crate::import::ImportError) -> Self {
+        Self::Import(error)
+    }
+}
+
+impl From<crate::camera::CameraError> for DeviceError {
+    fn from(error: crate::camera::CameraError) -> Self {
+        Self::Download(error)
+    }
+}
+
+impl From<DeviceError> for String {
+    fn from(error: DeviceError) -> Self {
+        error.to_string()
+    }
+}
+
 const LTT_CLASS: &str = "de.thomas_oster.liblasercut.drivers.LaserToolsTechnicsCutter";
 const STORE_FILE: &str = "devices.json";
 /// Shortest pause between camera pictures (VisiCut's default `cameraTiming`).
@@ -104,43 +265,33 @@ impl LaserDevice {
         devices
     }
 
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), DeviceError> {
         if self.name.trim().is_empty() {
-            return Err(tr("Gerätename fehlt").into());
+            return Err(DeviceError::NameMissing);
         }
         if self.hostname.trim().is_empty() || self.port == 0 {
-            return Err(tr!(
-                "{device}: Hostname und Port müssen gesetzt sein",
-                device = self.name
-            ));
+            return Err(DeviceError::Address(self.name.clone()));
         }
         self.machine
             .validate()
-            .map_err(|e| format!("{}: {e}", self.name))?;
+            .map_err(|error| DeviceError::Machine {
+                device: self.name.clone(),
+                error,
+            })?;
         if self.camera_refresh_ms != 0
             && !(MIN_CAMERA_REFRESH_MS..=3_600_000).contains(&self.camera_refresh_ms)
         {
-            return Err(tr!(
-                "{device}: Kamera-Aktualisierung muss 0 (aus) oder {min} ms bis 1 h sein",
-                device = self.name,
-                min = MIN_CAMERA_REFRESH_MS
-            ));
+            return Err(DeviceError::CameraRefresh(self.name.clone()));
         }
         if let Some(c) = &self.camera_calibration {
             if c.reference_points.len() != c.view_points.len()
                 || !(c.reference_points.len() == 2 || c.reference_points.len() >= 4)
             {
-                return Err(tr!(
-                    "{device}: Kamerakalibrierung benötigt 2 oder mindestens 4 Punktpaare",
-                    device = self.name
-                ));
+                return Err(DeviceError::CameraPointCount(self.name.clone()));
             }
             let finite = |p: &[f64; 2]| p.iter().all(|v| v.is_finite());
             if !c.reference_points.iter().chain(&c.view_points).all(finite) {
-                return Err(tr!(
-                    "{device}: Kamerapunkte müssen endlich sein",
-                    device = self.name
-                ));
+                return Err(DeviceError::CameraPoints(self.name.clone()));
             }
         }
         Ok(())
@@ -166,23 +317,20 @@ impl Default for DeviceStore {
 }
 
 impl DeviceStore {
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), DeviceError> {
         if self.format_version != 1 {
-            return Err(tr("Unbekannte Version der Geräteliste").into());
+            return Err(DeviceError::UnknownVersion);
         }
         if self.devices.is_empty() {
-            return Err(tr("Mindestens ein Lasercutter muss eingerichtet sein").into());
+            return Err(DeviceError::NoDevice);
         }
         if self.selected >= self.devices.len() {
-            return Err(tr("Ausgewählter Lasercutter existiert nicht").into());
+            return Err(DeviceError::SelectedMissing);
         }
         for (i, device) in self.devices.iter().enumerate() {
             device.validate()?;
             if self.devices[..i].iter().any(|d| d.name == device.name) {
-                return Err(tr!(
-                    "Gerätename „{name}“ ist doppelt vorhanden",
-                    name = device.name
-                ));
+                return Err(DeviceError::Duplicate(device.name.clone()));
             }
         }
         Ok(())
@@ -240,19 +388,14 @@ impl DeviceStore {
         Some(index.min(self.devices.len() - 1))
     }
 
-    pub fn load(dir: &Path) -> Result<Self, String> {
+    pub fn load(dir: &Path) -> Result<Self, DeviceError> {
         let path = dir.join(STORE_FILE);
         if !path.exists() {
             return Ok(Self::default());
         }
-        let source = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        let store: Self = serde_json::from_str(&source).map_err(|e| {
-            tr!(
-                "Geräteliste {path} ist beschädigt: {error}",
-                path = path.display(),
-                error = e
-            )
-        })?;
+        let source = std::fs::read_to_string(&path)?;
+        let store: Self =
+            serde_json::from_str(&source).map_err(|error| DeviceError::Damaged { path, error })?;
         store.validate()?;
         Ok(store)
     }
@@ -266,10 +409,10 @@ impl DeviceStore {
         store
     }
 
-    pub fn save(&self, dir: &Path) -> Result<(), String> {
+    pub fn save(&self, dir: &Path) -> Result<(), DeviceError> {
         self.validate()?;
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(dir)?;
+        let json = serde_json::to_string_pretty(self).map_err(DeviceError::Json)?;
         // Write atomically and durably so a crash or power cut never leaves a
         // truncated device list, readable only by the user (camera passwords).
         let temporary = dir.join(format!("{STORE_FILE}.{}.tmp", std::process::id()));
@@ -288,7 +431,7 @@ impl DeviceStore {
         if written.is_err() {
             let _ = std::fs::remove_file(&temporary);
         }
-        written.map_err(|e| e.to_string())
+        Ok(written?)
     }
 }
 
@@ -352,17 +495,17 @@ fn text(node: roxmltree::Node, name: &str) -> Option<String> {
     child(node, name).map(|n| n.text().unwrap_or_default().to_string())
 }
 
-fn number(node: roxmltree::Node, name: &str) -> Result<Option<f64>, String> {
+fn number(node: roxmltree::Node, name: &str) -> Result<Option<f64>, DeviceError> {
     text(node, name)
         .map(|t| {
             t.trim()
                 .parse()
-                .map_err(|_| tr!("Ungültiger Wert für {name}", name = name))
+                .map_err(|_| DeviceError::InvalidValue(name.into()))
         })
         .transpose()
 }
 
-fn points(node: Option<roxmltree::Node>) -> Result<Vec<[f64; 2]>, String> {
+fn points(node: Option<roxmltree::Node>) -> Result<Vec<[f64; 2]>, DeviceError> {
     let Some(node) = node else {
         return Ok(Vec::new());
     };
@@ -380,18 +523,17 @@ fn points(node: Option<roxmltree::Node>) -> Result<Vec<[f64; 2]>, String> {
 
 /// Reads a VisiCut `LaserDevice` XML file. Only LTT iLaser 4000 devices with the
 /// machine geometry of the Rust driver are accepted.
-pub fn from_visicut_xml(source: &str) -> Result<LaserDevice, String> {
+pub fn from_visicut_xml(source: &str) -> Result<LaserDevice, DeviceError> {
     crate::svg::check_nesting(source)?;
-    let doc = roxmltree::Document::parse(source).map_err(|e| e.to_string())?;
+    let doc = roxmltree::Document::parse(source).map_err(DeviceError::Xml)?;
     let root = doc.root_element();
     if !root.has_tag_name("laserDevice") {
-        return Err(tr("Keine VisiCut-Gerätedatei").into());
+        return Err(DeviceError::NotVisiCutDevice);
     }
-    let cutter = child(root, "laserCutter").ok_or(tr("Gerätedatei ohne Lasercutter"))?;
+    let cutter = child(root, "laserCutter").ok_or(DeviceError::NoCutter)?;
     if cutter.attribute("class") != Some(LTT_CLASS) {
-        return Err(tr!(
-            "Nur der LTT iLaser 4000 wird unterstützt (Treiber: {driver})",
-            driver = cutter.attribute("class").unwrap_or(tr("unbekannt"))
+        return Err(DeviceError::UnsupportedDriver(
+            cutter.attribute("class").map(str::to_string),
         ));
     }
     for (name, expected) in [
@@ -402,12 +544,11 @@ pub fn from_visicut_xml(source: &str) -> Result<LaserDevice, String> {
         if let Some(value) = number(cutter, name)?
             && (value - expected).abs() > 0.01
         {
-            return Err(tr!(
-                "{name} = {value} weicht vom LTT iLaser 4000 ab ({expected}); nicht unterstützt",
-                name = name,
-                value = value,
-                expected = expected
-            ));
+            return Err(DeviceError::Geometry {
+                name: name.into(),
+                value,
+                expected,
+            });
         }
     }
     let defaults = LaserDevice::default();
@@ -430,12 +571,10 @@ pub fn from_visicut_xml(source: &str) -> Result<LaserDevice, String> {
                     .unwrap_or_default()
                     .trim()
                     .parse::<f32>()
-                    .map_err(|_| tr("Ungültiger Wert in engraveShiftList").to_string())
+                    .map_err(|_| DeviceError::InvalidShift)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        machine.engrave_shift = values
-            .try_into()
-            .map_err(|_| tr("engraveShiftList braucht zehn Werte (10 % … 100 %)"))?;
+        machine.engrave_shift = values.try_into().map_err(|_| DeviceError::ShiftCount)?;
     }
     if text(cutter, "useTangentCurves").as_deref() != Some("false")
         && let Some(value) = number(cutter, "tangentCurveMaxAcceleration")?
@@ -449,7 +588,7 @@ pub fn from_visicut_xml(source: &str) -> Result<LaserDevice, String> {
         description: text(root, "description").unwrap_or_default(),
         hostname: text(cutter, "hostname").unwrap_or(defaults.hostname),
         port: match text(cutter, "port") {
-            Some(p) => p.trim().parse().map_err(|_| tr("Ungültiger Port"))?,
+            Some(p) => p.trim().parse().map_err(|_| DeviceError::InvalidPort)?,
             None => defaults.port,
         },
         rotary_axis: text(cutter, "rotaryAxisSupported").as_deref() == Some("true"),
@@ -472,27 +611,27 @@ pub fn from_visicut_xml(source: &str) -> Result<LaserDevice, String> {
 
 /// Imports LTT devices from a VisiCut device XML, a `.vcsettings`/GitHub
 /// settings archive, or a VisiCutR device export (JSON).
-pub fn import_bytes(bytes: &[u8]) -> Result<Vec<LaserDevice>, String> {
+pub fn import_bytes(bytes: &[u8]) -> Result<Vec<LaserDevice>, DeviceError> {
     if bytes.starts_with(b"PK") {
         return import_archive(bytes);
     }
-    let source = std::str::from_utf8(bytes).map_err(|_| tr("Datei ist kein Text"))?;
+    let source = std::str::from_utf8(bytes).map_err(|_| DeviceError::NotText)?;
     if source.trim_start().starts_with('{') {
-        let store: DeviceStore = serde_json::from_str(source).map_err(|e| e.to_string())?;
+        let store: DeviceStore = serde_json::from_str(source).map_err(DeviceError::Json)?;
         store.validate()?;
         return Ok(store.devices);
     }
     Ok(vec![from_visicut_xml(source)?])
 }
 
-fn import_archive(bytes: &[u8]) -> Result<Vec<LaserDevice>, String> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| e.to_string())?;
+fn import_archive(bytes: &[u8]) -> Result<Vec<LaserDevice>, DeviceError> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
     let mut devices = Vec::new();
     let mut skipped = Vec::new();
     let mut budget = crate::import::ZipBudget::new(50 * 1024 * 1024);
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-        let name = file.name().map_err(|e| e.to_string())?.to_string();
+        let mut file = archive.by_index(i)?;
+        let name = file.name()?.to_string();
         // Settings archives keep devices in devices/, GitHub adds a top folder.
         let in_devices = name.split('/').rev().nth(1) == Some("devices");
         if !in_devices || !name.ends_with(".xml") || file.size() > 5 * 1024 * 1024 {
@@ -501,7 +640,7 @@ fn import_archive(bytes: &[u8]) -> Result<Vec<LaserDevice>, String> {
         let Some(source) = budget.read(&mut file, 5 * 1024 * 1024)? else {
             continue;
         };
-        let source = String::from_utf8(source).map_err(|e| e.to_string())?;
+        let source = String::from_utf8(source).map_err(DeviceError::Utf8)?;
         match from_visicut_xml(&source) {
             Ok(device) => devices.push(device),
             Err(_) => skipped.push(name.rsplit('/').next().unwrap_or(&name).to_string()),
@@ -509,12 +648,9 @@ fn import_archive(bytes: &[u8]) -> Result<Vec<LaserDevice>, String> {
     }
     if devices.is_empty() {
         return Err(if skipped.is_empty() {
-            tr("Archiv enthält keine VisiCut-Geräte").into()
+            DeviceError::NoDevicesInArchive
         } else {
-            tr!(
-                "Archiv enthält keinen LTT iLaser 4000 (übersprungen: {skipped})",
-                skipped = skipped.join(", ")
-            )
+            DeviceError::NoLttInArchive(skipped)
         });
     }
     Ok(devices)
@@ -522,7 +658,7 @@ fn import_archive(bytes: &[u8]) -> Result<Vec<LaserDevice>, String> {
 
 /// Writes the devices for sharing; camera passwords stay out. Returns
 /// whether a password was left out.
-pub fn export(path: &Path, devices: &[LaserDevice]) -> Result<bool, String> {
+pub fn export(path: &Path, devices: &[LaserDevice]) -> Result<bool, DeviceError> {
     let store = DeviceStore {
         format_version: 1,
         devices: devices.to_vec(),
@@ -531,8 +667,8 @@ pub fn export(path: &Path, devices: &[LaserDevice]) -> Result<bool, String> {
     store.validate()?;
     let omitted = devices.iter().any(|d| !d.camera_password.is_empty());
     let json =
-        serde_json::to_string_pretty(&store.without_passwords()).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())?;
+        serde_json::to_string_pretty(&store.without_passwords()).map_err(DeviceError::Json)?;
+    std::fs::write(path, json)?;
     Ok(omitted)
 }
 
@@ -645,7 +781,7 @@ pub const LAB_SETTINGS: &[(&str, &str)] = &[
     ),
 ];
 
-pub fn download(url: &str) -> Result<Vec<LaserDevice>, String> {
+pub fn download(url: &str) -> Result<Vec<LaserDevice>, DeviceError> {
     import_bytes(&crate::camera::fetch(url, 50 * 1024 * 1024)?)
 }
 
@@ -733,23 +869,34 @@ mod tests {
         assert_eq!(device.machine.engrave_shift[9], -11.0);
         assert_eq!(device.machine.curve_acceleration_mm_s2, 981.0);
         let short = xml.replace("<int>-11</int>", "");
-        assert!(from_visicut_xml(&short).unwrap_err().contains("zehn Werte"));
+        assert!(matches!(
+            from_visicut_xml(&short),
+            Err(DeviceError::ShiftCount)
+        ));
         let mut bad = LaserDevice::fau();
         bad.machine.curve_acceleration_mm_s2 = 100.0;
-        assert!(bad.validate().unwrap_err().contains("Kurvenbeschleunigung"));
+        assert!(matches!(
+            bad.validate(),
+            Err(DeviceError::Machine {
+                error: crate::project::ProjectError::CurveAcceleration,
+                ..
+            })
+        ));
     }
 
     #[test]
     fn rejects_other_drivers_and_geometry() {
         let xml = include_str!("../reference/FAU-LTT-iLaser-4000.xml");
         let epilog = xml.replace(LTT_CLASS, "de.thomas_oster.liblasercut.drivers.EpilogZing");
-        assert!(
-            from_visicut_xml(&epilog)
-                .unwrap_err()
-                .contains("Nur der LTT")
-        );
+        assert!(matches!(
+            from_visicut_xml(&epilog),
+            Err(DeviceError::UnsupportedDriver(Some(_)))
+        ));
         let wide = xml.replace("<bedWidth>1000.0</bedWidth>", "<bedWidth>1200.0</bedWidth>");
-        assert!(from_visicut_xml(&wide).unwrap_err().contains("bedWidth"));
+        assert!(matches!(
+            from_visicut_xml(&wide),
+            Err(DeviceError::Geometry { name, .. }) if name == "bedWidth"
+        ));
     }
 
     #[test]
@@ -809,7 +956,7 @@ mod tests {
         // Exports leave the camera passwords out.
         export_and_reimport(&export, &store.without_passwords().devices);
         store.devices[1].name = store.devices[0].name.clone();
-        assert!(store.save(&dir).unwrap_err().contains("doppelt"));
+        assert!(matches!(store.save(&dir), Err(DeviceError::Duplicate(_))));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

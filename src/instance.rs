@@ -91,9 +91,42 @@ DATEI                 Projekt oder Grafik öffnen (mehrere werden als Teile hinz
 -v, --version         Version ausgeben\n\
 Läuft VisiCutR schon, öffnet das dortige Fenster die Dateien.";
 
+/// Argumente, mit denen VisiCutR nicht startet; `Display` liefert die
+/// Meldung samt Hilfe für die Konsole.
+#[derive(Debug, PartialEq, Eq)]
+pub enum UsageError {
+    /// `--help`: nur die Hilfe.
+    Help,
+    InvalidThickness(String),
+    MappingUnsupported,
+    UnknownOption(String),
+    /// Die Option braucht einen Wert.
+    MissingValue(String),
+}
+
+impl std::fmt::Display for UsageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Help => return f.write_str(USAGE),
+            Self::InvalidThickness(text) => write!(f, "Ungültige Dicke {text}")?,
+            Self::MappingUnsupported => f.write_str(
+                "--mapping wird nicht unterstützt; Zuordnungen kommen aus dem Material",
+            )?,
+            Self::UnknownOption(option) => write!(f, "Unbekannte Option {option}")?,
+            Self::MissingValue(name) => write!(f, "{name} braucht einen Wert")?,
+        }
+        write!(f, "\n{USAGE}")
+    }
+}
+
+impl std::error::Error for UsageError {}
+
 /// Wertet die Argumente ohne Programmnamen aus. Relative Pfade gelten ab
 /// `cwd`. `Err` enthält die Meldung für die Konsole.
-pub fn parse(arguments: impl IntoIterator<Item = String>, cwd: &Path) -> Result<Launch, String> {
+pub fn parse(
+    arguments: impl IntoIterator<Item = String>,
+    cwd: &Path,
+) -> Result<Launch, UsageError> {
     let mut launch = Launch::default();
     let mut arguments = arguments.into_iter();
     let mut only_files = false;
@@ -117,7 +150,7 @@ pub fn parse(arguments: impl IntoIterator<Item = String>, cwd: &Path) -> Result<
                     .parse::<f32>()
                     .ok()
                     .filter(|mm| mm.is_finite() && *mm > 0.0)
-                    .ok_or_else(|| format!("Ungültige Dicke {text}\n{USAGE}"))?;
+                    .ok_or(UsageError::InvalidThickness(text))?;
                 options.thickness_mm = Some(mm);
             }
             "--execute" => options.execute = true,
@@ -125,9 +158,7 @@ pub fn parse(arguments: impl IntoIterator<Item = String>, cwd: &Path) -> Result<
                 launch.print = Some(format!("VisiCutR {}", crate::update::current_version()));
             }
             "--mapping" => {
-                return Err(format!(
-                    "--mapping wird nicht unterstützt; Zuordnungen kommen aus dem Material\n{USAGE}"
-                ));
+                return Err(UsageError::MappingUnsupported);
             }
             "--demo" => launch.demo = true,
             // Bildschirmaufnahmen (Feature `screenshot`) mit Wert.
@@ -135,21 +166,21 @@ pub fn parse(arguments: impl IntoIterator<Item = String>, cwd: &Path) -> Result<
                 launch.standalone = true;
                 arguments.next();
             }
-            "-h" | "--help" => return Err(USAGE.into()),
+            "-h" | "--help" => return Err(UsageError::Help),
             // Ältere macOS-Versionen hängen beim Start aus dem Finder eine
             // Prozessnummer an.
             other if other.starts_with("-psn_") => {}
-            other => return Err(format!("Unbekannte Option {other}\n{USAGE}")),
+            other => return Err(UsageError::UnknownOption(other.into())),
         }
     }
     Ok(launch)
 }
 
 /// Wert einer Option wie `--material NAME`.
-fn value(arguments: &mut impl Iterator<Item = String>, name: &str) -> Result<String, String> {
+fn value(arguments: &mut impl Iterator<Item = String>, name: &str) -> Result<String, UsageError> {
     arguments
         .next()
-        .ok_or_else(|| format!("{name} braucht einen Wert\n{USAGE}"))
+        .ok_or_else(|| UsageError::MissingValue(name.into()))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -384,8 +415,17 @@ mod tests {
     #[test]
     fn rejects_unknown_options_with_usage() {
         let error = parse(args(&["--singleinstanceport=1"]), Path::new("/")).unwrap_err();
-        assert!(error.contains("--singleinstanceport") && error.contains("--add"));
-        assert_eq!(parse(args(&["--help"]), Path::new("/")).unwrap_err(), USAGE);
+        assert_eq!(
+            error,
+            UsageError::UnknownOption("--singleinstanceport=1".into())
+        );
+        assert!(error.to_string().contains("--add"));
+        assert_eq!(
+            parse(args(&["--help"]), Path::new("/"))
+                .unwrap_err()
+                .to_string(),
+            USAGE
+        );
     }
 
     #[test]

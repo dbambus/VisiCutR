@@ -142,14 +142,38 @@ fn table_value(shift_px: i32) -> f32 {
     }
 }
 
+#[derive(Debug)]
+pub enum ShiftError {
+    /// A chosen block outside 1 … 5.
+    InvalidBlock,
+    Machine(crate::project::ProjectError),
+}
+
+impl std::fmt::Display for ShiftError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidBlock => f.write_str(tr("Block muss zwischen 1 und 5 liegen")),
+            Self::Machine(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for ShiftError {}
+
+impl From<crate::project::ProjectError> for ShiftError {
+    fn from(error: crate::project::ProjectError) -> Self {
+        Self::Machine(error)
+    }
+}
+
 /// The machine settings after the test: `best` holds the chosen block
 /// (1 … 5, from the left) of each speed row; the middle block keeps a value.
-pub fn apply(machine: &MachineSettings, best: &[usize; 10]) -> Result<MachineSettings, String> {
+pub fn apply(machine: &MachineSettings, best: &[usize; 10]) -> Result<MachineSettings, ShiftError> {
     let mut result = machine.clone();
     for (i, block) in best.iter().enumerate() {
         let offset = *OFFSETS
             .get(block.wrapping_sub(1))
-            .ok_or(tr("Block muss zwischen 1 und 5 liegen"))?;
+            .ok_or(ShiftError::InvalidBlock)?;
         if offset != 0 {
             let shift = engrave_shift_px(machine, SPEEDS[i], offset);
             result.engrave_shift[i] = table_value(shift);

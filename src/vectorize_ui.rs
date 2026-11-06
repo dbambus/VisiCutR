@@ -83,7 +83,7 @@ impl VectorizeUi {
             self.result = self
                 .bitmap
                 .as_ref()
-                .map(|bitmap| bitmap.vectorize(&options));
+                .map(|bitmap| bitmap.vectorize(&options).map_err(String::from));
             self.result_for = Some(options);
         }
         let mut open = self.open;

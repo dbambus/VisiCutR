@@ -5,7 +5,68 @@ pub use crate::device::Lens;
 use crate::device::{CameraCalibration, LaserDevice};
 use crate::{i18n::tr, tr};
 use image::RgbaImage;
-use std::{io::Read, time::Duration};
+use std::{fmt, io::Read, time::Duration};
+
+/// Why a picture cannot be fetched or mapped onto the bed.
+#[derive(Debug)]
+pub enum CameraError {
+    Http {
+        url: String,
+        error: ureq::Error,
+    },
+    File {
+        path: String,
+        error: std::io::Error,
+    },
+    Io(std::io::Error),
+    /// The file at this path is larger than allowed.
+    FileTooLarge(String),
+    PointCount,
+    PointsOnAxis,
+    PointsOnLine,
+    Degenerate,
+    Encode(image::ImageError),
+    Unreadable(image::ImageError),
+    /// The device (by name) has no camera URL.
+    NoUrl(String),
+    NotCalibrated,
+}
+
+impl fmt::Display for CameraError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = match self {
+            Self::Http { url, error } => format!("{url}: {error}"),
+            Self::File { path, error } => format!("{path}: {error}"),
+            Self::Io(error) => error.to_string(),
+            Self::FileTooLarge(path) => tr!("{path}: Datei ist zu groß", path = path),
+            Self::PointCount => {
+                tr("Kamerakalibrierung benötigt 2 oder mindestens 4 Punktpaare").to_string()
+            }
+            Self::PointsOnAxis => {
+                tr("Kalibrierpunkte dürfen nicht auf einer Achse liegen").to_string()
+            }
+            Self::PointsOnLine => tr("Kalibrierpunkte liegen alle auf einer Linie").to_string(),
+            Self::Degenerate => {
+                tr("Kalibrierpunkte sind degeneriert (z. B. drei auf einer Linie)").to_string()
+            }
+            Self::Encode(error) => error.to_string(),
+            Self::Unreadable(error) => tr!("Kamerabild nicht lesbar: {error}", error = error),
+            Self::NoUrl(device) => {
+                tr!("{device}: keine Kamera-URL eingetragen", device = device)
+            }
+            Self::NotCalibrated => tr("Kamera ist noch nicht kalibriert").to_string(),
+        };
+        f.write_str(&text)
+    }
+}
+
+impl std::error::Error for CameraError {}
+
+impl From<CameraError> for String {
+    fn from(error: CameraError) -> Self {
+        error.to_string()
+    }
+}
 
 pub type Matrix = [[f64; 3]; 3];
 
@@ -51,7 +112,7 @@ fn discover_at(targets: &[std::net::SocketAddr], wait: Duration) -> Vec<String> 
 }
 
 /// Fetches http(s) URLs or reads local files (`file://` or a plain path).
-pub fn fetch(url: &str, limit: u64) -> Result<Vec<u8>, String> {
+pub fn fetch(url: &str, limit: u64) -> Result<Vec<u8>, CameraError> {
     fetch_with(url, limit, None)
 }
 
@@ -71,7 +132,7 @@ pub fn fetch_with(
     url: &str,
     limit: u64,
     credentials: Option<(&str, &str)>,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, CameraError> {
     if url.starts_with("http://") || url.starts_with("https://") {
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(20)))
@@ -81,23 +142,30 @@ pub fn fetch_with(
         if let Some(header) = credentials.and_then(|(user, password)| basic_auth(user, password)) {
             request = request.header("Authorization", header);
         }
-        let mut response = request.call().map_err(|e| format!("{url}: {e}"))?;
+        let http = |error| CameraError::Http {
+            url: url.into(),
+            error,
+        };
+        let mut response = request.call().map_err(http)?;
         return response
             .body_mut()
             .with_config()
             .limit(limit)
             .read_to_vec()
-            .map_err(|e| format!("{url}: {e}"));
+            .map_err(http);
     }
     let path = url.strip_prefix("file://").unwrap_or(url);
     let mut bytes = Vec::new();
     std::fs::File::open(path)
-        .map_err(|e| format!("{path}: {e}"))?
+        .map_err(|error| CameraError::File {
+            path: path.into(),
+            error,
+        })?
         .take(limit + 1)
         .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
+        .map_err(CameraError::Io)?;
     if bytes.len() as u64 > limit {
-        return Err(tr!("{path}: Datei ist zu groß", path = path));
+        return Err(CameraError::FileTooLarge(path.into()));
     }
     Ok(bytes)
 }
@@ -203,16 +271,16 @@ fn spans_plane(points: &[[f64; 2]]) -> bool {
 
 /// Homography from bed mm (reference) to camera pixels (view). Two point
 /// pairs give VisiCut's legacy axis-aligned scale and offset.
-pub fn homography(calibration: &CameraCalibration) -> Result<Matrix, String> {
+pub fn homography(calibration: &CameraCalibration) -> Result<Matrix, CameraError> {
     let (reference, view) = (&calibration.reference_points, &calibration.view_points);
     if reference.len() != view.len() || !(reference.len() == 2 || reference.len() >= 4) {
-        return Err(tr("Kamerakalibrierung benötigt 2 oder mindestens 4 Punktpaare").into());
+        return Err(CameraError::PointCount);
     }
     if reference.len() == 2 {
         let sx = (view[1][0] - view[0][0]) / (reference[1][0] - reference[0][0]);
         let sy = (view[1][1] - view[0][1]) / (reference[1][1] - reference[0][1]);
         if !sx.is_finite() || !sy.is_finite() || sx == 0.0 || sy == 0.0 {
-            return Err(tr("Kalibrierpunkte dürfen nicht auf einer Achse liegen").into());
+            return Err(CameraError::PointsOnAxis);
         }
         return Ok([
             [sx, 0.0, view[0][0] - sx * reference[0][0]],
@@ -221,7 +289,7 @@ pub fn homography(calibration: &CameraCalibration) -> Result<Matrix, String> {
         ]);
     }
     if !spans_plane(reference) || !spans_plane(view) {
-        return Err(tr("Kalibrierpunkte liegen alle auf einer Linie").into());
+        return Err(CameraError::PointsOnLine);
     }
     let (tr, _) = normalisation(reference);
     let (tv, tv_inverse) = normalisation(view);
@@ -265,10 +333,7 @@ pub fn homography(calibration: &CameraCalibration) -> Result<Matrix, String> {
     let normalised = [[h[0], h[1], h[2]], [h[3], h[4], h[5]], [h[6], h[7], h[8]]];
     let result = multiply(&multiply(&tv_inverse, &normalised), &tr);
     if result.iter().flatten().any(|v| !v.is_finite()) || result[2][2].abs() < 1e-300 {
-        return Err(crate::i18n::tr(
-            "Kalibrierpunkte sind degeneriert (z. B. drei auf einer Linie)",
-        )
-        .into());
+        return Err(CameraError::Degenerate);
     }
     let scale = result[2][2];
     Ok(result.map(|row| row.map(|v| v / scale)))
@@ -370,7 +435,7 @@ fn invert(m: &Matrix) -> Option<Matrix> {
 }
 
 /// Bed-to-pixel mapping of a calibration, with its lens if it has one.
-pub fn mapping(calibration: &CameraCalibration) -> Result<Mapping, String> {
+pub fn mapping(calibration: &CameraCalibration) -> Result<Mapping, CameraError> {
     let lens = calibration.lens.clone();
     let view = calibration
         .view_points
@@ -387,7 +452,7 @@ pub fn mapping(calibration: &CameraCalibration) -> Result<Mapping, String> {
 
 /// Distance (pixels) between every view point and where the calibration maps
 /// its reference point.
-pub fn residuals(calibration: &CameraCalibration) -> Result<Vec<f64>, String> {
+pub fn residuals(calibration: &CameraCalibration) -> Result<Vec<f64>, CameraError> {
     let mapping = mapping(calibration)?;
     Ok(calibration
         .reference_points
@@ -522,26 +587,23 @@ pub(crate) fn parallel_rows<T: Send>(
     });
 }
 
-pub fn encode_png(image: &RgbaImage) -> Result<Vec<u8>, String> {
+pub fn encode_png(image: &RgbaImage) -> Result<Vec<u8>, CameraError> {
     let mut png = Vec::new();
     image
         .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-        .map_err(|e| e.to_string())?;
+        .map_err(CameraError::Encode)?;
     Ok(png)
 }
 
-pub fn decode(bytes: &[u8]) -> Result<RgbaImage, String> {
+pub fn decode(bytes: &[u8]) -> Result<RgbaImage, CameraError> {
     image::load_from_memory(bytes)
         .map(|i| i.to_rgba8())
-        .map_err(|e| tr!("Kamerabild nicht lesbar: {error}", error = e))
+        .map_err(CameraError::Unreadable)
 }
 
-pub fn capture(device: &LaserDevice) -> Result<RgbaImage, String> {
+pub fn capture(device: &LaserDevice) -> Result<RgbaImage, CameraError> {
     if device.camera_url.trim().is_empty() {
-        return Err(tr!(
-            "{device}: keine Kamera-URL eingetragen",
-            device = device.name
-        ));
+        return Err(CameraError::NoUrl(device.name.clone()));
     }
     decode(&fetch_with(
         device.camera_url.trim(),
@@ -918,15 +980,11 @@ pub fn find_cross(gray: &Gray, around: [f64; 2], radius: f64, arm: f64) -> Optio
 pub fn markers_on_bed(
     pixels: &[[f64; 2]],
     calibration: &CameraCalibration,
-) -> Result<Vec<[f64; 2]>, String> {
+) -> Result<Vec<[f64; 2]>, CameraError> {
     let mapping = mapping(calibration)?;
     pixels
         .iter()
-        .map(|p| {
-            mapping.to_bed(*p).ok_or_else(|| {
-                tr("Kalibrierpunkte sind degeneriert (z. B. drei auf einer Linie)").into()
-            })
-        })
+        .map(|p| mapping.to_bed(*p).ok_or(CameraError::Degenerate))
         .collect()
 }
 
@@ -983,7 +1041,7 @@ fn fit_affine(from: &[[f64; 2]], to: &[[f64; 2]]) -> Option<Matrix> {
 pub fn tracked_mapping(
     calibration: &CameraCalibration,
     picture: &RgbaImage,
-) -> Result<(Mapping, usize), String> {
+) -> Result<(Mapping, usize), CameraError> {
     let base = mapping(calibration)?;
     if calibration.marker_points.len() < 2 {
         return Ok((base, 0));
@@ -1058,11 +1116,11 @@ pub fn background_image(
     device: &LaserDevice,
     bed_width_mm: f64,
     bed_height_mm: f64,
-) -> Result<RgbaImage, String> {
+) -> Result<RgbaImage, CameraError> {
     let calibration = device
         .camera_calibration
         .as_ref()
-        .ok_or(tr("Kamera ist noch nicht kalibriert"))?;
+        .ok_or(CameraError::NotCalibrated)?;
     let picture = capture(device)?;
     let (mapping, _) = tracked_mapping(calibration, &picture)?;
     Ok(correct(
@@ -1079,7 +1137,7 @@ pub fn background(
     device: &LaserDevice,
     bed_width_mm: f64,
     bed_height_mm: f64,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, CameraError> {
     encode_png(&background_image(device, bed_width_mm, bed_height_mm)?)
 }
 
@@ -1374,7 +1432,7 @@ mod tests {
             marker_points: Vec::new(),
             lens: None,
         };
-        assert!(homography(&line).unwrap_err().contains("Linie"));
+        assert!(matches!(homography(&line), Err(CameraError::PointsOnLine)));
         let legacy = CameraCalibration {
             reference_points: vec![[200.0, 120.0], [800.0, 480.0]],
             view_points: vec![[100.0, 60.0], [400.0, 240.0]],
@@ -1466,7 +1524,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("camera.png");
         encode_png(&RgbaImage::from_pixel(40, 30, image::Rgba([1, 2, 3, 255])))
-            .and_then(|png| std::fs::write(&path, png).map_err(|e| e.to_string()))
+            .and_then(|png| std::fs::write(&path, png).map_err(CameraError::Io))
             .unwrap();
         let mut device = LaserDevice {
             camera_url: format!("file://{}", path.display()),

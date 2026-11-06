@@ -355,7 +355,7 @@ pub fn processing_preview_sized(
     }
     preview
         .encode_png()
-        .map_err(|e| LttError::Other(e.to_string()))
+        .map_err(|e| LttError::PreviewEncoding(e.to_string()))
 }
 
 /// What an engraving would burn, tinted in the operation colour: the darker
@@ -366,8 +366,7 @@ fn draw_area(
     source: &Project,
     color: [u8; 3],
 ) -> Result<(), LttError> {
-    let tree = usvg::Tree::from_str(&source.svg, &crate::svg::options())
-        .map_err(|e| LttError::Other(e.to_string()))?;
+    let tree = usvg::Tree::from_str(&source.svg, &crate::svg::options())?;
     let size = tree.size();
     let sx = preview.width() as f32 / frame.width;
     let sy = preview.height() as f32 / frame.height;
@@ -603,7 +602,7 @@ pub fn prepare_with(project: &Project, single_job: bool) -> Result<PreparedJob, 
         estimated_seconds: timeline.duration_seconds,
         preview_png: preview
             .encode_png()
-            .map_err(|e| LttError::Other(e.to_string()))?,
+            .map_err(|e| LttError::PreviewEncoding(e.to_string()))?,
         steps,
         timeline,
         warnings,
@@ -1133,7 +1132,7 @@ fn raster_preview(raster: &Raster, color: [u8; 3]) -> Result<Vec<u8>, LttError> 
     );
     small
         .encode_png()
-        .map_err(|e| LttError::Other(e.to_string()))
+        .map_err(|e| LttError::PreviewEncoding(e.to_string()))
 }
 
 fn draw_contours(
@@ -1275,8 +1274,7 @@ fn render_raster(
         image_rendering: usvg::ImageRendering::OptimizeSpeed,
         ..crate::svg::options()
     };
-    let tree =
-        usvg::Tree::from_str(&project.svg, &options).map_err(|e| LttError::Other(e.to_string()))?;
+    let tree = usvg::Tree::from_str(&project.svg, &options)?;
     let size = tree.size();
     let sx = f64::from(project.width_mm) / f64::from(size.width());
     let sy = f64::from(project.height_mm) / f64::from(size.height());
@@ -2231,7 +2229,7 @@ mod tests {
         let error = transmit_jobs_with(&job.jobs, |_| {
             calls += 1;
             if calls == 2 {
-                Err(LttError::Other("Test-Verbindungsabbruch".into()))
+                Err(LttError::NoConnection)
             } else {
                 Ok(())
             }

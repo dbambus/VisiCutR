@@ -70,8 +70,9 @@ pub enum LttError {
     },
     Selection(crate::selection::SelectionError),
     Mapping(crate::mapping::MappingError),
-    /// Errors from the drawing, the mapping or the project, already as text.
-    Other(String),
+    Svg(resvg::usvg::Error),
+    /// The preview PNG cannot be written (tiny-skia's encoder error as text).
+    PreviewEncoding(String),
 }
 
 impl fmt::Display for LttError {
@@ -161,7 +162,8 @@ impl fmt::Display for LttError {
             Self::Geometry(error) => error.to_string(),
             Self::Selection(error) => error.to_string(),
             Self::Mapping(error) => error.to_string(),
-            Self::Other(text) => text.clone(),
+            Self::Svg(error) => error.to_string(),
+            Self::PreviewEncoding(error) => error.clone(),
         };
         f.write_str(&text)
     }
@@ -190,9 +192,9 @@ fn connect_message(address: SocketAddr, error: &io::Error) -> String {
 
 impl std::error::Error for LttError {}
 
-impl From<String> for LttError {
-    fn from(text: String) -> Self {
-        Self::Other(text)
+impl From<resvg::usvg::Error> for LttError {
+    fn from(error: resvg::usvg::Error) -> Self {
+        Self::Svg(error)
     }
 }
 

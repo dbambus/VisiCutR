@@ -5,6 +5,21 @@
 
 use std::path::{Path, PathBuf};
 
+/// A file or folder of the extension that cannot be written.
+#[derive(Debug)]
+pub struct InstallError {
+    pub path: PathBuf,
+    pub error: std::io::Error,
+}
+
+impl std::fmt::Display for InstallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.path.display(), self.error)
+    }
+}
+
+impl std::error::Error for InstallError {}
+
 /// Unterordner im Erweiterungsverzeichnis.
 pub const FOLDER: &str = "visicutr";
 /// Programmpfad für das Skript (siehe `visicutr_export.py`).
@@ -77,9 +92,12 @@ pub fn status(extensions: &Path, program: &Path) -> Status {
 
 /// Schreibt die Erweiterung nach `extensions/visicutr` und merkt `program`.
 /// Liefert den Zielordner.
-pub fn install(extensions: &Path, program: &Path) -> Result<PathBuf, String> {
+pub fn install(extensions: &Path, program: &Path) -> Result<PathBuf, InstallError> {
     let dir = extensions.join(FOLDER);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    std::fs::create_dir_all(&dir).map_err(|error| InstallError {
+        path: dir.clone(),
+        error,
+    })?;
     let path_text = program.to_string_lossy();
     for (name, content) in FILES
         .iter()
@@ -87,7 +105,10 @@ pub fn install(extensions: &Path, program: &Path) -> Result<PathBuf, String> {
         .chain([(PATH_FILE, path_text.as_ref())])
     {
         let path = dir.join(name);
-        std::fs::write(&path, content).map_err(|e| format!("{}: {e}", path.display()))?;
+        std::fs::write(&path, content).map_err(|error| InstallError {
+            path: path.clone(),
+            error,
+        })?;
     }
     #[cfg(unix)]
     {

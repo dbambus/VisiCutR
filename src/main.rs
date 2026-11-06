@@ -674,7 +674,8 @@ impl VisiCutR {
         {
             let (tx, rx) = std::sync::mpsc::channel();
             std::thread::spawn(move || {
-                let _ = tx.send(visicut_core::lab::download(&lab.name, &lab.url));
+                let _ =
+                    tx.send(visicut_core::lab::download(&lab.name, &lab.url).map_err(String::from));
             });
             app.lab_check = Some(rx);
         }
@@ -751,7 +752,7 @@ impl VisiCutR {
         }
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(visicut_core::update::check());
+            let _ = tx.send(visicut_core::update::check().map_err(String::from));
         });
         self.update_check = Some((manual, rx));
         if manual {
@@ -1931,7 +1932,7 @@ impl VisiCutR {
                         .into()
                 };
             }
-            Err(e) => self.report(e),
+            Err(e) => self.report(e.to_string()),
         }
     }
 
@@ -2552,7 +2553,9 @@ impl VisiCutR {
         };
         if ui.button(label).clicked() {
             let result = match (&target, &program) {
-                (Some(dir), Some(program)) => inkscape::install(dir, program),
+                (Some(dir), Some(program)) => {
+                    inkscape::install(dir, program).map_err(|e| e.to_string())
+                }
                 _ => Err(tr("Erweiterungsordner von Inkscape unbekannt").into()),
             };
             self.inkscape = None;

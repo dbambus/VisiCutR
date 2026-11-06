@@ -229,7 +229,7 @@ impl DeviceUi {
 
     fn save(&mut self, store: DeviceStore, project: &mut Project, status: &mut String) -> bool {
         if let Err(e) = store.save(&device::config_dir()) {
-            *status = e;
+            *status = e.to_string();
             return false;
         }
         let camera_changed = {
@@ -261,7 +261,9 @@ impl DeviceUi {
         }
         let device = self.device().clone();
         let (w, h) = (project.bed_width_mm as f64, project.bed_height_mm as f64);
-        self.camera_loading = Some(spawn(move || camera::background_image(&device, w, h)));
+        self.camera_loading = Some(spawn(move || {
+            camera::background_image(&device, w, h).map_err(String::from)
+        }));
     }
 
     /// Macht einen eingerichteten Lasercutter aktiv (Menü Datei → Lasercutter).
@@ -428,7 +430,7 @@ impl DeviceUi {
                         test.best = [shift_calibration::CENTER_BLOCK; 10];
                         *status = tr("Zeilenversatz übernommen · zum Übernehmen sichern").into();
                     }
-                    Err(e) => *status = e,
+                    Err(e) => *status = e.to_string(),
                 }
             }
             if !open {
@@ -445,7 +447,7 @@ impl DeviceUi {
         let (tx, rx) = channel();
         let lab = name.to_owned();
         std::thread::spawn(move || {
-            let _ = tx.send(visicut_core::lab::download(&lab, url));
+            let _ = tx.send(visicut_core::lab::download(&lab, url).map_err(String::from));
         });
         self.download = Some((name.to_owned(), url, rx));
         *status = tr!(
@@ -754,7 +756,7 @@ impl DeviceUi {
             let shot = c.device.clone();
             c.parked = false;
             c.problem = None;
-            c.loading = Some(spawn(move || camera::capture(&shot)));
+            c.loading = Some(spawn(move || camera::capture(&shot).map_err(String::from)));
         } else if calibrate {
             let device = draft.devices[editing].clone();
             let points = device
@@ -780,7 +782,7 @@ impl DeviceUi {
                 points,
                 picture: None,
                 markers: Vec::new(),
-                loading: Some(spawn(move || camera::capture(&shot))),
+                loading: Some(spawn(move || camera::capture(&shot).map_err(String::from))),
                 selected: 0,
                 problem: None,
                 gray: None,
@@ -901,7 +903,7 @@ impl DeviceUi {
             {
                 match std::fs::read(&path)
                     .map_err(|e| e.to_string())
-                    .and_then(|b| device::import_bytes(&b))
+                    .and_then(|b| device::import_bytes(&b).map_err(String::from))
                 {
                     Ok(devices) => {
                         if let Some(count) = self.adopt(devices, project, status) {
@@ -943,7 +945,7 @@ impl DeviceUi {
                         }
                         text
                     }
-                    Err(e) => e,
+                    Err(e) => e.to_string(),
                 };
             }
         });
@@ -1516,7 +1518,7 @@ fn calibration_toolbar(
         {
             let device = c.device.clone();
             c.problem = None;
-            c.loading = Some(spawn(move || camera::capture(&device)));
+            c.loading = Some(spawn(move || camera::capture(&device).map_err(String::from)));
         }
         if ui
             .add_enabled(c.gray.is_some(), egui::Button::new(tr("Kreuze erkennen")))

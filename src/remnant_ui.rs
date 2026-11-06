@@ -213,12 +213,10 @@ impl RemnantUi {
         let (tx, rx) = channel();
         let options = input.options;
         std::thread::spawn(move || {
-            let _ = tx.send(remnant::detect(
-                &image,
-                reference.as_deref(),
-                bed_mm,
-                &options,
-            ));
+            let _ = tx.send(
+                remnant::detect(&image, reference.as_deref(), bed_mm, &options)
+                    .map_err(String::from),
+            );
         });
         self.pending = Some((input, rx));
     }

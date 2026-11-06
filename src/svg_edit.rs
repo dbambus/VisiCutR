@@ -205,7 +205,7 @@ pub(crate) fn scope_names(existing: &str, source: &str) -> Result<String, Compos
             let new = (2..)
                 .map(|k| format!("{name}-{k}"))
                 .find(|n| !taken.contains(n) && !own.contains(n))
-                .unwrap();
+                .expect("unendlich viele Namen");
             taken.insert(new.clone());
             renamed.insert(name.to_string(), new);
         }
@@ -312,7 +312,10 @@ fn rename_css(css: &str, renamed: &std::collections::HashMap<String, String>) ->
     let mut position = 0;
     let mut i = 0;
     while i < css.len() {
-        let c = css[i..].chars().next().unwrap();
+        let c = css[i..]
+            .chars()
+            .next()
+            .expect("i liegt vor dem Ende auf einer Zeichengrenze");
         if c == '#' || c == '.' {
             let rest = &css[i + 1..];
             let len = rest.find(|c: char| !is_name_char(c)).unwrap_or(rest.len());
@@ -422,7 +425,7 @@ fn write_path(path: &tiny_skia::Path, d: &mut String) {
             S::CubicTo(a, b, c) => write!(d, "C{} {} {}", p(a), p(b), p(c)),
             S::Close => write!(d, "Z"),
         }
-        .unwrap();
+        .expect("Schreiben in einen String gelingt immer");
     }
 }
 

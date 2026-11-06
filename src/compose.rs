@@ -340,7 +340,8 @@ pub fn set_text(project: &Project, source: &TextSource) -> Result<Project, Compo
     part.text = Some(source);
     let mut result = project.clone();
     let mut all = project.all_parts();
-    let index = project.active_part.min(all.len() - 1);
+    let last = all.len().checked_sub(1).ok_or(ComposeError::NoMotif)?;
+    let index = project.active_part.min(last);
     all[index] = part;
     result.set_all_parts(all, index);
     Ok(result)
@@ -800,10 +801,14 @@ pub fn add_objects(
             r#"<path id="{}" d="{moved}" fill="{fill}" stroke="{stroke}" stroke-width="0.1"/>"#,
             unique_id(&project.svg, &object.shape, existing + i)
         )
-        .unwrap();
+        .expect("Schreiben in einen String gelingt immer");
         bounds = union(bounds, Some([object.x_mm, object.y_mm, b[2], b[3]]));
     }
-    let mut result = with_document(project, &body, bounds.unwrap())?;
+    let mut result = with_document(
+        project,
+        &body,
+        bounds.expect("mindestens ein Element, also ein Bereich"),
+    )?;
     let ids: Vec<usize> = (existing..existing + objects.len()).collect();
     // Whole-motif processing turns into individual steps when the new
     // elements need another operation; the motif keeps its parameters.
@@ -1254,7 +1259,7 @@ fn nested_body(
                 (!first_of_part).then_some(suffix.as_str())
             )
         )
-        .unwrap();
+        .expect("Schreiben in einen String gelingt immer");
         check_size(&body)?;
         let [pw, ph] = orientation.size;
         bounds = union(bounds, Some([*x, *y, pw, ph]));
@@ -1265,7 +1270,7 @@ fn nested_body(
     }
     Ok(NestedBody {
         body,
-        bounds: bounds.unwrap(),
+        bounds: bounds.ok_or(ComposeError::NothingFits)?,
         new_ids,
     })
 }
@@ -1311,7 +1316,8 @@ pub fn append(project: &Project, source: &str) -> Result<(Project, Vec<String>),
     let existing = selection::objects(&project.svg)?.len();
     let added = selection::objects(&part.svg)?.len();
     let body = embed(project, None, None)? + &embed(&part, None, None)?;
-    let bounds = union(motif_bounds(project), Some([x, y, w, h])).unwrap();
+    let bounds = union(motif_bounds(project), Some([x, y, w, h]))
+        .expect("Bereich der neuen Zeichnung ist gesetzt");
     let result = with_document(project, &body, bounds)?;
     if individual(project) && added > 0 {
         notes.push(tr!(
@@ -1532,7 +1538,8 @@ pub fn set_parameters(
     part.parametric = imported.parametric;
     let mut result = project.clone();
     let mut all = project.all_parts();
-    let index = project.active_part.min(all.len() - 1);
+    let last = all.len().checked_sub(1).ok_or(ComposeError::NoMotif)?;
+    let index = project.active_part.min(last);
     all[index] = part;
     result.set_all_parts(all, index);
     Ok((result, imported.warnings))
@@ -2271,7 +2278,7 @@ fn polygon(corners: impl Iterator<Item = (f64, f64)>) -> (String, [f64; 4]) {
             num(*x),
             num(*y)
         )
-        .unwrap();
+        .expect("Schreiben in einen String gelingt immer");
     }
     d.push('Z');
     (d, [x0, y0, x1 - x0, y1 - y0])
@@ -2314,7 +2321,7 @@ fn text_outline(shape: &Shape) -> Result<(String, [f64; 4]), ComposeError> {
             num(i as f64 * size_mm * line_spacing),
             escape(line)
         )
-        .unwrap();
+        .expect("Schreiben in einen String gelingt immer");
     }
     let source = format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><text xml:space="preserve" font-family="{}" font-size="{}" font-weight="{}" font-style="{}" text-anchor="{anchor}">{spans}</text></svg>"#,

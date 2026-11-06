@@ -181,6 +181,82 @@ pub(crate) fn render_here(
     })
 }
 
+/// `type="Integer(1,2,4)"`: only these values.
+fn kind_options(kind: &str, parameter_kind: Option<Kind>) -> Vec<Value> {
+    kind.find('(')
+        .filter(|_| kind.trim_end().ends_with(')'))
+        .map(|open| &kind.trim_end()[open + 1..kind.trim_end().len() - 1])
+        .map(|list| {
+            list.split(',')
+                .filter_map(|item| match parameter_kind {
+                    Some(Kind::Number) => item.trim().parse().ok().map(Value::Number),
+                    Some(Kind::Integer) => item.trim().parse().ok().map(Value::Integer),
+                    Some(Kind::Text) => Some(Value::Text(item.to_string())),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The `label_<language>` attribute for the UI language, else `label`, else
+/// the parameter name `param`.
+fn localized_label(node: Node, param: &str) -> String {
+    let language = crate::i18n::language().code();
+    node.attributes()
+        .find(|a| {
+            a.name()
+                .strip_prefix("label_")
+                .is_some_and(|code| code.split(['-', '_']).next() == Some(language))
+        })
+        .map(|a| a.value())
+        .or_else(|| node.attribute("label"))
+        .unwrap_or(param)
+        .to_string()
+}
+
+/// The start tag of `node` without the `th:` and computed attributes and
+/// with `set` applied; also the position after it.
+fn rewritten_start_tag(
+    source: &str,
+    node: Node,
+    th: &[(String, String, Range<usize>)],
+    computed: &[Computed],
+    set: Vec<(String, Option<String>)>,
+) -> (String, usize) {
+    let mut final_set: Vec<(String, Option<String>)> = Vec::new();
+    for (name, value) in set {
+        final_set.retain(|(n, _)| *n != name);
+        final_set.push((name, value));
+    }
+    let mut removed: Vec<Range<usize>> = th.iter().map(|(_, _, r)| r.clone()).collect();
+    removed.extend(computed.iter().map(|c| c.range.clone()));
+    for attribute in node.attributes() {
+        let qname = &source[attribute.range_qname()];
+        if final_set.iter().any(|(n, _)| n == qname) {
+            removed.push(attribute.range());
+        }
+    }
+    let added: Vec<(String, String)> = final_set
+        .into_iter()
+        .filter_map(|(n, v)| v.map(|v| (n, v)))
+        .collect();
+    let start = node.range().start;
+    let tag_end = xml::start_tag_end(source, start);
+    let tag = xml::rewrite_start_tag(source, start, tag_end, &removed, &added);
+    (tag, tag_end)
+}
+
+/// Results of the `th:` attributes of one element.
+struct Directives {
+    /// Attributes to set (`None` removes them), in order of evaluation.
+    set: Vec<(String, Option<String>)>,
+    /// Replacement for the element's content (`th:text`, `th:utext`).
+    text: Option<String>,
+    /// Value of `th:remove`.
+    remove: Option<String>,
+}
+
 struct Renderer<'a> {
     engine: &'a mut Engine,
     source: &'a str,
@@ -218,96 +294,17 @@ impl Renderer<'_> {
             if self.psvg
                 && let Some(expression) = &default
             {
-                // VisiCut evaluates PSVG defaults as JavaScript with the
-                // previous parameters as variables and German decimal commas.
-                self.scope = result
-                    .iter()
-                    .map(|p| (p.name.clone(), p.value.to_js()))
-                    .collect();
-                let code = expression.replace('$', "").replace(',', ".");
-                let value = self.evaluate_js(&code, expression)?;
-                let number = value
-                    .to_number(&mut self.engine.context)
-                    .ok()
-                    .filter(|n| !n.is_nan())
-                    .ok_or_else(|| ImportError::ParameterNotANumber {
-                        name: name.clone(),
-                        expression: expression.clone(),
-                    })?;
-                default = Some(number.to_string());
+                default = Some(self.psvg_default(&result, &name, expression)?);
             }
             let kind = node.attribute("type").unwrap_or("Double");
-            let base = kind.split('(').next().unwrap_or(kind).trim();
-            let number = |text: &Option<String>| -> Result<f64, ImportError> {
-                match text {
-                    None => Ok(0.0),
-                    Some(t) => {
-                        t.trim()
-                            .parse::<f64>()
-                            .map_err(|_| ImportError::ParameterNotANumber {
-                                name: name.clone(),
-                                expression: t.clone(),
-                            })
-                    }
-                }
-            };
-            let (value, parameter_kind) = match base {
-                "Double" => (Value::Number(number(&default)?), Some(Kind::Number)),
-                "Integer" => (
-                    Value::Integer(number(&default)?.trunc() as i64),
-                    Some(Kind::Integer),
-                ),
-                "Boolean" => (
-                    Value::Boolean(
-                        default
-                            .as_deref()
-                            .is_some_and(|d| d.trim().eq_ignore_ascii_case("true")),
-                    ),
-                    Some(Kind::Boolean),
-                ),
-                "String" => (Value::Text(default.unwrap_or_default()), Some(Kind::Text)),
-                _ => {
-                    self.warnings.push(tr!(
-                        "Parameter „{name}“ hat den unbekannten Typ „{kind}“",
-                        name = name,
-                        kind = kind
-                    ));
-                    (Value::Null, None)
-                }
-            };
-            // `type="Integer(1,2,4)"`: only these values.
-            let options = kind
-                .find('(')
-                .filter(|_| kind.trim_end().ends_with(')'))
-                .map(|open| &kind.trim_end()[open + 1..kind.trim_end().len() - 1])
-                .map(|list| {
-                    list.split(',')
-                        .filter_map(|item| match parameter_kind {
-                            Some(Kind::Number) => item.trim().parse().ok().map(Value::Number),
-                            Some(Kind::Integer) => item.trim().parse().ok().map(Value::Integer),
-                            Some(Kind::Text) => Some(Value::Text(item.to_string())),
-                            _ => None,
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            let (value, parameter_kind) = self.typed_value(&name, kind, default)?;
+            let options = kind_options(kind, parameter_kind);
             let limit = |attribute: &str| {
                 node.attribute(attribute)
                     .and_then(|v| v.trim().parse::<f64>().ok())
                     .filter(|v| v.is_finite())
             };
-            let language = crate::i18n::language().code();
-            let label = node
-                .attributes()
-                .find(|a| {
-                    a.name()
-                        .strip_prefix("label_")
-                        .is_some_and(|code| code.split(['-', '_']).next() == Some(language))
-                })
-                .map(|a| a.value())
-                .or_else(|| node.attribute("label"))
-                .unwrap_or(param)
-                .to_string();
+            let label = localized_label(node, param);
             match result.iter_mut().find(|p| p.name == name) {
                 Some(existing) => existing.value = value,
                 None => result.push(Parameter {
@@ -323,6 +320,79 @@ impl Renderer<'_> {
             }
         }
         Ok(result)
+    }
+
+    /// A PSVG default evaluated with the `previous` parameters in scope.
+    fn psvg_default(
+        &mut self,
+        previous: &[Parameter],
+        name: &str,
+        expression: &str,
+    ) -> Result<String, ImportError> {
+        // VisiCut evaluates PSVG defaults as JavaScript with the
+        // previous parameters as variables and German decimal commas.
+        self.scope = previous
+            .iter()
+            .map(|p| (p.name.clone(), p.value.to_js()))
+            .collect();
+        let code = expression.replace('$', "").replace(',', ".");
+        let value = self.evaluate_js(&code, expression)?;
+        let number = value
+            .to_number(&mut self.engine.context)
+            .ok()
+            .filter(|n| !n.is_nan())
+            .ok_or_else(|| ImportError::ParameterNotANumber {
+                name: name.to_string(),
+                expression: expression.to_string(),
+            })?;
+        Ok(number.to_string())
+    }
+
+    /// The value of `default` for the parameter type `kind` (`Double`,
+    /// `Integer(1,2,4)`, …); `Kind` is `None` with a warning for unknown types.
+    fn typed_value(
+        &mut self,
+        name: &str,
+        kind: &str,
+        default: Option<String>,
+    ) -> Result<(Value, Option<Kind>), ImportError> {
+        let base = kind.split('(').next().unwrap_or(kind).trim();
+        let number = |text: &Option<String>| -> Result<f64, ImportError> {
+            match text {
+                None => Ok(0.0),
+                Some(t) => t
+                    .trim()
+                    .parse::<f64>()
+                    .map_err(|_| ImportError::ParameterNotANumber {
+                        name: name.to_string(),
+                        expression: t.clone(),
+                    }),
+            }
+        };
+        Ok(match base {
+            "Double" => (Value::Number(number(&default)?), Some(Kind::Number)),
+            "Integer" => (
+                Value::Integer(number(&default)?.trunc() as i64),
+                Some(Kind::Integer),
+            ),
+            "Boolean" => (
+                Value::Boolean(
+                    default
+                        .as_deref()
+                        .is_some_and(|d| d.trim().eq_ignore_ascii_case("true")),
+                ),
+                Some(Kind::Boolean),
+            ),
+            "String" => (Value::Text(default.unwrap_or_default()), Some(Kind::Text)),
+            _ => {
+                self.warnings.push(tr!(
+                    "Parameter „{name}“ hat den unbekannten Typ „{kind}“",
+                    name = name,
+                    kind = kind
+                ));
+                (Value::Null, None)
+            }
+        })
     }
 
     fn element(&mut self, node: Node, out: &mut String) -> Result<(), ImportError> {
@@ -420,6 +490,62 @@ impl Renderer<'_> {
         out: &mut String,
     ) -> Result<(), ImportError> {
         let source = self.source;
+        let Directives {
+            mut set,
+            mut text,
+            remove,
+        } = self.directives(node, th)?;
+        for item in computed {
+            let result = self.evaluate_js(&item.expression, &item.expression)?;
+            let result = self.optional_string(&result)?;
+            set.push((item.name.clone(), result));
+        }
+        let start = node.range().start;
+        let (mut tag, tag_end) = rewritten_start_tag(source, node, th, computed, set);
+        let self_closing = xml::is_self_closing(source, tag_end);
+        let qname = xml::qualified_name(source, start);
+        match remove.as_deref() {
+            Some("all") => return Ok(()),
+            Some("tag") => {
+                if text.is_some() {
+                    out.push_str(text.as_deref().unwrap_or_default());
+                } else {
+                    self.content(node, tag_end, out)?;
+                }
+                return Ok(());
+            }
+            Some("body") => text = Some(String::new()),
+            _ => {}
+        }
+        if let Some(text) = text {
+            if self_closing {
+                tag = format!("{}>", tag.trim_end_matches("/>").trim_end());
+            }
+            out.push_str(&tag);
+            out.push_str(&text);
+            out.push_str(&format!("</{qname}>"));
+            return Ok(());
+        }
+        out.push_str(&tag);
+        if remove.as_deref() == Some("all-but-first") {
+            if let Some(first) = node.children().find(|c| c.is_element()) {
+                self.element(first, out)?;
+            }
+        } else {
+            self.content(node, tag_end, out)?;
+        }
+        out.push_str(self.end_tag(node, tag_end));
+        Ok(())
+    }
+
+    /// Evaluates the `th:` attributes except the structural ones (`each`,
+    /// `if`, `unless`, `fragment`).
+    fn directives(
+        &mut self,
+        node: Node,
+        th: &[(String, String, Range<usize>)],
+    ) -> Result<Directives, ImportError> {
+        let source = self.source;
         let mut set: Vec<(String, Option<String>)> = Vec::new();
         let mut text = None;
         let mut remove = None;
@@ -484,65 +610,7 @@ impl Renderer<'_> {
                 }
             }
         }
-        for item in computed {
-            let result = self.evaluate_js(&item.expression, &item.expression)?;
-            let result = self.optional_string(&result)?;
-            set.push((item.name.clone(), result));
-        }
-        let mut final_set: Vec<(String, Option<String>)> = Vec::new();
-        for (name, value) in set {
-            final_set.retain(|(n, _)| *n != name);
-            final_set.push((name, value));
-        }
-        let mut removed: Vec<Range<usize>> = th.iter().map(|(_, _, r)| r.clone()).collect();
-        removed.extend(computed.iter().map(|c| c.range.clone()));
-        for attribute in node.attributes() {
-            let qname = &source[attribute.range_qname()];
-            if final_set.iter().any(|(n, _)| n == qname) {
-                removed.push(attribute.range());
-            }
-        }
-        let added: Vec<(String, String)> = final_set
-            .into_iter()
-            .filter_map(|(n, v)| v.map(|v| (n, v)))
-            .collect();
-        let start = node.range().start;
-        let tag_end = xml::start_tag_end(source, start);
-        let self_closing = xml::is_self_closing(source, tag_end);
-        let mut tag = xml::rewrite_start_tag(source, start, tag_end, &removed, &added);
-        let qname = xml::qualified_name(source, start);
-        match remove.as_deref() {
-            Some("all") => return Ok(()),
-            Some("tag") => {
-                if text.is_some() {
-                    out.push_str(text.as_deref().unwrap_or_default());
-                } else {
-                    self.content(node, tag_end, out)?;
-                }
-                return Ok(());
-            }
-            Some("body") => text = Some(String::new()),
-            _ => {}
-        }
-        if let Some(text) = text {
-            if self_closing {
-                tag = format!("{}>", tag.trim_end_matches("/>").trim_end());
-            }
-            out.push_str(&tag);
-            out.push_str(&text);
-            out.push_str(&format!("</{qname}>"));
-            return Ok(());
-        }
-        out.push_str(&tag);
-        if remove.as_deref() == Some("all-but-first") {
-            if let Some(first) = node.children().find(|c| c.is_element()) {
-                self.element(first, out)?;
-            }
-        } else {
-            self.content(node, tag_end, out)?;
-        }
-        out.push_str(self.end_tag(node, tag_end));
-        Ok(())
+        Ok(Directives { set, text, remove })
     }
 
     /// Copies everything between the tags, processing child elements.
@@ -719,36 +787,9 @@ fn convert(text: &str, inside: bool) -> Result<String, ImportError> {
                 }
             }
             '|' if !inside => {
-                let end = chars[i + 1..]
-                    .iter()
-                    .position(|c| *c == '|')
-                    .map(|p| i + 1 + p)
-                    .ok_or_else(|| ImportError::MissingPipe(text.into()))?;
-                let mut parts = vec!["''".to_string()];
-                let mut literal = String::new();
-                let mut j = i + 1;
-                while j < end {
-                    if chars[j] == '$' && chars.get(j + 1) == Some(&'{') {
-                        let close = brace_end(&chars[..end], j + 1)
-                            .ok_or_else(|| ImportError::MissingClosingBrace(text.into()))?;
-                        if !literal.is_empty() {
-                            parts.push(js_string_literal(&std::mem::take(&mut literal)));
-                        }
-                        let inner: String = chars[j + 2..close].iter().collect();
-                        parts.push(format!("({})", convert(&inner, true)?));
-                        j = close + 1;
-                    } else {
-                        literal.push(chars[j]);
-                        j += 1;
-                    }
-                }
-                if !literal.is_empty() {
-                    parts.push(js_string_literal(&literal));
-                }
-                out.push('(');
-                out.push_str(&parts.join(" + "));
-                out.push(')');
-                i = end + 1;
+                let (js, next) = literal_substitution(&chars, i, text)?;
+                out.push_str(&js);
+                i = next;
             }
             c if c.is_alphabetic() || c == '_' => {
                 let start = i;
@@ -761,20 +802,7 @@ fn convert(text: &str, inside: bool) -> Result<String, ImportError> {
                     .rev()
                     .find(|c| !c.is_whitespace())
                     .is_some_and(|c| *c == '.');
-                let operator = match word.as_str() {
-                    "gt" => Some(">"),
-                    "lt" => Some("<"),
-                    "ge" => Some(">="),
-                    "le" => Some("<="),
-                    "eq" => Some("=="),
-                    "ne" | "neq" => Some("!="),
-                    "and" => Some("&&"),
-                    "or" => Some("||"),
-                    "not" => Some("!"),
-                    "div" => Some("/"),
-                    "mod" => Some("%"),
-                    _ => None,
-                };
+                let operator = word_operator(&word);
                 match operator {
                     Some(op) if !after_dot => {
                         out.push(' ');
@@ -798,6 +826,60 @@ fn convert(text: &str, inside: bool) -> Result<String, ImportError> {
         }
     }
     Ok(out)
+}
+
+/// `|a ${x} b|` starting at `chars[i]` → JS concatenation in parentheses, and
+/// the index after the closing pipe. `text` is the whole expression for errors.
+fn literal_substitution(
+    chars: &[char],
+    i: usize,
+    text: &str,
+) -> Result<(String, usize), ImportError> {
+    let end = chars[i + 1..]
+        .iter()
+        .position(|c| *c == '|')
+        .map(|p| i + 1 + p)
+        .ok_or_else(|| ImportError::MissingPipe(text.into()))?;
+    let mut parts = vec!["''".to_string()];
+    let mut literal = String::new();
+    let mut j = i + 1;
+    while j < end {
+        if chars[j] == '$' && chars.get(j + 1) == Some(&'{') {
+            let close = brace_end(&chars[..end], j + 1)
+                .ok_or_else(|| ImportError::MissingClosingBrace(text.into()))?;
+            if !literal.is_empty() {
+                parts.push(js_string_literal(&std::mem::take(&mut literal)));
+            }
+            let inner: String = chars[j + 2..close].iter().collect();
+            parts.push(format!("({})", convert(&inner, true)?));
+            j = close + 1;
+        } else {
+            literal.push(chars[j]);
+            j += 1;
+        }
+    }
+    if !literal.is_empty() {
+        parts.push(js_string_literal(&literal));
+    }
+    Ok((format!("({})", parts.join(" + ")), end + 1))
+}
+
+/// OGNL word operators (`gt`, `and`, `mod`, …) as JS operators.
+fn word_operator(word: &str) -> Option<&'static str> {
+    match word {
+        "gt" => Some(">"),
+        "lt" => Some("<"),
+        "ge" => Some(">="),
+        "le" => Some("<="),
+        "eq" => Some("=="),
+        "ne" | "neq" => Some("!="),
+        "and" => Some("&&"),
+        "or" => Some("||"),
+        "not" => Some("!"),
+        "div" => Some("/"),
+        "mod" => Some("%"),
+        _ => None,
+    }
 }
 
 fn string_end(chars: &[char], start: usize) -> Option<usize> {

@@ -571,45 +571,6 @@ fn profile_settings(
     part: &str,
     warnings: &mut Vec<String>,
 ) -> (Operation, RasterSettings) {
-    let dpi_check = |dpi: f64, warnings: &mut Vec<String>| {
-        if (dpi - SUPPORTED_DPI).abs() > 1e-6 {
-            warnings.push(tr!(
-                "Teil „{part}“: Vektor-Auflösung {dpi} DPI wird nicht übernommen; \
-                 der LTT schneidet wie in VisiCut mit {supported} DPI",
-                part = part,
-                dpi = dpi,
-                supported = SUPPORTED_DPI
-            ));
-        }
-    };
-    // Gravuren übernehmen die Auflösungen des iLaser 4000 (166 … 1000 DPI).
-    let raster_dpi = |dpi: f64, warnings: &mut Vec<String>| match RASTER_DPIS
-        .iter()
-        .find(|&&d| (f64::from(d) - dpi).abs() < 1.0)
-    {
-        Some(&d) => d,
-        None => {
-            warnings.push(tr!(
-                "Teil „{part}“: Gravurauflösung {dpi} DPI gibt es am iLaser 4000 nicht; \
-                 es wird mit {supported} DPI graviert",
-                part = part,
-                dpi = dpi,
-                supported = SUPPORTED_DPI
-            ));
-            SUPPORTED_DPI as u32
-        }
-    };
-    let color_shift = |value: i32, warnings: &mut Vec<String>| {
-        if !(-255..=255).contains(&value) {
-            warnings.push(tr!(
-                "Teil „{part}“: Helligkeitsverschiebung {value} auf den zulässigen Bereich \
-                 begrenzt",
-                part = part,
-                value = value
-            ));
-        }
-        value.clamp(-255, 255)
-    };
     match profile {
         Profile::Vector {
             is_cut,
@@ -617,7 +578,7 @@ fn profile_settings(
             order,
             dpi,
         } => {
-            dpi_check(*dpi, warnings);
+            check_vector_dpi(*dpi, part, warnings);
             if order != "INNER_FIRST" {
                 warnings.push(tr!(
                     "Teil „{part}“: Sortierung „{order}“ wird nicht übernommen; \
@@ -640,7 +601,7 @@ fn profile_settings(
             color_shift: shift,
             dithering,
         } => {
-            let dpi = raster_dpi(*dpi, warnings);
+            let dpi = raster_dpi(*dpi, part, warnings);
             let default = RasterSettings::default();
             let dithering = match dithering.as_deref() {
                 None => default.dithering,
@@ -659,7 +620,7 @@ fn profile_settings(
                 RasterSettings {
                     dithering,
                     invert: *invert,
-                    color_shift: color_shift(*shift, warnings),
+                    color_shift: clamped_color_shift(*shift, part, warnings),
                     dpi,
                     ..RasterSettings::default()
                 },
@@ -670,18 +631,64 @@ fn profile_settings(
             invert,
             color_shift: shift,
         } => {
-            let dpi = raster_dpi(*dpi, warnings);
+            let dpi = raster_dpi(*dpi, part, warnings);
             (
                 Operation::Engrave3d,
                 RasterSettings {
                     invert: *invert,
-                    color_shift: color_shift(*shift, warnings),
+                    color_shift: clamped_color_shift(*shift, part, warnings),
                     dpi,
                     ..RasterSettings::default()
                 },
             )
         }
     }
+}
+
+/// Warns when a vector profile asks for a resolution other than the LTT's.
+fn check_vector_dpi(dpi: f64, part: &str, warnings: &mut Vec<String>) {
+    if (dpi - SUPPORTED_DPI).abs() > 1e-6 {
+        warnings.push(tr!(
+            "Teil „{part}“: Vektor-Auflösung {dpi} DPI wird nicht übernommen; \
+             der LTT schneidet wie in VisiCut mit {supported} DPI",
+            part = part,
+            dpi = dpi,
+            supported = SUPPORTED_DPI
+        ));
+    }
+}
+
+/// Gravuren übernehmen die Auflösungen des iLaser 4000 (166 … 1000 DPI).
+fn raster_dpi(dpi: f64, part: &str, warnings: &mut Vec<String>) -> u32 {
+    match RASTER_DPIS
+        .iter()
+        .find(|&&d| (f64::from(d) - dpi).abs() < 1.0)
+    {
+        Some(&d) => d,
+        None => {
+            warnings.push(tr!(
+                "Teil „{part}“: Gravurauflösung {dpi} DPI gibt es am iLaser 4000 nicht; \
+             es wird mit {supported} DPI graviert",
+                part = part,
+                dpi = dpi,
+                supported = SUPPORTED_DPI
+            ));
+            SUPPORTED_DPI as u32
+        }
+    }
+}
+
+/// Brightness shift limited to -255 … 255, with a warning when it was outside.
+fn clamped_color_shift(value: i32, part: &str, warnings: &mut Vec<String>) -> i32 {
+    if !(-255..=255).contains(&value) {
+        warnings.push(tr!(
+            "Teil „{part}“: Helligkeitsverschiebung {value} auf den zulässigen Bereich \
+             begrenzt",
+            part = part,
+            value = value
+        ));
+    }
+    value.clamp(-255, 255)
 }
 
 /// Zuordnungsvorlagen aus VisiCut-Einstellungen: eine Datei `mappings/<Name>.xml`

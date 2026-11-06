@@ -53,6 +53,134 @@ pub fn read_plf(path: &Path) -> Result<Imported, ImportError> {
         return Err(ImportError::PlfTooManyEntries(MAX_ENTRIES));
     }
     let temp = TempDir::new()?;
+    let parts = extract_parts(&mut archive, &temp)?;
+
+    let mut composer = Composer::default();
+    let mut warnings = Vec::new();
+    let any_mapping = parts.values().any(|part| part.mapping.is_some());
+    let mut placed = Vec::new();
+    let mut separate: Vec<crate::svg_import::ExtraPart> = Vec::new();
+    for (index, part) in parts {
+        let mapping = part.mapping.map(|bytes| mappings::parse(&bytes));
+        let Some((name, file, imported)) = import_part(index, part.source, &mut warnings) else {
+            continue;
+        };
+        warnings.extend(imported.warnings.iter().map(|w| format!("{name}: {w}")));
+        let transform = placement(&name, part.transform, &mut warnings);
+        // Parametrische Teile bleiben eigene Teile, damit sich ihre
+        // Parameter ändern lassen.
+        if let Some(parametric) = imported.parametric {
+            let parametric = crate::project::Parametric {
+                placement: Some(crate::project::Placement { transform }),
+                ..parametric
+            };
+            match separate_part(&name, &imported.svg, parametric, mapping, any_mapping) {
+                Ok((part, more)) => {
+                    warnings.extend(more);
+                    separate.push(part);
+                }
+                Err(error) => warnings.push(tr!(
+                    "Teil „{name}“ übersprungen: {error}",
+                    name = name,
+                    error = error
+                )),
+            }
+            continue;
+        }
+        match composer.add(&name, &file, &imported.svg, transform) {
+            Ok(()) => placed.push(mappings::Placed {
+                // Same source as the composer parses (without DOCTYPE), with the original ids.
+                objects: attributes(&xml::strip_doctype(&imported.svg)).ok(),
+                svg: is_svg(&file),
+                mapping,
+                name,
+            }),
+            Err(error) => warnings.push(tr!(
+                "Teil „{name}“ übersprungen: {error}",
+                name = name,
+                error = error
+            )),
+        }
+    }
+    if composer.parts.is_empty() && !separate.is_empty() {
+        // Nur parametrische Teile: das erste wird die Hauptgrafik.
+        return Ok(first_part_as_main(separate, warnings));
+    }
+    if composer.parts.is_empty() {
+        return Err(if warnings.is_empty() {
+            ImportError::PlfEmpty
+        } else {
+            ImportError::PlfNothingImportable(warnings)
+        });
+    }
+    let (svg, more, shift) = composer.finish()?;
+    warnings.extend(more);
+    // Die Hauptgrafik beginnt am (verschobenen) Ursprung des Betts.
+    let (sx, sy) = shift.unwrap_or_default();
+    for part in &mut separate {
+        part.offset_mm[0] += sx;
+        part.offset_mm[1] += sy;
+    }
+    let translation = if any_mapping {
+        mappings::translate(&placed, attributes(&svg))
+    } else {
+        mappings::Translation::default()
+    };
+    warnings.extend(translation.warnings);
+    Ok(Imported {
+        svg,
+        warnings,
+        steps: translation.steps,
+        parametric: None,
+        extra_parts: separate,
+        offset_mm: [0.0, 0.0],
+    })
+}
+
+/// Imports the graphic file of part `index`; `None` with a warning when it is
+/// missing, a nested PLF file or not importable.
+fn import_part(
+    index: u32,
+    source: Option<(String, PathBuf)>,
+    warnings: &mut Vec<String>,
+) -> Option<(String, PathBuf, Imported)> {
+    let Some((name, file)) = source else {
+        warnings.push(tr!(
+            "Teil {number}: Grafikdatei fehlt in der PLF-Datei",
+            number = index + 1
+        ));
+        return None;
+    };
+    if file
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("plf"))
+    {
+        warnings.push(tr!(
+            "Teil „{name}“ übersprungen: PLF-Dateien in PLF-Dateien werden nicht geöffnet",
+            name = name
+        ));
+        return None;
+    }
+    let imported = match super::read_file(&file) {
+        Ok(imported) => imported,
+        Err(error) => {
+            warnings.push(tr!(
+                "Teil „{name}“ übersprungen: {error}",
+                name = name,
+                error = error
+            ));
+            return None;
+        }
+    };
+    Some((name, file, imported))
+}
+
+/// Reads the archive entries: transforms and mappings into memory, graphic
+/// and parameter files into `temp`, grouped by part index.
+fn extract_parts(
+    archive: &mut zip::ZipArchive<std::fs::File>,
+    temp: &TempDir,
+) -> Result<BTreeMap<u32, PartFiles>, ImportError> {
     let mut parts: BTreeMap<u32, PartFiles> = BTreeMap::new();
     let mut total = 0u64;
     for i in 0..archive.len() {
@@ -98,141 +226,55 @@ pub fn read_plf(path: &Path) -> Result<Imported, ImportError> {
             }
         }
     }
+    Ok(parts)
+}
 
-    let mut composer = Composer::default();
-    let mut warnings = Vec::new();
-    let any_mapping = parts.values().any(|part| part.mapping.is_some());
-    let mut placed = Vec::new();
-    let mut separate: Vec<crate::svg_import::ExtraPart> = Vec::new();
-    for (index, part) in parts {
-        let mapping = part.mapping.map(|bytes| mappings::parse(&bytes));
-        let Some((name, file)) = part.source else {
+/// The part's saved position; `None` (graphic at the origin) with a warning
+/// when it is missing or unreadable.
+fn placement(
+    name: &str,
+    transform: Option<Result<Matrix, ImportError>>,
+    warnings: &mut Vec<String>,
+) -> Option<Matrix> {
+    match transform {
+        Some(Ok(transform)) => Some(transform),
+        Some(Err(error)) => {
             warnings.push(tr!(
-                "Teil {number}: Grafikdatei fehlt in der PLF-Datei",
-                number = index + 1
-            ));
-            continue;
-        };
-        if file
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("plf"))
-        {
-            warnings.push(tr!(
-                "Teil „{name}“ übersprungen: PLF-Dateien in PLF-Dateien werden nicht geöffnet",
-                name = name
-            ));
-            continue;
-        }
-        let imported = match super::read_file(&file) {
-            Ok(imported) => imported,
-            Err(error) => {
-                warnings.push(tr!(
-                    "Teil „{name}“ übersprungen: {error}",
-                    name = name,
-                    error = error
-                ));
-                continue;
-            }
-        };
-        warnings.extend(imported.warnings.iter().map(|w| format!("{name}: {w}")));
-        let transform = match part.transform {
-            Some(Ok(transform)) => Some(transform),
-            Some(Err(error)) => {
-                warnings.push(tr!(
-                    "Teil „{name}“: Position nicht lesbar ({error}); die Grafik liegt am Nullpunkt",
-                    name = name,
-                    error = error
-                ));
-                None
-            }
-            None => {
-                warnings.push(tr!(
-                    "Teil „{name}“: keine Position gespeichert; die Grafik liegt am Nullpunkt",
-                    name = name
-                ));
-                None
-            }
-        };
-        // Parametrische Teile bleiben eigene Teile, damit sich ihre
-        // Parameter ändern lassen.
-        if let Some(parametric) = imported.parametric {
-            let parametric = crate::project::Parametric {
-                placement: Some(crate::project::Placement { transform }),
-                ..parametric
-            };
-            match separate_part(&name, &imported.svg, parametric, mapping, any_mapping) {
-                Ok((part, more)) => {
-                    warnings.extend(more);
-                    separate.push(part);
-                }
-                Err(error) => warnings.push(tr!(
-                    "Teil „{name}“ übersprungen: {error}",
-                    name = name,
-                    error = error
-                )),
-            }
-            continue;
-        }
-        match composer.add(&name, &file, &imported.svg, transform) {
-            Ok(()) => placed.push(mappings::Placed {
-                // Same source as the composer parses (without DOCTYPE), with the original ids.
-                objects: attributes(&xml::strip_doctype(&imported.svg)).ok(),
-                svg: is_svg(&file),
-                mapping,
-                name,
-            }),
-            Err(error) => warnings.push(tr!(
-                "Teil „{name}“ übersprungen: {error}",
+                "Teil „{name}“: Position nicht lesbar ({error}); die Grafik liegt am Nullpunkt",
                 name = name,
                 error = error
-            )),
+            ));
+            None
+        }
+        None => {
+            warnings.push(tr!(
+                "Teil „{name}“: keine Position gespeichert; die Grafik liegt am Nullpunkt",
+                name = name
+            ));
+            None
         }
     }
-    if composer.parts.is_empty() && !separate.is_empty() {
-        // Nur parametrische Teile: das erste wird die Hauptgrafik.
-        let first = separate.remove(0);
-        for part in &mut separate {
-            part.offset_mm[0] -= first.offset_mm[0];
-            part.offset_mm[1] -= first.offset_mm[1];
-        }
-        return Ok(Imported {
-            svg: first.svg,
-            warnings,
-            steps: first.steps,
-            parametric: first.parametric,
-            extra_parts: separate,
-            offset_mm: first.offset_mm,
-        });
-    }
-    if composer.parts.is_empty() {
-        return Err(if warnings.is_empty() {
-            ImportError::PlfEmpty
-        } else {
-            ImportError::PlfNothingImportable(warnings)
-        });
-    }
-    let (svg, more, shift) = composer.finish()?;
-    warnings.extend(more);
-    // Die Hauptgrafik beginnt am (verschobenen) Ursprung des Betts.
-    let (sx, sy) = shift.unwrap_or_default();
+}
+
+/// A PLF file with parametric parts only: the first becomes the main graphic,
+/// the others keep their offsets relative to it.
+fn first_part_as_main(
+    mut separate: Vec<crate::svg_import::ExtraPart>,
+    warnings: Vec<String>,
+) -> Imported {
+    let first = separate.remove(0);
     for part in &mut separate {
-        part.offset_mm[0] += sx;
-        part.offset_mm[1] += sy;
+        part.offset_mm[0] -= first.offset_mm[0];
+        part.offset_mm[1] -= first.offset_mm[1];
     }
-    let translation = if any_mapping {
-        mappings::translate(&placed, attributes(&svg))
-    } else {
-        mappings::Translation::default()
-    };
-    warnings.extend(translation.warnings);
-    Ok(Imported {
-        svg,
+    Imported {
+        svg: first.svg,
         warnings,
-        steps: translation.steps,
-        parametric: None,
+        steps: first.steps,
+        parametric: first.parametric,
         extra_parts: separate,
-        offset_mm: [0.0, 0.0],
-    })
+        offset_mm: first.offset_mm,
+    }
 }
 
 /// Parts that VisiCutR knows as SVG; their objects have the attributes VisiCut uses.

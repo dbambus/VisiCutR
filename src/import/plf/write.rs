@@ -207,12 +207,31 @@ fn part_files(
         mappings.push(mapping(Some(filters), None));
     }
 
-    // Root in millimetres: the content keeps its user units inside a group
-    // that maps them to the part's size, as VisiCutR draws it.
-    let matrix = user_to_mm(part, &source, root)?;
+    wrap_root_in_mm(part, &source, root, &mut edits)?;
+    let svg = xml::apply_edits(&source, 0, edits);
+
+    let entries: String = mappings.concat();
+    let mapping_xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<com.t_oster.visicut.model.mapping.MappingSet serialization=\"custom\">\n  <unserializable-parents/>\n  <linked-list>\n    <default/>\n    <int>{}</int>\n{entries}  </linked-list>\n  <name>{}</name>\n</com.t_oster.visicut.model.mapping.MappingSet>\n",
+        mappings.len(),
+        xml::escape_text(project)
+    );
+    Ok((svg, mapping_xml))
+}
+
+/// Root in millimetres: the content keeps its user units inside a group
+/// that maps them to the part's size, as VisiCutR draws it. Adds the edits
+/// of the root's start and end tag.
+fn wrap_root_in_mm(
+    part: &Part,
+    source: &str,
+    root: roxmltree::Node,
+    edits: &mut Vec<(std::ops::Range<usize>, String)>,
+) -> Result<(), ImportError> {
+    let matrix = user_to_mm(part, source, root)?;
     let start = root.range().start;
-    let tag_end = xml::start_tag_end(&source, start);
-    if xml::is_self_closing(&source, tag_end) {
+    let tag_end = xml::start_tag_end(source, start);
+    if xml::is_self_closing(source, tag_end) {
         return Err(ImportError::NoObjects);
     }
     let replaced = [
@@ -234,7 +253,7 @@ fn part_files(
         ("height".to_string(), format!("{h}mm")),
         ("viewBox".to_string(), format!("0 0 {w} {h}")),
     ];
-    let tag = xml::rewrite_start_tag(&source, start, tag_end, &removed, &added);
+    let tag = xml::rewrite_start_tag(source, start, tag_end, &removed, &added);
     let matrix = matrix.map(|v| v.to_string()).join(" ");
     edits.push((
         start..tag_end,
@@ -244,15 +263,7 @@ fn part_files(
         .rfind("</")
         .ok_or(ImportError::SvgStructure)?;
     edits.push((close..close, "</g>".into()));
-    let svg = xml::apply_edits(&source, 0, edits);
-
-    let entries: String = mappings.concat();
-    let mapping_xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<com.t_oster.visicut.model.mapping.MappingSet serialization=\"custom\">\n  <unserializable-parents/>\n  <linked-list>\n    <default/>\n    <int>{}</int>\n{entries}  </linked-list>\n  <name>{}</name>\n</com.t_oster.visicut.model.mapping.MappingSet>\n",
-        mappings.len(),
-        xml::escape_text(project)
-    );
-    Ok((svg, mapping_xml))
+    Ok(())
 }
 
 /// Matrix from the SVG's user units to millimetres of the part: the root

@@ -66,6 +66,12 @@ impl P {
             angle: f64::NAN,
         }
     }
+
+    /// Delta of a point after the first of its list, which always has one.
+    fn delta(&self) -> (f64, f64) {
+        self.delta
+            .expect("jeder Punkt nach dem ersten hat einen Abstand")
+    }
 }
 
 fn hypot(d: (f64, f64)) -> f64 {
@@ -242,7 +248,7 @@ impl<'a> Encoder<'a> {
         let tolerance = mm_to_px(LENGTH_TOLERANCE_MM).max(1.0);
         let mut list = vec![P::new(self.x, self.y)];
         for &(x, y) in points {
-            let last = *list.last().unwrap();
+            let last = *list.last().expect("beginnt mit dem Startpunkt");
             let mut point = P::new(x, y);
             let delta = (x - last.x, y - last.y);
             point.delta = Some(delta);
@@ -252,7 +258,9 @@ impl<'a> Encoder<'a> {
             }
             if let Some(previous) = last.delta {
                 let angle = abs_angle(previous, delta);
-                list.last_mut().unwrap().angle = angle;
+                if let Some(corner) = list.last_mut() {
+                    corner.angle = angle;
+                }
                 if angle * length > tolerance * 5.0
                     || angle > ANGLE_TOLERANCE_SHORT
                     || (length > tolerance * 100.0 && angle > ANGLE_TOLERANCE_LONG)
@@ -339,8 +347,6 @@ impl<'a> Encoder<'a> {
         }
         let max_speed = self.speed as f64 * NOMINAL_CUT_SPEED / 100.0;
         let to_percent = 100.0 / NOMINAL_CUT_SPEED;
-        let px_mm = px_to_mm(1.0);
-        let safety = 0.99;
         let mut points = reinterpolate(points, mm_to_px(0.9));
         for p in &mut points {
             p.speed = max_speed;
@@ -349,6 +355,20 @@ impl<'a> Encoder<'a> {
         points[0].speed = 0.0;
         points[last].speed = 0.0;
         points[0].angle = 0.0;
+        self.plan_curve_speeds(&mut points, max_speed)?;
+        let mut filtered = drop_straight_points(&points);
+        for p in &mut filtered {
+            p.speed *= to_percent;
+        }
+        self.curve_with_known_speed(&filtered)
+    }
+
+    /// Lowers the speed of the points until every change between two of
+    /// them stays within the curve acceleration; the first rounds plan
+    /// optimistically with more acceleration.
+    fn plan_curve_speeds(&self, points: &mut [P], max_speed: f64) -> Result<(), LttError> {
+        let px_mm = px_to_mm(1.0);
+        let safety = 0.99;
         const WARMUP_ROUNDS: i32 = 10;
         const WARMUP_FACTOR_MAX: f64 = 16.0;
         let mut warmup = WARMUP_ROUNDS;
@@ -373,7 +393,7 @@ impl<'a> Encoder<'a> {
                 let before = points[i - 1];
                 let p = points[i];
                 let max_avg = (p.speed + before.speed) / 2.0;
-                let distance = hypot(p.delta.unwrap()) * px_mm;
+                let distance = hypot(p.delta()) * px_mm;
                 let mut min_time = distance / max_avg;
                 const MAX_ACCEL_TIME: f64 = 0.005;
                 if before.angle != 0.0 && min_time > MAX_ACCEL_TIME {
@@ -422,25 +442,7 @@ impl<'a> Encoder<'a> {
                 i += 1;
             }
         }
-        // Drop points on straight segments with little speed change.
-        let mut filtered = vec![points[0]];
-        let mut speed_now = points[0].speed;
-        let mut since_last = 0.0;
-        for p in &points[1..last] {
-            let threshold = 0.2 + (0.1 * speed_now * (1.0 - since_last / 5.0)).max(0.0);
-            if p.angle == 0.0 && (p.speed - speed_now).abs() < threshold {
-                since_last += hypot(p.delta.unwrap()) * px_mm;
-            } else {
-                speed_now = p.speed;
-                since_last = 0.0;
-                filtered.push(*p);
-            }
-        }
-        filtered.push(points[last]);
-        for p in &mut filtered {
-            p.speed *= to_percent;
-        }
-        self.curve_with_known_speed(&filtered)
+        Ok(())
     }
 
     fn curve_with_known_speed(&mut self, points: &[P]) -> Result<f64, LttError> {
@@ -487,11 +489,32 @@ impl<'a> Encoder<'a> {
     }
 }
 
+/// Drop points on straight segments with little speed change.
+fn drop_straight_points(points: &[P]) -> Vec<P> {
+    let px_mm = px_to_mm(1.0);
+    let last = points.len() - 1;
+    let mut filtered = vec![points[0]];
+    let mut speed_now = points[0].speed;
+    let mut since_last = 0.0;
+    for p in &points[1..last] {
+        let threshold = 0.2 + (0.1 * speed_now * (1.0 - since_last / 5.0)).max(0.0);
+        if p.angle == 0.0 && (p.speed - speed_now).abs() < threshold {
+            since_last += hypot(p.delta()) * px_mm;
+        } else {
+            speed_now = p.speed;
+            since_last = 0.0;
+            filtered.push(*p);
+        }
+    }
+    filtered.push(points[last]);
+    filtered
+}
+
 fn reinterpolate(points: Vec<P>, max_distance: f64) -> Vec<P> {
     let mut result = vec![points[0]];
     let mut previous = points[0];
     for mut point in points.into_iter().skip(1) {
-        let delta = point.delta.unwrap();
+        let delta = point.delta();
         let length = hypot(delta);
         if length == 0.0 {
             continue;

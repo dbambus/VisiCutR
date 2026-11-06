@@ -813,7 +813,7 @@ impl VisiCutR {
         #[cfg(feature = "screenshot")]
         if let Some(index) = arguments.iter().position(|argument| argument == "--page") {
             match arguments.get(index + 1).map(String::as_str) {
-                Some("preview") => app.show_preview = true,
+                Some("preview") => app.navigation.show_preview = true,
                 Some("devices") => app.show_settings(SettingsPage::Devices),
                 Some("materials") => app.show_settings(SettingsPage::Materials),
                 Some("job") => app.show_settings(SettingsPage::Job),

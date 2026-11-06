@@ -491,8 +491,7 @@ struct VisiCutR {
     /// Hinweis nach dem Senden: schließt sich zu diesem Zeitpunkt von selbst,
     /// solange der Dialog noch genau diesen Text zeigt.
     alert_until: Option<(std::time::Instant, String)>,
-    /// Zeichnung ragt über die Zeichenfläche: Auswahl steht aus.
-    pending_import: Option<PendingImport>,
+    pending: Pending,
     /// Gewählte Behandlung beim laufenden Import: `Some(true)` ganze Zeichnung.
     fit_policy: Option<bool>,
     project_path: Option<PathBuf>,
@@ -515,14 +514,6 @@ struct VisiCutR {
     show_grid: bool,
     /// Projekt ist vollständig und passt aufs Bett (pro Bild neu bestimmt).
     sendable: bool,
-    /// Wartet auf „Sichern / Nicht sichern / Abbrechen“.
-    replace: Option<Replace>,
-    overwrite: Option<PendingExport>,
-    /// Wartet auf die Bestätigung „Zwischenspeicher leeren“ (Anzahl Stände).
-    confirm_clear_cache: Option<usize>,
-    confirm_send: Option<PreparedJob>,
-    /// Rückfrage beim Beenden mit ungesicherter Materialbibliothek.
-    confirm_library_quit: bool,
     preview: preview_ui::PreviewUi,
     /// „Vorschau & Zeit“ (Menü, Reiterleiste) setzt dieses Feld; `update`
     /// berechnet die Vorschau und wechselt in den Reiter „Vorschau“.
@@ -570,6 +561,32 @@ struct VisiCutR {
     capture: Option<(PathBuf, u32)>,
 }
 
+/// Rückfragen, die als Dialog auf eine Antwort warten.
+#[derive(Default)]
+struct Pending {
+    /// Zeichnung ragt über die Zeichenfläche: Auswahl steht aus.
+    import: Option<PendingImport>,
+    /// Wartet auf „Sichern / Nicht sichern / Abbrechen“.
+    replace: Option<Replace>,
+    overwrite: Option<PendingExport>,
+    /// Wartet auf die Bestätigung „Zwischenspeicher leeren“ (Anzahl Stände).
+    clear_cache: Option<usize>,
+    send: Option<PreparedJob>,
+    /// Rückfrage beim Beenden mit ungesicherter Materialbibliothek.
+    library_quit: bool,
+}
+
+impl Pending {
+    /// Eine Rückfrage (außer der Importwahl) ist offen.
+    fn asking(&self) -> bool {
+        self.replace.is_some()
+            || self.overwrite.is_some()
+            || self.clear_cache.is_some()
+            || self.send.is_some()
+            || self.library_quit
+    }
+}
+
 impl VisiCutR {
     fn new(cc: &eframe::CreationContext<'_>, launch: instance::Launch) -> Self {
         // Erster Start nach der Umbenennung: Einstellungen von VisiCutRust übernehmen.
@@ -605,7 +622,6 @@ impl VisiCutR {
             status: tr("Datei öffnen, hierher ziehen oder das Beispiel öffnen").into(),
             alert: None,
             alert_until: None,
-            pending_import: None,
             fit_policy: None,
             project_path: None,
             name_draft: None,
@@ -619,11 +635,7 @@ impl VisiCutR {
             copied: None,
             show_grid: true,
             sendable: false,
-            replace: None,
-            overwrite: None,
-            confirm_clear_cache: None,
-            confirm_send: None,
-            confirm_library_quit: false,
+            pending: Pending::default(),
             show_preview: false,
             page: Page::Prepare,
             settings_page: SettingsPage::Devices,
@@ -1069,11 +1081,7 @@ impl VisiCutR {
     fn modal_open(&self) -> bool {
         self.reading.is_some()
             || self.alert.is_some()
-            || self.replace.is_some()
-            || self.overwrite.is_some()
-            || self.confirm_clear_cache.is_some()
-            || self.confirm_send.is_some()
-            || self.confirm_library_quit
+            || self.pending.asking()
             || self.lab_offer.is_some()
     }
 
@@ -1425,7 +1433,7 @@ impl VisiCutR {
                     Some(true) => imported.svg = whole,
                     Some(false) => {}
                     None => {
-                        self.pending_import = Some(PendingImport {
+                        self.pending.import = Some(PendingImport {
                             paths: vec![path.to_owned()],
                             replace: true,
                             names: vec![file_name(path)],
@@ -1597,7 +1605,7 @@ impl VisiCutR {
                 .collect();
             if !overflowing.is_empty() {
                 // Eine Frage für alle Dateien; danach läuft der Import weiter.
-                self.pending_import = Some(PendingImport {
+                self.pending.import = Some(PendingImport {
                     replace: self.project.svg.is_empty(),
                     paths: graphics.iter().chain(&projects).cloned().collect(),
                     names: overflowing,
@@ -1693,7 +1701,7 @@ impl VisiCutR {
             return false;
         }
         if self.jobs.library_unsaved() {
-            self.confirm_library_quit = true;
+            self.pending.library_quit = true;
             return false;
         }
         true
@@ -1706,7 +1714,7 @@ impl VisiCutR {
         if self.busy() && !matches!(action, Replace::Quit) {
             self.status = tr("Bitte die laufende Übertragung abwarten").into();
         } else if self.dirty && !self.stash(matches!(action, Replace::Quit)) {
-            self.replace = Some(action);
+            self.pending.replace = Some(action);
         } else {
             self.perform(ctx, action);
         }
@@ -2134,7 +2142,7 @@ impl VisiCutR {
         if pending.existing.is_empty() {
             self.write_export(pending);
         } else {
-            self.overwrite = Some(pending);
+            self.pending.overwrite = Some(pending);
         }
     }
 
@@ -2163,7 +2171,7 @@ impl VisiCutR {
         match ltt::require_material(&self.project)
             .and_then(|()| ltt::prepare_with(&self.project, single_job))
         {
-            Ok(prepared) => self.confirm_send = Some(prepared),
+            Ok(prepared) => self.pending.send = Some(prepared),
             Err(e) => self.report(e.to_string()),
         }
     }
@@ -2819,7 +2827,7 @@ impl VisiCutR {
                 self.save_settings();
             }
             Command::ClearCache => {
-                self.confirm_clear_cache = Some(session::states(&session::dir()).len());
+                self.pending.clear_cache = Some(session::states(&session::dir()).len());
             }
             Command::Device(index) => {
                 if self
@@ -4432,7 +4440,7 @@ impl VisiCutR {
 
     /// Materialbibliothek vor dem Beenden sichern?
     fn library_quit_dialog(&mut self, ctx: &egui::Context) {
-        if !self.confirm_library_quit {
+        if !self.pending.library_quit {
             return;
         }
         // Some(true): sichern, Some(false): verwerfen.
@@ -4456,7 +4464,7 @@ impl VisiCutR {
         });
         match choice {
             Some(save) => {
-                self.confirm_library_quit = false;
+                self.pending.library_quit = false;
                 let saved = if save {
                     self.jobs.save_library()
                 } else {
@@ -4471,14 +4479,14 @@ impl VisiCutR {
                     )),
                 }
             }
-            None if modal.should_close() => self.confirm_library_quit = false,
+            None if modal.should_close() => self.pending.library_quit = false,
             None => {}
         }
     }
 
     /// Ungesicherte Änderungen vor dem Ersetzen des Projekts.
     fn replace_dialog(&mut self, ctx: &egui::Context) {
-        let Some(action) = self.replace.take() else {
+        let Some(action) = self.pending.replace.take() else {
             return;
         };
         let mut choice = None;
@@ -4510,13 +4518,13 @@ impl VisiCutR {
             },
             Some(false) => self.perform(ctx, action),
             None if modal.should_close() => {}
-            None => self.replace = Some(action),
+            None => self.pending.replace = Some(action),
         }
     }
 
     /// Zeichnung größer als ihre Zeichenfläche: alles oder nur die Fläche importieren.
     fn import_overflow_dialog(&mut self, ctx: &egui::Context) {
-        let Some(pending) = self.pending_import.take() else {
+        let Some(pending) = self.pending.import.take() else {
             return;
         };
         // Some(true): ganze Zeichnung, Some(false): nur die Fläche.
@@ -4560,13 +4568,13 @@ impl VisiCutR {
                 self.fit_policy = None;
             }
             None if modal.should_close() => {}
-            None => self.pending_import = Some(pending),
+            None => self.pending.import = Some(pending),
         }
     }
 
     /// Vorhandene LTT-Dateien beim Export ersetzen?
     fn overwrite_dialog(&mut self, ctx: &egui::Context) {
-        let Some(pending) = self.overwrite.take() else {
+        let Some(pending) = self.pending.overwrite.take() else {
             return;
         };
         let mut replace = false;
@@ -4586,13 +4594,13 @@ impl VisiCutR {
         if replace {
             self.write_export(pending);
         } else if !modal.should_close() {
-            self.overwrite = Some(pending);
+            self.pending.overwrite = Some(pending);
         }
     }
 
     /// Ungesicherte Stände im Zwischenspeicher löschen?
     fn clear_cache_dialog(&mut self, ctx: &egui::Context) {
-        let Some(count) = self.confirm_clear_cache.take() else {
+        let Some(count) = self.pending.clear_cache.take() else {
             return;
         };
         let mut clear = false;
@@ -4613,13 +4621,13 @@ impl VisiCutR {
         if clear {
             self.clear_cache();
         } else if !modal.should_close() {
-            self.confirm_clear_cache = Some(count);
+            self.pending.clear_cache = Some(count);
         }
     }
 
     /// Zusammenfassung vor dem Senden an den Lasercutter.
     fn send_dialog(&mut self, ctx: &egui::Context) {
-        let Some(prepared) = self.confirm_send.take() else {
+        let Some(prepared) = self.pending.send.take() else {
             return;
         };
         let mut send = false;
@@ -4654,7 +4662,7 @@ impl VisiCutR {
         if send {
             self.transmit(prepared);
         } else if !cancel && !modal.should_close() {
-            self.confirm_send = Some(prepared);
+            self.pending.send = Some(prepared);
         }
     }
 
@@ -5063,7 +5071,7 @@ impl eframe::App for VisiCutR {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             } else if self.dirty && !self.stash(true) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                self.replace = Some(Replace::Quit);
+                self.pending.replace = Some(Replace::Quit);
             }
         }
         let dropped: Vec<PathBuf> = ctx.input(|i| {
@@ -5089,14 +5097,14 @@ impl eframe::App for VisiCutR {
         }
         if !self.modal_open()
             && !self.busy()
-            && self.pending_import.is_none()
+            && self.pending.import.is_none()
             && let Some(request) = self.handed_over.take()
         {
             self.open_request(ctx, request);
         }
         if !self.modal_open()
             && !self.busy()
-            && self.pending_import.is_none()
+            && self.pending.import.is_none()
             && self.handed_over.is_none()
             && let Some(options) = self.launch_options.take()
         {

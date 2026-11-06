@@ -785,7 +785,34 @@ fn summary(
     send_enabled: bool,
     computing: bool,
 ) -> Option<Action> {
-    let job = &ready.job;
+    let action = action_bar(ui, send_enabled);
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        job_overview(ui, ready, project, computing);
+        crate::form::section(ui, tr("Schritte"), |ui| {
+            for (index, step) in ready.job.steps.iter().enumerate() {
+                if index > 0 {
+                    ui.separator();
+                }
+                step_summary(ui, index, step);
+            }
+        });
+        crate::form::section(ui, tr("Auftrag"), |ui| {
+            job_split(ui, single_job, ready.job.jobs.len());
+        });
+        crate::form::caption(
+            ui,
+            tr(
+                "Schätzung aus Fahrwegen, Tempo und Durchgängen; bei Gravur mit Zeilenrücklauf und \
+                 Overscan. Beschleunigung und Geräteeinstellungen können die tatsächliche Dauer verändern.",
+            )
+            .to_string(),
+        );
+    });
+    action
+}
+
+/// Leiste unten: „LTT exportieren …“ und „An Lasercutter senden …“.
+fn action_bar(ui: &mut egui::Ui, send_enabled: bool) -> Option<Action> {
     let mut action = None;
     egui::TopBottomPanel::bottom("preview_actions")
         // Rand unten, damit der hervorgehobene Knopf nicht abgeschnitten wird.
@@ -817,115 +844,110 @@ fn summary(
                 });
             });
         });
-    egui::ScrollArea::vertical().show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.heading(tr!("Ca. {time}", time = duration(job.estimated_seconds)));
-            if computing {
-                ui.spinner();
-            }
-        });
-        ui.label(tr("geschätzte Bearbeitungszeit"));
-        crate::form::caption(
-            ui,
-            {
-                let jobs = job
-                    .jobs
-                    .iter()
-                    .map(|j| j.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" › ");
-                if job.jobs.len() == 1 {
-                    tr!(
-                        "{size} · 1 Auftrag ({jobs}) · {host}:{port}",
-                        size = bytes(ready.bytes),
-                        jobs = jobs,
-                        host = project.hostname,
-                        port = project.port
-                    )
-                } else {
-                    tr!(
-                        "{size} · {count} Einzelaufträge ({jobs}) · {host}:{port}",
-                        size = bytes(ready.bytes),
-                        count = job.jobs.len(),
-                        jobs = jobs,
-                        host = project.hostname,
-                        port = project.port
-                    )
-                }
-            },
-        );
-        for warning in &job.warnings {
-            egui::Frame::group(ui.style())
-                .stroke(Stroke::new(1.0, WARNING))
-                .show(ui, |ui| {
-                    ui.colored_label(WARNING, format!("⚠ {warning}"));
-                });
-        }
-        crate::form::section(ui, tr("Schritte"), |ui| {
-            for (index, step) in job.steps.iter().enumerate() {
-                if index > 0 {
-                    ui.separator();
-                }
-                ui.horizontal(|ui| {
-                    ui.colored_label(
-                        operation_color(step.operation),
-                        egui::RichText::new(format!(
-                            "{}. {}",
-                            index + 1,
-                            operation_title(step.operation)
-                        ))
-                        .strong(),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(tr!("ca. {time}", time = duration(step.estimated_seconds)));
-                    });
-                });
-                ui.monospace(&step.name).on_hover_text(&step.description);
-                ui.small(tr!(
-                    "Leistung {power} % · Tempo {speed} %",
-                    power = decimal(step.power_percent as f64),
-                    speed = decimal(step.speed_percent as f64)
-                ));
-                let mut counts = tr!("{count} Durchgänge", count = step.passes);
-                if step.parameter_sets > 1 {
-                    counts += " · ";
-                    counts += &tr!("{count} Parametersätze", count = step.parameter_sets);
-                }
-                ui.small(counts);
-                crate::form::caption(ui, step.description.clone());
-            }
-        });
-        crate::form::section(ui, tr("Auftrag"), |ui| {
-            // Alle Verfahren in einen Auftrag oder einen je Verfahren.
-            ui.checkbox(single_job, tr("Alles in eine Datei"))
-                .on_hover_text(tr(
-                    "Alle Verfahren in einem LTT-Auftrag statt einem je Verfahren",
-                ));
-            crate::form::caption(
-                ui,
-                if *single_job {
-                    tr("Ein Auftrag mit allen Verfahren: Gravuren zuerst, dann Markieren und Schneiden.")
-                        .to_string()
-                } else if job.jobs.len() == 1 {
-                    tr("Ein Auftrag · Engrav → Eng3D → Mark → Cut.").to_string()
-                } else {
-                    tr!(
-                        "{count} Einzelaufträge · Engrav → Eng3D → Mark → Cut; jeder wird am Gerät einzeln gestartet.",
-                        count = job.jobs.len()
-                    )
-                },
-            );
-        });
-        crate::form::caption(
-            ui,
-            tr(
-                "Schätzung aus Fahrwegen, Tempo und Durchgängen; bei Gravur mit Zeilenrücklauf und \
-                 Overscan. Beschleunigung und Geräteeinstellungen können die tatsächliche Dauer verändern.",
-            )
-            .to_string(),
-        );
-    });
     action
+}
+
+/// Geschätzte Dauer, Größe, Aufträge und Ziel, darunter die Warnungen.
+fn job_overview(ui: &mut egui::Ui, ready: &Ready, project: &Project, computing: bool) {
+    let job = &ready.job;
+    ui.horizontal(|ui| {
+        ui.heading(tr!("Ca. {time}", time = duration(job.estimated_seconds)));
+        if computing {
+            ui.spinner();
+        }
+    });
+    ui.label(tr("geschätzte Bearbeitungszeit"));
+    crate::form::caption(ui, job_caption(ready, project));
+    for warning in &job.warnings {
+        egui::Frame::group(ui.style())
+            .stroke(Stroke::new(1.0, WARNING))
+            .show(ui, |ui| {
+                ui.colored_label(WARNING, format!("⚠ {warning}"));
+            });
+    }
+}
+
+/// „Größe · Aufträge (Namen) · Host:Port“.
+fn job_caption(ready: &Ready, project: &Project) -> String {
+    let job = &ready.job;
+    let jobs = job
+        .jobs
+        .iter()
+        .map(|j| j.name.as_str())
+        .collect::<Vec<_>>()
+        .join(" › ");
+    if job.jobs.len() == 1 {
+        tr!(
+            "{size} · 1 Auftrag ({jobs}) · {host}:{port}",
+            size = bytes(ready.bytes),
+            jobs = jobs,
+            host = project.hostname,
+            port = project.port
+        )
+    } else {
+        tr!(
+            "{size} · {count} Einzelaufträge ({jobs}) · {host}:{port}",
+            size = bytes(ready.bytes),
+            count = job.jobs.len(),
+            jobs = jobs,
+            host = project.hostname,
+            port = project.port
+        )
+    }
+}
+
+/// Ein Schritt des Auftrags: Verfahren, Dauer, Name und Parameter.
+fn step_summary(ui: &mut egui::Ui, index: usize, step: &ltt::PreparedStep) {
+    ui.horizontal(|ui| {
+        ui.colored_label(
+            operation_color(step.operation),
+            egui::RichText::new(format!(
+                "{}. {}",
+                index + 1,
+                operation_title(step.operation)
+            ))
+            .strong(),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(tr!("ca. {time}", time = duration(step.estimated_seconds)));
+        });
+    });
+    ui.monospace(&step.name).on_hover_text(&step.description);
+    ui.small(tr!(
+        "Leistung {power} % · Tempo {speed} %",
+        power = decimal(step.power_percent as f64),
+        speed = decimal(step.speed_percent as f64)
+    ));
+    let mut counts = tr!("{count} Durchgänge", count = step.passes);
+    if step.parameter_sets > 1 {
+        counts += " · ";
+        counts += &tr!("{count} Parametersätze", count = step.parameter_sets);
+    }
+    ui.small(counts);
+    crate::form::caption(ui, step.description.clone());
+}
+
+/// „Alles in eine Datei“ und wie viele Aufträge daraus werden (`jobs`).
+fn job_split(ui: &mut egui::Ui, single_job: &mut bool, jobs: usize) {
+    // Alle Verfahren in einen Auftrag oder einen je Verfahren.
+    ui.checkbox(single_job, tr("Alles in eine Datei"))
+        .on_hover_text(tr(
+            "Alle Verfahren in einem LTT-Auftrag statt einem je Verfahren",
+        ));
+    crate::form::caption(
+        ui,
+        if *single_job {
+            tr("Ein Auftrag mit allen Verfahren: Gravuren zuerst, dann Markieren und Schneiden.")
+                .to_string()
+        } else if jobs == 1 {
+            tr("Ein Auftrag · Engrav → Eng3D → Mark → Cut.").to_string()
+        } else {
+            tr!(
+                "{count} Einzelaufträge · Engrav → Eng3D → Mark → Cut; jeder wird am Gerät einzeln gestartet.",
+                count = jobs
+            )
+        },
+    );
 }
 
 fn simulation(ui: &mut egui::Ui, ready: &Ready, project: &Project, playback: &mut Playback) {
@@ -1056,31 +1078,7 @@ fn paint_simulation(
     seconds: f64,
 ) {
     let view = View::new(rect, viewport(project, ready.motion_bounds));
-    painter.rect_filled(rect, 0.0, Color32::from_gray(232));
-    let bed = view.rect([
-        0.0,
-        0.0,
-        project.bed_width_mm as f64,
-        project.bed_height_mm as f64,
-    ]);
-    painter.rect_filled(bed, 0.0, Color32::WHITE);
-    painter.rect_stroke(
-        bed,
-        0.0,
-        Stroke::new(1.0, Color32::from_gray(160)),
-        egui::StrokeKind::Outside,
-    );
-    // The job preview covers all parts.
-    let artwork = view.rect(project.bounds().map(f64::from));
-    // Planned processing, faint.
-    if let Some(texture) = &ready.preview {
-        painter.image(
-            texture.id(),
-            artwork,
-            full_uv(),
-            Color32::WHITE.gamma_multiply(0.22),
-        );
-    }
+    paint_bed(painter, rect, &view, project, ready.preview.as_ref());
     let Some(frame) = frame else {
         return;
     };
@@ -1098,24 +1096,10 @@ fn paint_simulation(
         if let (Some(Some(texture)), Some(bounds)) =
             (ready.rasters.get(index), program.raster_bounds_mm)
         {
-            let target = view.rect(bounds);
             if full {
-                painter.image(texture.id(), target, full_uv(), Color32::WHITE);
+                painter.image(texture.id(), view.rect(bounds), full_uv(), Color32::WHITE);
             } else {
-                for revealed in revealed_rows(program, frame, bounds) {
-                    let clip = view.rect(revealed);
-                    if clip.width() > 0.0 && clip.height() > 0.0 {
-                        // At least one pixel high so single rows stay visible.
-                        let clip =
-                            clip.expand2(Vec2::new(0.0, (0.5 - clip.height() / 2.0).max(0.0)));
-                        painter.with_clip_rect(clip).image(
-                            texture.id(),
-                            target,
-                            full_uv(),
-                            Color32::WHITE,
-                        );
-                    }
-                }
+                paint_revealed_rows(painter, &view, texture, program, frame, bounds);
             }
         }
         let limit = if full {
@@ -1124,41 +1108,120 @@ fn paint_simulation(
             frame.motion_index.unwrap_or(0)
         };
         let color = operation_color(program.operation);
-        for chain in &ready.chains[index] {
-            if chain.start >= limit {
-                break;
-            }
-            let count = (limit - chain.start).min(chain.points.len() - 1);
-            let points: Vec<Pos2> = chain.points[..=count]
-                .iter()
-                .map(|p| view.pos(*p))
-                .collect();
-            let stroke = match chain.kind {
-                MotionKind::Cut | MotionKind::Mark => Stroke::new(1.5, color),
-                _ => Stroke::new(0.5, Color32::from_gray(185)),
-            };
-            painter.add(egui::Shape::line(points, stroke));
-        }
+        paint_chains(painter, &view, &ready.chains[index], limit, color);
     }
     if !frame.finished {
-        let line = [view.pos(frame.from), view.pos(frame.position)];
-        match frame.kind {
-            MotionKind::Travel => {
-                painter.extend(egui::Shape::dashed_line(
-                    &line,
-                    Stroke::new(1.0, Color32::GRAY),
-                    4.0,
-                    3.0,
-                ));
-            }
-            MotionKind::Cut | MotionKind::Mark => {
-                let color = operation_color(timeline.programs[frame.program_index].operation);
-                painter.line_segment(line, Stroke::new(2.0, color));
-            }
-            MotionKind::Raster | MotionKind::Dwell => {}
+        paint_current_motion(painter, &view, timeline, frame);
+    }
+    paint_laser_head(painter, rect, view.pos(frame.position));
+}
+
+/// Hintergrund, Arbeitsfläche und blass die geplante Bearbeitung.
+fn paint_bed(
+    painter: &egui::Painter,
+    rect: Rect,
+    view: &View,
+    project: &Project,
+    preview: Option<&egui::TextureHandle>,
+) {
+    painter.rect_filled(rect, 0.0, Color32::from_gray(232));
+    let bed = view.rect([
+        0.0,
+        0.0,
+        project.bed_width_mm as f64,
+        project.bed_height_mm as f64,
+    ]);
+    painter.rect_filled(bed, 0.0, Color32::WHITE);
+    painter.rect_stroke(
+        bed,
+        0.0,
+        Stroke::new(1.0, Color32::from_gray(160)),
+        egui::StrokeKind::Outside,
+    );
+    // The job preview covers all parts.
+    let artwork = view.rect(project.bounds().map(f64::from));
+    // Planned processing, faint.
+    if let Some(texture) = preview {
+        painter.image(
+            texture.id(),
+            artwork,
+            full_uv(),
+            Color32::WHITE.gamma_multiply(0.22),
+        );
+    }
+}
+
+/// Die schon gravierten Zeilen eines laufenden Rasterprogramms.
+fn paint_revealed_rows(
+    painter: &egui::Painter,
+    view: &View,
+    texture: &egui::TextureHandle,
+    program: &Program,
+    frame: &Frame,
+    bounds: [f64; 4],
+) {
+    let target = view.rect(bounds);
+    for revealed in revealed_rows(program, frame, bounds) {
+        let clip = view.rect(revealed);
+        if clip.width() > 0.0 && clip.height() > 0.0 {
+            // At least one pixel high so single rows stay visible.
+            let clip = clip.expand2(Vec2::new(0.0, (0.5 - clip.height() / 2.0).max(0.0)));
+            painter
+                .with_clip_rect(clip)
+                .image(texture.id(), target, full_uv(), Color32::WHITE);
         }
     }
-    let raw = view.pos(frame.position);
+}
+
+/// Die Linienzüge eines Programms bis vor die Bewegung `limit`.
+fn paint_chains(
+    painter: &egui::Painter,
+    view: &View,
+    chains: &[Chain],
+    limit: usize,
+    color: Color32,
+) {
+    for chain in chains {
+        if chain.start >= limit {
+            break;
+        }
+        let count = (limit - chain.start).min(chain.points.len() - 1);
+        let points: Vec<Pos2> = chain.points[..=count]
+            .iter()
+            .map(|p| view.pos(*p))
+            .collect();
+        let stroke = match chain.kind {
+            MotionKind::Cut | MotionKind::Mark => Stroke::new(1.5, color),
+            _ => Stroke::new(0.5, Color32::from_gray(185)),
+        };
+        painter.add(egui::Shape::line(points, stroke));
+    }
+}
+
+/// Die laufende Bewegung: Leerfahrt gestrichelt, Schneiden und Markieren
+/// kräftig in der Farbe des Verfahrens.
+fn paint_current_motion(painter: &egui::Painter, view: &View, timeline: &Timeline, frame: &Frame) {
+    let line = [view.pos(frame.from), view.pos(frame.position)];
+    match frame.kind {
+        MotionKind::Travel => {
+            painter.extend(egui::Shape::dashed_line(
+                &line,
+                Stroke::new(1.0, Color32::GRAY),
+                4.0,
+                3.0,
+            ));
+        }
+        MotionKind::Cut | MotionKind::Mark => {
+            let color = operation_color(timeline.programs[frame.program_index].operation);
+            painter.line_segment(line, Stroke::new(2.0, color));
+        }
+        MotionKind::Raster | MotionKind::Dwell => {}
+    }
+}
+
+/// Gelber Punkt des Laserkopfs an `raw`, am Rand von `rect` festgehalten;
+/// liegt er außerhalb, ein Hinweis oben.
+fn paint_laser_head(painter: &egui::Painter, rect: Rect, raw: Pos2) {
     let inner = rect.shrink(8.0);
     let marker = raw.clamp(inner.min, inner.max);
     painter.circle(

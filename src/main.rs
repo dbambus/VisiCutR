@@ -539,13 +539,7 @@ struct VisiCutR {
     pending: Pending,
     /// Gewählte Behandlung beim laufenden Import: `Some(true)` ganze Zeichnung.
     fit_policy: Option<bool>,
-    project_path: Option<PathBuf>,
-    /// Projektname während des Umbenennens im Kopf der Arbeitsfläche.
-    name_draft: Option<String>,
-    /// Zwischenstand, aus dem das Projekt geöffnet wurde (`session`);
-    /// Sichern löscht ihn.
-    cached: Option<PathBuf>,
-    dirty: bool,
+    file: FileState,
     inspector: InspectorInputs,
     allow_close: bool,
     /// Zuletzt kopiertes Teil (für Einfügen aus dem Menü und ⌘F).
@@ -657,6 +651,18 @@ struct InspectorInputs {
     rotate_deg: f32,
 }
 
+/// Datei des Projekts, Zwischenstand und ob es seit dem Sichern geändert wurde.
+struct FileState {
+    /// Gesicherte Projektdatei; `None` für ein neues Projekt.
+    path: Option<PathBuf>,
+    /// Projektname während des Umbenennens im Kopf der Arbeitsfläche.
+    name_draft: Option<String>,
+    /// Zwischenstand, aus dem das Projekt geöffnet wurde (`session`);
+    /// Sichern löscht ihn.
+    cached: Option<PathBuf>,
+    dirty: bool,
+}
+
 impl VisiCutR {
     fn new(cc: &eframe::CreationContext<'_>, launch: instance::Launch) -> Self {
         // Erster Start nach der Umbenennung: Einstellungen von VisiCutRust übernehmen.
@@ -693,10 +699,12 @@ impl VisiCutR {
                 alert_until: None,
             },
             fit_policy: None,
-            project_path: None,
-            name_draft: None,
-            cached: None,
-            dirty: false,
+            file: FileState {
+                path: None,
+                name_draft: None,
+                cached: None,
+                dirty: false,
+            },
             inspector: InspectorInputs {
                 proportional: true,
                 reference: [0.0, 0.0],
@@ -1241,9 +1249,9 @@ impl VisiCutR {
         self.devices.apply(&mut self.project);
         self.texture = None;
         self.part_textures.clear();
-        self.project_path = None;
-        self.cached = None;
-        self.dirty = false;
+        self.file.path = None;
+        self.file.cached = None;
+        self.file.dirty = false;
         self.forget_history();
     }
 
@@ -1358,7 +1366,7 @@ impl VisiCutR {
         part.y_mm += 5.0;
         self.project.add_part(part);
         self.arrange_textures(all);
-        self.dirty = true;
+        self.file.dirty = true;
         self.messages.status = tr("Teil dupliziert · Widerrufen macht es rückgängig").into();
     }
 
@@ -1400,7 +1408,7 @@ impl VisiCutR {
                 self.checkpoint();
                 self.project = project;
                 (self.texture, self.part_textures) = (texture, part_textures);
-                self.dirty = true;
+                self.file.dirty = true;
                 self.messages.status = tr("Teil eingefügt · Widerrufen macht es rückgängig").into();
             }
             Err(e) => self.report(e),
@@ -1450,9 +1458,9 @@ impl VisiCutR {
             color_image(preview.pixmap),
             egui::TextureOptions::LINEAR,
         ));
-        self.project_path = None;
-        self.cached = None;
-        self.dirty = true;
+        self.file.path = None;
+        self.file.cached = None;
+        self.file.dirty = true;
         self.forget_history();
         self.messages.status = tr("Datei importiert · Maße aus der Datei übernommen").into();
         Ok(())
@@ -1540,15 +1548,15 @@ impl VisiCutR {
             self.forget_history();
             // Ein Zwischenstand hat noch keinen eigenen Speicherort.
             if session::is_cached(&session::dir(), path) {
-                self.project_path = None;
-                self.cached = Some(path.to_owned());
-                self.dirty = true;
+                self.file.path = None;
+                self.file.cached = Some(path.to_owned());
+                self.file.dirty = true;
                 self.messages.status =
                     tr("Ungesicherter Stand geöffnet. Zum Behalten sichern.").into();
             } else {
-                self.project_path = Some(path.to_owned());
-                self.cached = None;
-                self.dirty = false;
+                self.file.path = Some(path.to_owned());
+                self.file.cached = None;
+                self.file.dirty = false;
                 self.messages.status = tr("Projekt geöffnet").into();
             }
             self.remember(path);
@@ -1628,7 +1636,7 @@ impl VisiCutR {
                 options.material.as_deref(),
                 options.thickness_mm,
             ) {
-                Ok(()) => self.dirty = true,
+                Ok(()) => self.file.dirty = true,
                 Err(e) => problems.push(e),
             }
         }
@@ -1746,7 +1754,7 @@ impl VisiCutR {
     /// Sichert das Projekt; `false`, wenn der Dialog abgebrochen wurde.
     fn save(&mut self, as_copy: bool) -> Result<bool, String> {
         self.project.validate_document()?;
-        let path = self.project_path.clone().filter(|_| !as_copy).or_else(|| {
+        let path = self.file.path.clone().filter(|_| !as_copy).or_else(|| {
             rfd::FileDialog::new()
                 .set_title(tr("VisiCutR-Projekt sichern"))
                 .add_filter(tr("VisiCutR Projekt"), &["vcr"])
@@ -1758,14 +1766,14 @@ impl VisiCutR {
         };
         let bytes = serde_json::to_vec_pretty(&self.project).map_err(|e| e.to_string())?;
         workspace::write_atomic(&path, &bytes)?;
-        if let Some(cache) = self.cached.take() {
+        if let Some(cache) = self.file.cached.take() {
             session::discard(&session::dir(), &cache);
             let cache = std::fs::canonicalize(&cache).unwrap_or(cache);
             self.settings.recent.retain(|p| p != &cache && p.exists());
         }
         self.remember(&path);
-        self.project_path = Some(path);
-        self.dirty = false;
+        self.file.path = Some(path);
+        self.file.dirty = false;
         self.messages.status = tr("Projekt mit eingebetteter SVG gesichert").into();
         Ok(true)
     }
@@ -1799,7 +1807,7 @@ impl VisiCutR {
         }
         if self.busy() && !matches!(action, Replace::Quit) {
             self.messages.status = tr("Bitte die laufende Übertragung abwarten").into();
-        } else if self.dirty && !self.stash(matches!(action, Replace::Quit)) {
+        } else if self.file.dirty && !self.stash(matches!(action, Replace::Quit)) {
             self.pending.replace = Some(action);
         } else {
             self.perform(ctx, action);
@@ -1819,7 +1827,7 @@ impl VisiCutR {
                     .recent
                     .retain(|p| !removed.contains(p) && p.exists());
                 self.save_settings();
-                self.cached = None;
+                self.file.cached = None;
                 self.messages.status = tr!(
                     "Zwischenspeicher geleert ({count} Stände)",
                     count = removed.len()
@@ -1834,7 +1842,7 @@ impl VisiCutR {
     fn stash(&mut self, resume: bool) -> bool {
         let dir = session::dir();
         let stashed =
-            session::stash(&dir, &self.project, self.cached.as_deref()).and_then(|path| {
+            session::stash(&dir, &self.project, self.file.cached.as_deref()).and_then(|path| {
                 if resume {
                     session::set_resume(&dir, Some(&path))?;
                 }
@@ -1995,7 +2003,7 @@ impl VisiCutR {
                 self.jobs.apply_preset_to(&mut self.project, index);
             }
         }
-        self.dirty = true;
+        self.file.dirty = true;
         self.messages.status = tr!(
             "Motiv aktualisiert · {width} × {height} mm",
             width = format!("{:.0}", self.project.width_mm),
@@ -2067,7 +2075,7 @@ impl VisiCutR {
         all.remove(self.project.active_part.min(all.len() - 1));
         self.project.remove_active_part();
         self.arrange_textures(all);
-        self.dirty = true;
+        self.file.dirty = true;
         self.messages.status = if several {
             tr("Teil entfernt · Widerrufen stellt es wieder her")
         } else {
@@ -2096,7 +2104,7 @@ impl VisiCutR {
         self.project = snapshot.project;
         self.texture = snapshot.texture;
         self.part_textures = snapshot.part_textures;
-        self.dirty = true;
+        self.file.dirty = true;
     }
 
     fn undo_last(&mut self) {
@@ -2405,7 +2413,7 @@ impl VisiCutR {
                         && !selected
                     {
                         self.project.cut_order = order;
-                        self.dirty = true;
+                        self.file.dirty = true;
                     }
                     // Erklärung unter dem Text des Knopfs eingerückt.
                     egui::Frame::new()
@@ -2421,12 +2429,12 @@ impl VisiCutR {
             // Schritte selbst stehen unter „Vorbereiten“.
             form::section(ui, tr("Regeln und Vorlagen"), |ui| {
                 ui.add_enabled_ui(!self.busy(), |ui| {
-                    self.jobs.rules_settings(ui, &mut self.project, &mut self.dirty);
+                    self.jobs.rules_settings(ui, &mut self.project, &mut self.file.dirty);
                 });
             });
             form::section(ui, tr("Ignorieren"), |ui| {
                 ui.add_enabled_ui(!self.busy(), |ui| {
-                    self.jobs.ignore_rules(ui, &mut self.project, &mut self.dirty);
+                    self.jobs.ignore_rules(ui, &mut self.project, &mut self.file.dirty);
                 });
             });
             // Früher in der Objektzuordnung; gehört wie die Reihenfolge zum Projekt.
@@ -2441,7 +2449,7 @@ impl VisiCutR {
                     )
                     .changed()
                 {
-                    self.dirty = true;
+                    self.file.dirty = true;
                 }
                 egui::Frame::new()
                     .inner_margin(egui::Margin {
@@ -2773,7 +2781,8 @@ impl VisiCutR {
                     egui::Frame::new()
                         .inner_margin(egui::Margin::symmetric(4, 2))
                         .show(ui, |ui| {
-                            self.devices.rotary(ui, &mut self.project, &mut self.dirty);
+                            self.devices
+                                .rotary(ui, &mut self.project, &mut self.file.dirty);
                         });
                 }
             });
@@ -2921,7 +2930,7 @@ impl VisiCutR {
                     .devices
                     .select(index, &mut self.project, &mut self.messages.status)
                 {
-                    self.dirty = true;
+                    self.file.dirty = true;
                 }
             }
         }
@@ -3015,7 +3024,7 @@ impl VisiCutR {
             delta
         });
         if (dx, dy) != (0.0, 0.0) && workspace::nudge(&mut self.project, dx, dy) {
-            self.dirty = true;
+            self.file.dirty = true;
         }
     }
 
@@ -3156,9 +3165,11 @@ impl VisiCutR {
             }
         }
         form::section(ui, tr("Material"), |ui| {
-            self.jobs.material(ui, &mut self.project, &mut self.dirty);
+            self.jobs
+                .material(ui, &mut self.project, &mut self.file.dirty);
         });
-        self.jobs.processing(ui, &mut self.project, &mut self.dirty);
+        self.jobs
+            .processing(ui, &mut self.project, &mut self.file.dirty);
         ui.add_space(8.0);
         clicked
     }
@@ -3315,7 +3326,7 @@ impl VisiCutR {
         }
         self.inspector.reference = reference;
         self.inspector.proportional = proportional;
-        self.dirty |= dirty;
+        self.file.dirty |= dirty;
     }
 
     /// Aufklappfeld „Skalieren“ der Objektleiste wie in Bambu Studio:
@@ -3423,7 +3434,7 @@ impl VisiCutR {
             dirty = true;
         }
         self.inspector.proportional = proportional;
-        self.dirty |= dirty;
+        self.file.dirty |= dirty;
     }
 
     /// Aufklappfeld „Drehen“ der Objektleiste: freier Winkel und 90°-Schritte.
@@ -3598,7 +3609,7 @@ impl VisiCutR {
             ui.vertical(|ui| {
                 // Projektname: Doppelklick zum Umbenennen, ⏎ oder Klick
                 // daneben übernimmt, Esc bricht ab.
-                if let Some(draft) = &mut self.name_draft {
+                if let Some(draft) = &mut self.file.name_draft {
                     let field = ui.add(
                         egui::TextEdit::singleline(draft)
                             .font(egui::FontId::proportional(20.0))
@@ -3606,14 +3617,14 @@ impl VisiCutR {
                     );
                     field.request_focus();
                     if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                        self.name_draft = None;
+                        self.file.name_draft = None;
                     } else if field.lost_focus() {
                         let name = draft.trim().to_owned();
                         if !name.is_empty() && name != self.project.name {
                             self.project.name = name;
-                            self.dirty = true;
+                            self.file.dirty = true;
                         }
-                        self.name_draft = None;
+                        self.file.name_draft = None;
                     }
                 } else if self.texture.is_some() {
                     let title = ui
@@ -3627,7 +3638,7 @@ impl VisiCutR {
                         )
                         .on_hover_text(tr("Doppelklick zum Umbenennen"));
                     if title.double_clicked() {
-                        self.name_draft = Some(self.project.name.clone());
+                        self.file.name_draft = Some(self.project.name.clone());
                     }
                 } else {
                     ui.label(
@@ -4092,7 +4103,7 @@ impl VisiCutR {
             let delta = response.drag_delta() / view.scale;
             let (x, y) = (self.project.x_mm + delta.x, self.project.y_mm + delta.y);
             if workspace::place(&mut self.project, x, y) {
-                self.dirty = true;
+                self.file.dirty = true;
             }
         }
         if !self.busy() {
@@ -4363,7 +4374,7 @@ impl VisiCutR {
                     workspace::drag_handle(start, handle, view.to_mm(pointer), proportional);
                 let p = &mut self.project;
                 (p.x_mm, p.y_mm, p.width_mm, p.height_mm) = (x, y, w, h);
-                self.dirty = true;
+                self.file.dirty = true;
             }
             if response.drag_stopped() {
                 self.canvas.handle_drag = None;
@@ -5167,7 +5178,7 @@ impl eframe::App for VisiCutR {
                     tr("Bitte die laufende Übertragung vor dem Beenden abwarten").into();
             } else if !self.settings_saved_before_quit() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            } else if self.dirty && !self.stash(true) {
+            } else if self.file.dirty && !self.stash(true) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.pending.replace = Some(Replace::Quit);
             }
@@ -5326,7 +5337,7 @@ impl eframe::App for VisiCutR {
                         ui.weak("ℹ");
                     }
                     ui.weak(&self.messages.status);
-                    if self.dirty {
+                    if self.file.dirty {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.weak(tr("geändert"));
                         });
@@ -5377,7 +5388,7 @@ impl eframe::App for VisiCutR {
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
             "{}{} — VisiCutR",
             self.project.name,
-            if self.dirty { " *" } else { "" }
+            if self.file.dirty { " *" } else { "" }
         )));
     }
 }

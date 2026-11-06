@@ -535,12 +535,7 @@ struct VisiCutR {
     /// Nullpunkt des Geräts beim letzten Bild (unten links?); ein Wechsel
     /// setzt den Standard-Bezugspunkt.
     origin_bottom_left: Option<bool>,
-    status: String,
-    /// Deutlich sichtbarer Hinweis (Fehler, Importwarnungen) in einem Dialog.
-    alert: Option<String>,
-    /// Hinweis nach dem Senden: schließt sich zu diesem Zeitpunkt von selbst,
-    /// solange der Dialog noch genau diesen Text zeigt.
-    alert_until: Option<(std::time::Instant, String)>,
+    messages: Messages,
     pending: Pending,
     /// Gewählte Behandlung beim laufenden Import: `Some(true)` ganze Zeichnung.
     fit_policy: Option<bool>,
@@ -551,7 +546,7 @@ struct VisiCutR {
     /// Sichern löscht ihn.
     cached: Option<PathBuf>,
     dirty: bool,
-    proportional: bool,
+    inspector: InspectorInputs,
     allow_close: bool,
     /// Zuletzt kopiertes Teil (für Einfügen aus dem Menü und ⌘F).
     copied: Option<visicut_core::project::Part>,
@@ -570,9 +565,6 @@ struct VisiCutR {
     history: History<Snapshot>,
     /// Fenster mit den Tastenkürzeln.
     show_shortcuts: bool,
-    /// Bezugspunkt für X/Y und Größenänderungen (0, ½ oder 1 je Achse).
-    reference: [f32; 2],
-    rotate_deg: f32,
     /// Sprache und zuletzt geöffnete Dateien.
     settings: settings::AppSettings,
     /// Felder für die Parameter eines parametrischen Teils.
@@ -647,6 +639,24 @@ struct Background {
     launch_options: Option<instance::Options>,
 }
 
+/// Statuszeile und Hinweisdialog.
+struct Messages {
+    status: String,
+    /// Deutlich sichtbarer Hinweis (Fehler, Importwarnungen) in einem Dialog.
+    alert: Option<String>,
+    /// Hinweis nach dem Senden: schließt sich zu diesem Zeitpunkt von selbst,
+    /// solange der Dialog noch genau diesen Text zeigt.
+    alert_until: Option<(std::time::Instant, String)>,
+}
+
+/// Eingaben im Inspektor, die über ein Bild hinaus gelten.
+struct InspectorInputs {
+    proportional: bool,
+    /// Bezugspunkt für X/Y und Größenänderungen (0, ½ oder 1 je Achse).
+    reference: [f32; 2],
+    rotate_deg: f32,
+}
+
 impl VisiCutR {
     fn new(cc: &eframe::CreationContext<'_>, launch: instance::Launch) -> Self {
         // Erster Start nach der Umbenennung: Einstellungen von VisiCutRust übernehmen.
@@ -677,15 +687,21 @@ impl VisiCutR {
             live: None,
             part_textures: Vec::new(),
             origin_bottom_left: None,
-            status: tr("Datei öffnen, hierher ziehen oder das Beispiel öffnen").into(),
-            alert: None,
-            alert_until: None,
+            messages: Messages {
+                status: tr("Datei öffnen, hierher ziehen oder das Beispiel öffnen").into(),
+                alert: None,
+                alert_until: None,
+            },
             fit_policy: None,
             project_path: None,
             name_draft: None,
             cached: None,
             dirty: false,
-            proportional: true,
+            inspector: InspectorInputs {
+                proportional: true,
+                reference: [0.0, 0.0],
+                rotate_deg: 0.0,
+            },
             allow_close: false,
             canvas: CanvasView {
                 zoom: 1.0,
@@ -721,8 +737,6 @@ impl VisiCutR {
             compose: compose_ui::ComposeUi::default(),
             history: History::default(),
             show_shortcuts: false,
-            reference: [0.0, 0.0],
-            rotate_deg: 0.0,
             settings,
             parameters: Default::default(),
             inkscape: None,
@@ -831,7 +845,7 @@ impl VisiCutR {
         });
         self.background.update_check = Some((manual, rx));
         if manual {
-            self.status = tr("Suche nach Updates …").into();
+            self.messages.status = tr("Suche nach Updates …").into();
         }
     }
 
@@ -860,7 +874,7 @@ impl VisiCutR {
                 match found {
                     Some(release) => self.background.update_found = Some(release),
                     None if manual => {
-                        self.status = tr!(
+                        self.messages.status = tr!(
                             "VisiCutR {version} ist aktuell",
                             version = visicut_core::update::current_version()
                         )
@@ -869,7 +883,7 @@ impl VisiCutR {
                 }
             }
             Err(e) if manual => self.report(e),
-            Err(e) => self.status = e,
+            Err(e) => self.messages.status = e,
         }
     }
 
@@ -911,7 +925,7 @@ impl VisiCutR {
             }
             // Ohne Netz nur ein Hinweis in der Statuszeile; morgen wieder.
             Err(e) => {
-                self.status = tr!(
+                self.messages.status = tr!(
                     "FabLab-Einstellungen von „{name}“ nicht abrufbar: {error}",
                     name = lab.name,
                     error = e
@@ -1043,7 +1057,11 @@ impl VisiCutR {
         if devices
             && self
                 .devices
-                .adopt_lab(settings.devices, &mut self.project, &mut self.status)
+                .adopt_lab(
+                    settings.devices,
+                    &mut self.project,
+                    &mut self.messages.status,
+                )
                 .is_some()
         {
             done.push(tr("Lasercutter"));
@@ -1070,7 +1088,7 @@ impl VisiCutR {
         if !problems.is_empty() {
             self.report(problems.join("\n"));
         } else if !done.is_empty() {
-            self.status = tr!(
+            self.messages.status = tr!(
                 "Von „{name}“ übernommen: {parts}",
                 name = name,
                 parts = done.join(", ")
@@ -1116,7 +1134,7 @@ impl VisiCutR {
 
     fn save_settings(&mut self) {
         if let Err(e) = self.settings.save() {
-            self.status = tr!("Einstellungen nicht gesichert: {error}", error = e);
+            self.messages.status = tr!("Einstellungen nicht gesichert: {error}", error = e);
         }
     }
 
@@ -1132,8 +1150,8 @@ impl VisiCutR {
         if let Some(options) = &mut self.background.launch_options {
             options.execute = false;
         }
-        self.status = message.lines().next().unwrap_or_default().to_owned();
-        self.alert = Some(match self.alert.take() {
+        self.messages.status = message.lines().next().unwrap_or_default().to_owned();
+        self.messages.alert = Some(match self.messages.alert.take() {
             Some(previous) if previous != message => format!("{previous}\n\n{message}"),
             _ => message,
         });
@@ -1145,7 +1163,7 @@ impl VisiCutR {
 
     fn modal_open(&self) -> bool {
         self.background.reading.is_some()
-            || self.alert.is_some()
+            || self.messages.alert.is_some()
             || self.pending.asking()
             || self.background.lab_offer.is_some()
     }
@@ -1158,7 +1176,7 @@ impl VisiCutR {
             return false;
         }
         if self.background.reading.is_some() {
-            self.status = tr("Bitte warten, bis die Dateien gelesen sind").into();
+            self.messages.status = tr("Bitte warten, bis die Dateien gelesen sind").into();
             return true;
         }
         let (sender, result) = std::sync::mpsc::channel();
@@ -1180,7 +1198,7 @@ impl VisiCutR {
             then,
             fit_policy: self.fit_policy,
         });
-        self.status = tr("Dateien werden gelesen …").into();
+        self.messages.status = tr("Dateien werden gelesen …").into();
         true
     }
 
@@ -1321,7 +1339,7 @@ impl VisiCutR {
         let all = self.all_textures();
         self.project.select_part(index);
         self.arrange_textures(all);
-        self.status = tr!(
+        self.messages.status = tr!(
             "Teil „{name}“ gewählt",
             name = part_title(&self.project.part_name, index)
         );
@@ -1341,7 +1359,7 @@ impl VisiCutR {
         self.project.add_part(part);
         self.arrange_textures(all);
         self.dirty = true;
-        self.status = tr("Teil dupliziert · Widerrufen macht es rückgängig").into();
+        self.messages.status = tr("Teil dupliziert · Widerrufen macht es rückgängig").into();
     }
 
     /// Kopiert das gewählte Teil, auch als Text in die Zwischenablage des
@@ -1352,7 +1370,7 @@ impl VisiCutR {
         }
         let part = self.project.active();
         ctx.copy_text(visicut_core::compose::part_to_clipboard(&part));
-        self.status = tr!(
+        self.messages.status = tr!(
             "Teil „{name}“ kopiert",
             name = part_title(&part.name, self.project.active_part)
         );
@@ -1383,7 +1401,7 @@ impl VisiCutR {
                 self.project = project;
                 (self.texture, self.part_textures) = (texture, part_textures);
                 self.dirty = true;
-                self.status = tr("Teil eingefügt · Widerrufen macht es rückgängig").into();
+                self.messages.status = tr("Teil eingefügt · Widerrufen macht es rückgängig").into();
             }
             Err(e) => self.report(e),
         }
@@ -1436,7 +1454,7 @@ impl VisiCutR {
         self.cached = None;
         self.dirty = true;
         self.forget_history();
-        self.status = tr("Datei importiert · Maße aus der Datei übernommen").into();
+        self.messages.status = tr("Datei importiert · Maße aus der Datei übernommen").into();
         Ok(())
     }
 
@@ -1465,13 +1483,13 @@ impl VisiCutR {
             visicut_core::compose::add_extra_parts(&mut self.project, imported.extra_parts)?;
             (self.texture, self.part_textures) = self.textures_for(ctx, &self.project)?;
         }
-        self.status = tr!(
+        self.messages.status = tr!(
             "{file} importiert · Originalmaße übernommen",
             file = path.file_name().unwrap_or_default().to_string_lossy()
         );
         self.remember(path);
         if !imported.warnings.is_empty() {
-            self.alert = Some(imported.warnings.join("\n"));
+            self.messages.alert = Some(imported.warnings.join("\n"));
         }
         Ok(())
     }
@@ -1525,12 +1543,13 @@ impl VisiCutR {
                 self.project_path = None;
                 self.cached = Some(path.to_owned());
                 self.dirty = true;
-                self.status = tr("Ungesicherter Stand geöffnet. Zum Behalten sichern.").into();
+                self.messages.status =
+                    tr("Ungesicherter Stand geöffnet. Zum Behalten sichern.").into();
             } else {
                 self.project_path = Some(path.to_owned());
                 self.cached = None;
                 self.dirty = false;
-                self.status = tr("Projekt geöffnet").into();
+                self.messages.status = tr("Projekt geöffnet").into();
             }
             self.remember(path);
             Ok(())
@@ -1584,7 +1603,7 @@ impl VisiCutR {
         }
         if !updated.is_empty() {
             self.apply_composed(ctx, project, notes);
-            self.status = tr!("Aktualisiert: {files}", files = updated.join(", "));
+            self.messages.status = tr!("Aktualisiert: {files}", files = updated.join(", "));
         } else if !notes.is_empty() {
             self.report(notes.join("\n"));
         }
@@ -1596,9 +1615,9 @@ impl VisiCutR {
     fn apply_launch_options(&mut self, options: instance::Options) {
         let mut problems = Vec::new();
         if let Some(name) = &options.device
-            && let Err(e) = self
-                .devices
-                .select_named(name, &mut self.project, &mut self.status)
+            && let Err(e) =
+                self.devices
+                    .select_named(name, &mut self.project, &mut self.messages.status)
         {
             problems.push(e);
         }
@@ -1644,7 +1663,7 @@ impl VisiCutR {
     /// öffnet die erste), ein einzelnes Projekt wird geöffnet.
     fn drop_files(&mut self, ctx: &egui::Context, mut paths: Vec<PathBuf>) {
         if self.busy() {
-            self.status = tr("Bitte die laufende Übertragung abwarten").into();
+            self.messages.status = tr("Bitte die laufende Übertragung abwarten").into();
             return;
         }
         if self.read_first(ctx, &paths, Deferred::Drop(paths.clone())) {
@@ -1693,7 +1712,7 @@ impl VisiCutR {
                 return self.report(notes.join("\n"));
             }
             rest = &rest[1..];
-            if let Some(warnings) = self.alert.take() {
+            if let Some(warnings) = self.messages.alert.take() {
                 notes.insert(0, warnings);
             }
         }
@@ -1710,7 +1729,7 @@ impl VisiCutR {
                     self.apply_composed(ctx, project, Vec::new());
                     let added = self.project.part_count().saturating_sub(before);
                     if added > 0 {
-                        self.status = tr!(
+                        self.messages.status = tr!(
                             "{count} Datei(en) als Teile hinzugefügt · Widerrufen macht es rückgängig",
                             count = added
                         );
@@ -1720,7 +1739,7 @@ impl VisiCutR {
             }
         }
         if !notes.is_empty() {
-            self.alert = Some(notes.join("\n"));
+            self.messages.alert = Some(notes.join("\n"));
         }
     }
 
@@ -1747,7 +1766,7 @@ impl VisiCutR {
         self.remember(&path);
         self.project_path = Some(path);
         self.dirty = false;
-        self.status = tr("Projekt mit eingebetteter SVG gesichert").into();
+        self.messages.status = tr("Projekt mit eingebetteter SVG gesichert").into();
         Ok(true)
     }
 
@@ -1757,10 +1776,13 @@ impl VisiCutR {
     /// eines Felds warten, und bei ungesicherter Materialbibliothek
     /// nachfragen. `false`, wenn das Beenden warten muss.
     fn settings_saved_before_quit(&mut self) -> bool {
-        if !self.devices.save_draft(&mut self.project, &mut self.status) {
+        if !self
+            .devices
+            .save_draft(&mut self.project, &mut self.messages.status)
+        {
             self.report(tr!(
                 "Geräteliste nicht gesichert: {error}",
-                error = self.status
+                error = self.messages.status
             ));
             return false;
         }
@@ -1776,7 +1798,7 @@ impl VisiCutR {
             return;
         }
         if self.busy() && !matches!(action, Replace::Quit) {
-            self.status = tr("Bitte die laufende Übertragung abwarten").into();
+            self.messages.status = tr("Bitte die laufende Übertragung abwarten").into();
         } else if self.dirty && !self.stash(matches!(action, Replace::Quit)) {
             self.pending.replace = Some(action);
         } else {
@@ -1798,7 +1820,7 @@ impl VisiCutR {
                     .retain(|p| !removed.contains(p) && p.exists());
                 self.save_settings();
                 self.cached = None;
-                self.status = tr!(
+                self.messages.status = tr!(
                     "Zwischenspeicher geleert ({count} Stände)",
                     count = removed.len()
                 );
@@ -1834,7 +1856,7 @@ impl VisiCutR {
         let result = match action {
             Replace::New => {
                 self.reset_project();
-                self.status = tr("Neues Projekt. Datei öffnen, um zu beginnen.").into();
+                self.messages.status = tr("Neues Projekt. Datei öffnen, um zu beginnen.").into();
                 Ok(())
             }
             Replace::Open(path) => self.open_path(ctx, &path),
@@ -1846,7 +1868,7 @@ impl VisiCutR {
                     Vec::new(),
                 )
                 .map(|()| {
-                    self.status =
+                    self.messages.status =
                         tr("Beispiel geöffnet. Material und Bearbeitung auswählen.").into();
                 }),
             Replace::Vectorized { svg, name } => self.import(ctx, svg, name, Vec::new()),
@@ -1881,7 +1903,7 @@ impl VisiCutR {
         (self.project.x_mm, self.project.y_mm) = (0.0, 0.0);
         self.project.operation = Operation::Mark;
         self.page = Page::Prepare;
-        self.status = tr(
+        self.messages.status = tr(
             "Kalibrierseite geöffnet: Material und Markier-Parameter prüfen, senden, danach Foto aufnehmen.",
         )
         .into();
@@ -1907,14 +1929,14 @@ impl VisiCutR {
         let (project, changed, notes) =
             visicut_core::compose::reload_parts(&self.project, self.fit_policy == Some(true));
         if changed == 0 {
-            self.status = tr("Neu laden: Dateien unverändert").into();
+            self.messages.status = tr("Neu laden: Dateien unverändert").into();
             if !notes.is_empty() {
                 self.report(notes.join("\n"));
             }
             return;
         }
         self.apply_composed(ctx, project, notes);
-        self.status = if changed == 1 {
+        self.messages.status = if changed == 1 {
             tr("Ein Teil neu geladen").into()
         } else {
             tr!("{count} Teile neu geladen", count = changed)
@@ -1974,13 +1996,13 @@ impl VisiCutR {
             }
         }
         self.dirty = true;
-        self.status = tr!(
+        self.messages.status = tr!(
             "Motiv aktualisiert · {width} × {height} mm",
             width = format!("{:.0}", self.project.width_mm),
             height = format!("{:.0}", self.project.height_mm)
         );
         if !notes.is_empty() {
-            self.alert = Some(notes.join("\n"));
+            self.messages.alert = Some(notes.join("\n"));
         }
     }
 
@@ -1996,7 +2018,7 @@ impl VisiCutR {
                 // bisherigen Teils (z. B. einer Gravur).
                 let preset = jobs_ui::apply_presets(self.jobs.active(), &mut project) > 0;
                 self.apply_composed(ctx, project, Vec::new());
-                self.status = if preset {
+                self.messages.status = if preset {
                     tr("Reststücke als Teil eingefügt · Bearbeiten › Widerrufen macht es rückgängig")
                         .into()
                 } else {
@@ -2046,7 +2068,7 @@ impl VisiCutR {
         self.project.remove_active_part();
         self.arrange_textures(all);
         self.dirty = true;
-        self.status = if several {
+        self.messages.status = if several {
             tr("Teil entfernt · Widerrufen stellt es wieder her")
         } else {
             tr("Motiv entfernt · Widerrufen stellt es wieder her")
@@ -2080,14 +2102,14 @@ impl VisiCutR {
     fn undo_last(&mut self) {
         if let Some(snapshot) = self.history.undo(self.snapshot()) {
             self.restore(snapshot);
-            self.status = tr("Letzte Änderung widerrufen").into();
+            self.messages.status = tr("Letzte Änderung widerrufen").into();
         }
     }
 
     fn redo_last(&mut self) {
         if let Some(snapshot) = self.history.redo(self.snapshot()) {
             self.restore(snapshot);
-            self.status = tr("Änderung wiederhergestellt").into();
+            self.messages.status = tr("Änderung wiederhergestellt").into();
         }
     }
 
@@ -2110,7 +2132,7 @@ impl VisiCutR {
             parts: Vec::new(),
             ..pattern
         };
-        self.status = tr(
+        self.messages.status = tr(
             "Zeilenversatz-Testmuster geöffnet: Material prüfen, senden, danach je Zeile den besten Block eintragen.",
         )
         .into();
@@ -2148,8 +2170,8 @@ impl VisiCutR {
         };
         match visicut_core::import::write_plf(&self.project, &path) {
             Ok(notes) => {
-                self.status = tr("Als VisiCut-Projekt exportiert").into();
-                self.alert = Some(notes.join("\n"));
+                self.messages.status = tr("Als VisiCut-Projekt exportiert").into();
+                self.messages.alert = Some(notes.join("\n"));
             }
             Err(e) => self.report(e.to_string()),
         }
@@ -2178,7 +2200,7 @@ impl VisiCutR {
                 return;
             };
             match workspace::write_atomic(&path, &job.bytes) {
-                Ok(()) => self.status = tr!("Exportiert: {files}", files = path.display()),
+                Ok(()) => self.messages.status = tr!("Exportiert: {files}", files = path.display()),
                 Err(e) => self.report(e),
             }
             return;
@@ -2211,7 +2233,7 @@ impl VisiCutR {
                 return self.report(e);
             }
         }
-        self.status = tr!(
+        self.messages.status = tr!(
             "Exportiert: {files}",
             files = pending
                 .jobs
@@ -2243,7 +2265,7 @@ impl VisiCutR {
             let _ = tx.send(ltt::transmit_jobs(&host, port, &prepared.jobs).map_err(String::from));
         });
         self.background.send_result = Some(rx);
-        self.status = tr("Job wird an den Lasercutter übertragen …").into();
+        self.messages.status = tr("Job wird an den Lasercutter übertragen …").into();
     }
 
     fn show_settings(&mut self, page: SettingsPage) {
@@ -2255,7 +2277,8 @@ impl VisiCutR {
     fn switch_page(&mut self, ctx: &egui::Context, page: Page) {
         self.page = page;
         if page == Page::Preview && self.preview.outdated() && !self.project.svg.is_empty() {
-            self.preview.request(ctx, &self.project, &mut self.status);
+            self.preview
+                .request(ctx, &self.project, &mut self.messages.status);
         }
     }
 
@@ -2347,9 +2370,11 @@ impl VisiCutR {
                 match self.settings_page {
                     SettingsPage::Devices => {
                         self.devices
-                            .settings_page(ui, &mut self.project, &mut self.status)
+                            .settings_page(ui, &mut self.project, &mut self.messages.status)
                     }
-                    SettingsPage::Materials => self.jobs.library_page(ui, &mut self.status),
+                    SettingsPage::Materials => {
+                        self.jobs.library_page(ui, &mut self.messages.status)
+                    }
                     SettingsPage::Job => self.job_page(ui),
                     SettingsPage::General => self.general_page(ui),
                     SettingsPage::AddIns => self.add_ins_page(ui),
@@ -2511,7 +2536,7 @@ impl VisiCutR {
             }
             form::section(ui, tr("Lasercutter"), |ui| {
                 self.devices
-                    .transfer(ui, &mut self.project, &mut self.status);
+                    .transfer(ui, &mut self.project, &mut self.messages.status);
                 form::caption(ui, tr("Importieren liest VisiCut-Gerätedateien, .vcsettings-Archive und eigene Exporte; Herunterladen ruft die FabLab-Einstellungen vom Einstellungs-Server eines FabLabs ab. Neue Geräte werden sofort gesichert."));
             });
             form::section(ui, tr("Info"), |ui| {
@@ -2590,7 +2615,7 @@ impl VisiCutR {
             return;
         };
         match std::fs::write(&path, content) {
-            Ok(()) => self.status = tr!("Gespeichert unter {path}", path = path.display()),
+            Ok(()) => self.messages.status = tr!("Gespeichert unter {path}", path = path.display()),
             Err(e) => self.report(tr!("Nicht gespeichert: {error}", error = e)),
         }
     }
@@ -2628,7 +2653,7 @@ impl VisiCutR {
             self.inkscape = None;
             match result {
                 Ok(dir) => {
-                    self.status = tr!(
+                    self.messages.status = tr!(
                         "Inkscape-Erweiterung installiert in {path}. Inkscape neu starten.",
                         path = dir.display()
                     )
@@ -2671,7 +2696,7 @@ impl VisiCutR {
                     && let Some(exe) = &exe
                 {
                     match file_types::register(exe) {
-                        Ok(()) => self.status = tr("Dateitypen zugeordnet").into(),
+                        Ok(()) => self.messages.status = tr("Dateitypen zugeordnet").into(),
                         Err(e) => self.report(e),
                     }
                 }
@@ -2683,7 +2708,9 @@ impl VisiCutR {
                     .clicked()
                 {
                     match file_types::unregister() {
-                        Ok(()) => self.status = tr("Zuordnung der Dateitypen entfernt").into(),
+                        Ok(()) => {
+                            self.messages.status = tr("Zuordnung der Dateitypen entfernt").into()
+                        }
                         Err(e) => self.report(e),
                     }
                 }
@@ -2819,7 +2846,7 @@ impl VisiCutR {
             Command::AddPart => self.choose_parts(ctx),
             Command::Reload => self.reload(ctx),
             Command::Demo => self.request(ctx, Replace::Demo),
-            Command::Vectorize => self.vectorize.pick(&mut self.status),
+            Command::Vectorize => self.vectorize.pick(&mut self.messages.status),
             Command::Save | Command::SaveAs => {
                 if let Err(e) = self.save(command == Command::SaveAs) {
                     self.report(e);
@@ -2872,7 +2899,7 @@ impl VisiCutR {
             Command::RotateLeft => self.transform(ctx, -90.0, false, false),
             Command::RotateRight => self.transform(ctx, 90.0, false, false),
             Command::RotateBy => {
-                let angle = std::mem::take(&mut self.rotate_deg) as f64;
+                let angle = std::mem::take(&mut self.inspector.rotate_deg) as f64;
                 self.transform(ctx, angle, false, false);
             }
             Command::FlipHorizontal => self.transform(ctx, 0.0, true, false),
@@ -2892,7 +2919,7 @@ impl VisiCutR {
             Command::Device(index) => {
                 if self
                     .devices
-                    .select(index, &mut self.project, &mut self.status)
+                    .select(index, &mut self.project, &mut self.messages.status)
                 {
                     self.dirty = true;
                 }
@@ -3192,9 +3219,9 @@ impl VisiCutR {
     /// Bezugspunkts, Breite/Höhe um ihn herum, Drehen und Spiegeln.
     /// Aufklappfeld „Position und Größe“ der Objektleiste.
     fn position_panel(&mut self, ui: &mut egui::Ui) {
-        let mut reference = self.reference;
+        let mut reference = self.inspector.reference;
         let mut dirty = false;
-        let mut proportional = self.proportional;
+        let mut proportional = self.inspector.proportional;
         // Nullpunkt unten links: Y zählt wie am Gerät von der unteren
         // Bettkante nach oben (nur Anzeige, der Auftrag bleibt gleich).
         let bottom = self.devices.origin_bottom_left();
@@ -3286,8 +3313,8 @@ impl VisiCutR {
             resize_about(p, reference, w, h);
             dirty = true;
         }
-        self.reference = reference;
-        self.proportional = proportional;
+        self.inspector.reference = reference;
+        self.inspector.proportional = proportional;
         self.dirty |= dirty;
     }
 
@@ -3297,8 +3324,8 @@ impl VisiCutR {
     /// Einstellung wie die Kette unter „Position und Größe“). Der
     /// Bezugspunkt von dort bleibt stehen.
     fn scale_panel(&mut self, ui: &mut egui::Ui) {
-        let mut proportional = self.proportional;
-        let reference = self.reference;
+        let mut proportional = self.inspector.proportional;
+        let reference = self.inspector.reference;
         let p = &mut self.project;
         let (mut sx, mut sy) = (100.0_f32, 100.0_f32);
         let (mut w, mut h) = (p.width_mm, p.height_mm);
@@ -3395,7 +3422,7 @@ impl VisiCutR {
             resize_about(p, reference, w, h);
             dirty = true;
         }
-        self.proportional = proportional;
+        self.inspector.proportional = proportional;
         self.dirty |= dirty;
     }
 
@@ -3408,7 +3435,7 @@ impl VisiCutR {
             let field = ui
                 .add_sized(
                     [80.0, ui.spacing().interact_size.y],
-                    egui::DragValue::new(&mut self.rotate_deg)
+                    egui::DragValue::new(&mut self.inspector.rotate_deg)
                         .range(-360.0..=360.0)
                         .speed(0.0)
                         .fixed_decimals(0)
@@ -3418,14 +3445,17 @@ impl VisiCutR {
                     "Anklicken und Winkel eingeben; positive Winkel drehen im Uhrzeigersinn",
                 ));
             let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            self.rotate_deg = self.rotate_deg.round();
+            self.inspector.rotate_deg = self.inspector.rotate_deg.round();
             if (ui
-                .add_enabled(editable && self.rotate_deg != 0.0, egui::Button::new("✔"))
+                .add_enabled(
+                    editable && self.inspector.rotate_deg != 0.0,
+                    egui::Button::new("✔"),
+                )
                 .on_hover_text(tr("Anwenden"))
                 .clicked()
                 || enter)
                 && editable
-                && self.rotate_deg != 0.0
+                && self.inspector.rotate_deg != 0.0
             {
                 *clicked = Some(Command::RotateBy);
             }
@@ -4328,7 +4358,7 @@ impl VisiCutR {
                 && let (Some(HandleDrag::Resize(start)), Some(pointer)) =
                     (self.canvas.handle_drag, response.interact_pointer_pos())
             {
-                let proportional = self.proportional != shift;
+                let proportional = self.inspector.proportional != shift;
                 let [x, y, w, h] =
                     workspace::drag_handle(start, handle, view.to_mm(pointer), proportional);
                 let p = &mut self.project;
@@ -4395,7 +4425,7 @@ impl VisiCutR {
                 && degrees.abs() >= 0.1
             {
                 // Dreht wie „Drehen“ im Inspektor um die Mitte.
-                self.rotate_deg = degrees;
+                self.inspector.rotate_deg = degrees;
                 *clicked = Some(Command::RotateBy);
             }
             self.canvas.handle_drag = None;
@@ -4735,14 +4765,15 @@ impl VisiCutR {
     /// Hinweis mit rotem Rahmen; schließt bei Bedarf nach einer Frist von selbst.
     fn alert_dialog(&mut self, ctx: &egui::Context) {
         let left = self
+            .messages
             .alert_until
             .as_ref()
-            .filter(|(_, text)| self.alert.as_ref() == Some(text))
+            .filter(|(_, text)| self.messages.alert.as_ref() == Some(text))
             .map(|(until, _)| until.saturating_duration_since(std::time::Instant::now()));
         if left.is_some_and(|left| left.is_zero()) {
-            self.alert = None;
+            self.messages.alert = None;
         }
-        let Some(text) = &self.alert else {
+        let Some(text) = &self.messages.alert else {
             return;
         };
         let mut close = false;
@@ -4793,7 +4824,7 @@ impl VisiCutR {
                     });
             });
         if close || modal.should_close() {
-            self.alert = None;
+            self.messages.alert = None;
         }
     }
 
@@ -4905,7 +4936,7 @@ impl VisiCutR {
         self.background.send_result = None;
         match result {
             Ok(names) => {
-                self.status = tr!(
+                self.messages.status = tr!(
                     "Übertragen: {jobs}. Aufträge am Gerät prüfen und einzeln starten.",
                     jobs = names.join(", ")
                 );
@@ -4916,8 +4947,8 @@ impl VisiCutR {
                     .replace("$jobname", &names.join(", "));
                 if !text.trim().is_empty() {
                     let until = std::time::Instant::now() + SENT_NOTICE_DURATION;
-                    self.alert_until = Some((until, text.clone()));
-                    self.alert = Some(text);
+                    self.messages.alert_until = Some((until, text.clone()));
+                    self.messages.alert = Some(text);
                 }
             }
             Err(e) => self.report(tr!("Übertragung fehlgeschlagen: {error}", error = e)),
@@ -5124,15 +5155,16 @@ impl eframe::App for VisiCutR {
             } else {
                 ([0.0, 1.0], [0.0, 0.0])
             };
-            if self.origin_bottom_left.is_none() || self.reference == from {
-                self.reference = to;
+            if self.origin_bottom_left.is_none() || self.inspector.reference == from {
+                self.inspector.reference = to;
             }
             self.origin_bottom_left = Some(bottom);
         }
         if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close {
             if self.busy() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                self.status = tr("Bitte die laufende Übertragung vor dem Beenden abwarten").into();
+                self.messages.status =
+                    tr("Bitte die laufende Übertragung vor dem Beenden abwarten").into();
             } else if !self.settings_saved_before_quit() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             } else if self.dirty && !self.stash(true) {
@@ -5148,7 +5180,7 @@ impl eframe::App for VisiCutR {
                 .collect()
         });
         if !dropped.is_empty() && self.background.reading.is_some() {
-            self.status = tr("Bitte warten, bis die Dateien gelesen sind").into();
+            self.messages.status = tr("Bitte warten, bis die Dateien gelesen sind").into();
         } else if !dropped.is_empty() && !self.modal_open() {
             self.drop_files(ctx, dropped);
         }
@@ -5206,15 +5238,20 @@ impl eframe::App for VisiCutR {
             None => {}
         }
         // Die Rückfrage bei ungesicherten Änderungen stellt `request`.
-        if let Some((svg, name)) = self.vectorize.windows(ctx, false, &mut self.status) {
+        if let Some((svg, name)) = self
+            .vectorize
+            .windows(ctx, false, &mut self.messages.status)
+        {
             self.request(ctx, Replace::Vectorized { svg, name });
         }
-        if let Some(remnant_ui::Action::InsertPart(remnants)) =
-            self.remnants
-                .windows(ctx, &mut self.devices, &self.project, &mut self.status)
-        {
+        if let Some(remnant_ui::Action::InsertPart(remnants)) = self.remnants.windows(
+            ctx,
+            &mut self.devices,
+            &self.project,
+            &mut self.messages.status,
+        ) {
             if self.busy() {
-                self.status = tr("Bitte die laufende Übertragung abwarten").into();
+                self.messages.status = tr("Bitte die laufende Übertragung abwarten").into();
             } else {
                 self.insert_remnants(ctx, &remnants);
             }
@@ -5228,7 +5265,7 @@ impl eframe::App for VisiCutR {
         self.shortcuts_window(ctx);
         let device_action = self
             .devices
-            .windows(ctx, &mut self.project, &mut self.status);
+            .windows(ctx, &mut self.project, &mut self.messages.status);
         match device_action {
             Some(devices_ui::Action::CalibrationPage(points)) => {
                 self.request(ctx, Replace::Calibration(points));
@@ -5240,14 +5277,15 @@ impl eframe::App for VisiCutR {
         }
         if self.show_preview {
             self.show_preview = false;
-            self.preview.request(ctx, &self.project, &mut self.status);
+            self.preview
+                .request(ctx, &self.project, &mut self.messages.status);
         }
         let mut commands = Vec::new();
         let send_enabled = self.sendable && !self.busy();
         self.preview.update(
             ctx,
             &self.project,
-            &mut self.status,
+            &mut self.messages.status,
             self.page == Page::Preview,
         );
         // Eine angeforderte Vorschau (Menü, Kürzel, Knopf) zeigt ihren Reiter.
@@ -5287,7 +5325,7 @@ impl eframe::App for VisiCutR {
                     } else {
                         ui.weak("ℹ");
                     }
-                    ui.weak(&self.status);
+                    ui.weak(&self.messages.status);
                     if self.dirty {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.weak(tr("geändert"));
@@ -5318,10 +5356,12 @@ impl eframe::App for VisiCutR {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(0.0))
                     .show(ctx, |ui| {
-                        match self
-                            .preview
-                            .page(ui, &self.project, &mut self.status, send_enabled)
-                        {
+                        match self.preview.page(
+                            ui,
+                            &self.project,
+                            &mut self.messages.status,
+                            send_enabled,
+                        ) {
                             Some(preview_ui::Action::Send) => commands.push(Command::Send),
                             Some(preview_ui::Action::Export) => commands.push(Command::Export),
                             None => {}

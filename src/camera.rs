@@ -250,7 +250,7 @@ fn smallest_eigenvector(mut a: [[f64; 9]; 9]) -> [f64; 9] {
     }
     let smallest = (0..9)
         .min_by(|i, j| a[*i][*i].total_cmp(&a[*j][*j]))
-        .unwrap();
+        .expect("0..9 ist nicht leer");
     std::array::from_fn(|i| v[i][smallest])
 }
 
@@ -556,7 +556,7 @@ pub fn correct(
             pixel.copy_from_slice(&value);
         }
     });
-    RgbaImage::from_raw(width, height, raw).expect("buffer has the image size")
+    RgbaImage::from_raw(width, height, raw).expect("Puffer hat die Bildgröße")
 }
 
 /// Calls `f(y, row)` for every row of `data` (rows of `row_len` items),
@@ -1087,7 +1087,7 @@ pub fn tracked_mapping(
             })
             .enumerate()
             .max_by(|a, b| a.1.total_cmp(&b.1))
-            .unwrap();
+            .expect("mindestens 5 Marken");
         if error <= tolerance {
             break;
         }

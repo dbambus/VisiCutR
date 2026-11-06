@@ -5000,12 +5000,17 @@ impl VisiCutR {
                 .iter()
                 .flat_map(|pixel| pixel.to_array())
                 .collect();
-            let size =
+            // Ein Fenster ohne Fläche liefert kein Bild.
+            let pixmap =
                 resvg::tiny_skia::IntSize::from_wh(image.size[0] as u32, image.size[1] as u32)
-                    .unwrap();
-            let pixmap = resvg::tiny_skia::Pixmap::from_vec(pixels, size).unwrap();
-            if let Err(error) = pixmap.save_png(path) {
-                eprintln!("{error}");
+                    .and_then(|size| resvg::tiny_skia::Pixmap::from_vec(pixels, size));
+            match pixmap {
+                Some(pixmap) => {
+                    if let Err(error) = pixmap.save_png(path) {
+                        eprintln!("{error}");
+                    }
+                }
+                None => eprintln!("Bildschirmfoto ist leer"),
             }
             self.allow_close = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);

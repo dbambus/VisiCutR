@@ -307,11 +307,17 @@ pub fn content_fraction(source: &str) -> [f32; 4] {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     source.hash(&mut hasher);
     let key = hasher.finish();
-    if let Some((_, fraction)) = CACHE.lock().unwrap().iter().find(|(k, _)| *k == key) {
+    // A panic while holding the lock leaves a valid cache behind.
+    let lock = || {
+        CACHE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    };
+    if let Some((_, fraction)) = lock().iter().find(|(k, _)| *k == key) {
         return *fraction;
     }
     let fraction = measure_content(source).unwrap_or([0.0, 0.0, 1.0, 1.0]);
-    let mut cache = CACHE.lock().unwrap();
+    let mut cache = lock();
     if cache.len() >= 64 {
         cache.remove(0);
     }

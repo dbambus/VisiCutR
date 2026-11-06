@@ -152,7 +152,7 @@ pub struct Library {
 impl Library {
     pub fn bundled() -> Self {
         serde_json::from_str(include_str!("../resources/materials.json"))
-            .expect("bundled material catalogue must parse")
+            .expect("mitgelieferter Materialkatalog ist lesbar")
     }
 
     /// The user's library, or the bundled one; `true` if it is customised.

@@ -366,7 +366,7 @@ fn brighten(value: i32) -> i32 {
     } else {
         let i = (1..4)
             .find(|i| output[i - 1] <= v && v <= output[*i])
-            .unwrap();
+            .expect("Wert liegt zwischen 0 und 255");
         (v - output[i - 1]) / (output[i] - output[i - 1]) * (input[i] - input[i - 1]) + input[i - 1]
     };
     mapped.round() as i32

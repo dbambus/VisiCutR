@@ -260,7 +260,7 @@ impl LaserDevice {
     /// The FAU FabLab configuration shipped with VisiCut settings.
     pub fn fau() -> Self {
         let mut devices = from_visicut_xml(include_str!("../reference/FAU-LTT-iLaser-4000.xml"))
-            .expect("bundled FAU device must parse");
+            .expect("mitgeliefertes FAU-Gerät ist lesbar");
         devices.description = "FAU FabLab".into();
         devices
     }

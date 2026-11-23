@@ -121,6 +121,8 @@ pub struct DeviceUi {
     /// „Suchen“: laufende VisiCam-Suche und gefundene URLs zur Auswahl.
     camera_search: Option<Receiver<Vec<String>>>,
     camera_found: Vec<String>,
+    /// Gerät, für das gesucht wurde; nur dort erscheinen die Ergebnisse.
+    camera_search_device: String,
     calibration: Option<Calibration>,
     shift_test: Option<ShiftTest>,
     /// Laufender Download von FabLab-Einstellungen (FabLab-Name, Ergebnis).
@@ -134,12 +136,24 @@ impl DeviceUi {
     pub fn load() -> (Self, Option<String>) {
         let (store, error) = match DeviceStore::load(&device::config_dir()) {
             Ok(store) => (store, None),
-            Err(e) => (
-                DeviceStore::default(),
-                Some(tr!("Geräteliste nicht lesbar: {error}", error = e)),
-            ),
+            Err(e) => {
+                let dir = device::config_dir();
+                let mut message = tr!("Geräteliste nicht lesbar: {error}", error = e);
+                if let Some(backup) = DeviceStore::backup_damaged(&dir) {
+                    message.push('\n');
+                    message.push_str(&tr!(
+                        "Die alte Liste liegt als Sicherung in {path}.",
+                        path = backup.display()
+                    ));
+                }
+                (DeviceStore::default(), Some(message))
+            }
         };
-        let ui = Self {
+        (Self::from_store(store), error)
+    }
+
+    pub fn from_store(store: DeviceStore) -> Self {
+        Self {
             store,
             draft: None,
             show_camera: false,
@@ -150,12 +164,12 @@ impl DeviceUi {
             camera_errors: 0,
             camera_search: None,
             camera_found: Vec::new(),
+            camera_search_device: String::new(),
             calibration: None,
             shift_test: None,
             download: None,
             downloaded: None,
-        };
-        (ui, error)
+        }
     }
 
     pub fn device(&self) -> &LaserDevice {
@@ -176,6 +190,19 @@ impl DeviceUi {
         [project.bed_width_mm, project.bed_height_mm] = BED_MM;
         project.rotary_axis &= device.rotary_axis;
         changed
+    }
+
+    /// Sichert Änderungen der Geräteseite, die noch im Eingabefeld stehen
+    /// (gesichert wird sonst erst, wenn kein Feld mehr den Fokus hat). Vor
+    /// dem Vorbereiten und Senden, damit die getippte Adresse gilt.
+    pub fn commit_draft(&mut self, project: &mut Project, status: &mut String) {
+        let Some((draft, _)) = &self.draft else {
+            return;
+        };
+        if *draft != self.store {
+            let draft = draft.clone();
+            self.save(draft, project, status);
+        }
     }
 
     /// Öffnet die Lasercutter-Verwaltung (oder lässt sie offen).
@@ -232,19 +259,8 @@ impl DeviceUi {
             *status = e.to_string();
             return false;
         }
-        let camera_changed = {
-            let (old, new) = (self.device(), &store.devices[store.selected]);
-            old.camera_url != new.camera_url
-                || old.camera_calibration != new.camera_calibration
-                || old.camera_user != new.camera_user
-                || old.camera_password != new.camera_password
-        };
+        self.drop_camera_if_changed(&store);
         self.store = store;
-        if camera_changed {
-            self.camera = None;
-            self.camera_image = None;
-            self.show_camera = false;
-        }
         self.apply(project);
         *status = tr!(
             "Lasercutter: {name} ({host}:{port})",
@@ -253,6 +269,23 @@ impl DeviceUi {
             port = self.device().port
         );
         true
+    }
+
+    /// Verwirft Bild und laufenden Abruf, wenn `store` eine andere Kamera
+    /// wählt; sonst käme das Bett des alten Geräts später noch an.
+    fn drop_camera_if_changed(&mut self, store: &DeviceStore) {
+        let (old, new) = (self.device(), &store.devices[store.selected]);
+        let changed = old.camera_url != new.camera_url
+            || old.camera_calibration != new.camera_calibration
+            || old.camera_user != new.camera_user
+            || old.camera_password != new.camera_password;
+        if changed {
+            self.camera_loading = None;
+            self.camera_next = None;
+            self.camera = None;
+            self.camera_image = None;
+            self.show_camera = false;
+        }
     }
 
     pub fn refresh_camera(&mut self, project: &Project) {
@@ -315,8 +348,10 @@ impl DeviceUi {
                 tr!(
                     "Y entspricht dem Umfang ({circumference} mm). Gravur zentriert am Gerät \
                      ausrichten. Schritte je Umdrehung aus LibLaserCut, am Gerät nicht validiert.",
-                    circumference =
-                        format!("{:.1}", std::f32::consts::PI * project.rotary_diameter_mm)
+                    circumference = visicut_core::i18n::number(
+                        f64::from(std::f32::consts::PI * project.rotary_diameter_mm),
+                        1
+                    )
                 ),
             );
         }
@@ -495,10 +530,16 @@ impl DeviceUi {
             return;
         };
         let ctx = ui.ctx().clone();
-        self.poll_camera_search(&ctx, &mut draft.devices[editing], status);
+        self.poll_camera_search(&ctx, status);
+        // Suche und Ergebnisse gehören zum Gerät, das gesucht hat.
+        let own = draft.devices[editing].name == self.camera_search_device;
         let search = CameraSearch {
-            searching: self.camera_search.is_some(),
-            found: std::mem::take(&mut self.camera_found),
+            searching: own && self.camera_search.is_some(),
+            found: if own {
+                std::mem::take(&mut self.camera_found)
+            } else {
+                Vec::new()
+            },
         };
         let requests = device_manager(ui, &mut draft, &mut editing, &search);
         if requests.calibrate {
@@ -513,8 +554,9 @@ impl DeviceUi {
         }
         // Die Auswahl bleibt, bis eine neue Suche startet oder das Fenster schließt.
         if requests.search {
+            self.camera_search_device = draft.devices[editing].name.clone();
             self.start_camera_search(status);
-        } else {
+        } else if own {
             self.camera_found = search.found;
         }
         // Sofort sichern statt Entwurf: sonst ging z. B. eine neue Kamera-URL
@@ -526,27 +568,19 @@ impl DeviceUi {
         self.draft = Some((draft, editing));
     }
 
-    /// Ergebnis von „Suchen“: eine Kamera wird übernommen, mehrere zur Wahl.
-    fn poll_camera_search(
-        &mut self,
-        ctx: &egui::Context,
-        device: &mut LaserDevice,
-        status: &mut String,
-    ) {
+    /// Ergebnis von „Suchen“: gefundene Kameras zur Wahl. Jeder Rechner im
+    /// Netz kann antworten, deshalb wird nichts ohne Klick übernommen.
+    fn poll_camera_search(&mut self, ctx: &egui::Context, status: &mut String) {
         let Some(receiver) = &self.camera_search else {
             return;
         };
         match receiver.try_recv() {
             Ok(urls) => {
                 self.camera_search = None;
-                match urls.as_slice() {
-                    [] => *status = tr("Keine VisiCam im Netz gefunden").into(),
-                    [url] => {
-                        device.camera_url = url.clone();
-                        *status = tr!("Kamera gefunden: {url}", url = url);
-                    }
-                    _ => self.camera_found = urls,
+                if urls.is_empty() {
+                    *status = tr("Keine VisiCam im Netz gefunden").into();
                 }
+                self.camera_found = urls;
             }
             Err(TryRecvError::Empty) => {
                 ctx.request_repaint_after(std::time::Duration::from_millis(100))
@@ -848,8 +882,40 @@ fn device_list(ui: &mut egui::Ui, draft: &mut DeviceStore, editing: &mut usize, 
             ) {
                 *editing = draft.duplicate(*editing);
             }
-            if list_button(ui, Icon::Minus, removable, tr("Lasercutter entfernen"))
-                && let Some(next) = draft.remove(*editing)
+            // Entfernen wird sofort gesichert: erst nachfragen.
+            let asking = egui::Id::new("remove_device");
+            if list_button(ui, Icon::Minus, removable, tr("Lasercutter entfernen")) {
+                ui.data_mut(|d| d.insert_temp(asking, *editing));
+            }
+            let Some(index) = ui.data(|d| d.get_temp::<usize>(asking)) else {
+                return;
+            };
+            let name = draft.devices.get(index).map(|d| d.name.clone());
+            let mut answer = None;
+            let modal = egui::Modal::new(asking).show(ui.ctx(), |ui| {
+                ui.set_max_width(360.0);
+                ui.heading(tr!(
+                    "Lasercutter „{name}“ entfernen?",
+                    name = name.clone().unwrap_or_default()
+                ));
+                ui.label(tr(
+                    "Seine Einstellungen und die Kamerakalibrierung gehen verloren.",
+                ));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button(tr("Entfernen")).clicked() {
+                        answer = Some(true);
+                    }
+                    if ui.button(tr("Abbrechen")).clicked() {
+                        answer = Some(false);
+                    }
+                });
+            });
+            if answer.is_some() || modal.should_close() || name.is_none() {
+                ui.data_mut(|d| d.remove::<usize>(asking));
+            }
+            if answer == Some(true)
+                && let Some(next) = draft.remove(index)
             {
                 *editing = next;
             }
@@ -985,13 +1051,33 @@ fn camera_url_rows(ui: &mut egui::Ui, device: &mut LaserDevice, search: &CameraS
         ui.vertical(|ui| {
             for url in &search.found {
                 if ui.button(url).clicked() {
-                    device.camera_url = url.clone();
+                    choose_camera(device, url);
                 }
             }
         });
         ui.end_row();
     }
     start
+}
+
+/// Übernimmt eine gefundene Kamera-URL. Die Anmeldung gilt nur für den
+/// bisherigen Rechner und wird bei einem anderen nicht mitgeschickt.
+fn choose_camera(device: &mut LaserDevice, url: &str) {
+    if camera_host(&device.camera_url) != camera_host(url) {
+        device.camera_user.clear();
+        device.camera_password.clear();
+    }
+    device.camera_url = url.into();
+}
+
+/// Rechner (mit Port) einer Kamera-URL, ohne Groß- und Kleinschreibung.
+fn camera_host(url: &str) -> String {
+    let rest = url.trim().split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    host.to_ascii_lowercase()
 }
 
 /// Anmeldung und Aktualisierung der Kamera.
@@ -1356,7 +1442,7 @@ fn accuracy_text(points: &CameraCalibration) -> String {
         Some((_, worst, per_mm)) if count > 4 => tr!(
             "{count} Punkte, Genauigkeit ≈ {mm} mm",
             count = count,
-            mm = format!("{:.1}", worst / per_mm)
+            mm = visicut_core::i18n::number(worst / per_mm, 1)
         ),
         _ => tr!("{count} Punkte", count = count),
     }
@@ -1368,9 +1454,9 @@ fn update_quality(c: &mut Calibration) {
         let (rms, worst, per_mm) = residual_error(&points)?;
         let mut text = tr!(
             "Restfehler: im Mittel {rms} px, höchstens {max} px (≈ {mm} mm)",
-            rms = format!("{rms:.1}"),
-            max = format!("{worst:.1}"),
-            mm = format!("{:.1}", worst / per_mm)
+            rms = visicut_core::i18n::number(rms, 1),
+            max = visicut_core::i18n::number(worst, 1),
+            mm = visicut_core::i18n::number(worst / per_mm, 1)
         );
         if let Some(lens) = &points.lens {
             text += &format!(
@@ -1985,5 +2071,39 @@ fn paint_markers(painter: &egui::Painter, c: &Calibration, view: PhotoView) {
             egui::FontId::proportional(14.0),
             color,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn found_camera_on_another_host_does_not_get_the_login() {
+        let mut device = LaserDevice {
+            camera_url: "http://cam.lab:8080/image".into(),
+            camera_user: "laser".into(),
+            camera_password: "geheim".into(),
+            ..Default::default()
+        };
+        choose_camera(&mut device, "http://CAM.lab:8080/other");
+        assert_eq!(device.camera_password, "geheim");
+        choose_camera(&mut device, "http://192.0.2.66:8080/image");
+        assert_eq!(device.camera_url, "http://192.0.2.66:8080/image");
+        assert!(device.camera_user.is_empty() && device.camera_password.is_empty());
+        assert_eq!(camera_host("https://u:p@Host:1/x?y"), "host:1");
+    }
+
+    #[test]
+    fn saving_another_camera_drops_the_pending_picture() {
+        let mut ui = DeviceUi::from_store(DeviceStore::default());
+        let (_tx, rx) = channel();
+        ui.camera_loading = Some(rx);
+        let mut store = ui.store.clone();
+        ui.drop_camera_if_changed(&store);
+        assert!(ui.camera_loading.is_some());
+        store.devices[0].camera_url = "http://192.0.2.1/image".into();
+        ui.drop_camera_if_changed(&store);
+        assert!(ui.camera_loading.is_none());
     }
 }

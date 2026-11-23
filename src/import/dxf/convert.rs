@@ -53,6 +53,13 @@ const MAX_DEPTH: u32 = 16;
 /// a block that inserts itself 1000 × 100 times would otherwise run on for
 /// ever without drawing anything.
 const MAX_BLOCK_INSTANCES: usize = 1_000_000;
+/// Entities visited in total, including those inside blocks. A block of
+/// 100 000 points drawn by a 316 × 316 array stays below the instance limit
+/// but would visit 10¹⁰ entities.
+const MAX_ENTITY_VISITS: usize = 10_000_000;
+/// Highest spline degree (as for SPLINE entities); de Boor costs grow with
+/// its square.
+const MAX_DEGREE: usize = 25;
 /// Cap height of typical fonts relative to the font size; DXF text height is
 /// the cap height.
 const CAP_HEIGHT: f64 = 0.7;
@@ -87,6 +94,9 @@ struct Converter<'a> {
     too_deep: bool,
     segments: usize,
     block_instances: usize,
+    visits: usize,
+    /// Objects left out because their coordinates are not finite.
+    invalid: usize,
 }
 
 pub fn convert(doc: &Document, unit_mm: f64) -> Result<Converted, DxfError> {
@@ -104,6 +114,8 @@ pub fn convert(doc: &Document, unit_mm: f64) -> Result<Converted, DxfError> {
         too_deep: false,
         segments: 0,
         block_instances: 0,
+        visits: 0,
+        invalid: 0,
     };
     let ctx = Ctx {
         m: Affine::scale(unit_mm, unit_mm),
@@ -153,6 +165,12 @@ pub fn convert(doc: &Document, unit_mm: f64) -> Result<Converted, DxfError> {
     }
     if converter.pattern_hatch {
         warnings.push(tr("Schraffurmuster werden als gefüllte Flächen übernommen").into());
+    }
+    if converter.invalid > 0 {
+        warnings.push(tr!(
+            "{count} Objekte mit ungültigen Koordinaten wurden ausgelassen",
+            count = converter.invalid
+        ));
     }
     if converter.too_deep {
         warnings.push(tr("Zu tief verschachtelte Blöcke wurden ausgelassen").into());
@@ -238,13 +256,16 @@ fn polyline(b: &mut PathBuilder, vertices: &[(P, f64)], closed: bool) {
     }
 }
 
+/// Knot span of `t`: the last k in p..n with knots[k] <= t. A binary
+/// search; a linear one per point made splines with many points quadratic.
+fn knot_span(t: f64, p: usize, knots: &[f64], n: usize) -> usize {
+    p + knots[p + 1..n].partition_point(|knot| t >= *knot)
+}
+
 /// Point of a (rational) B-spline by de Boor's algorithm.
 fn de_boor(t: f64, p: usize, knots: &[f64], ctrl: &[P], weights: &[f64]) -> P {
     let n = ctrl.len();
-    let mut k = p;
-    while k < n - 1 && t >= knots[k + 1] {
-        k += 1;
-    }
+    let k = knot_span(t, p, knots, n);
     let mut d: Vec<[f64; 3]> = (0..=p)
         .map(|j| {
             let i = j + k - p;
@@ -460,7 +481,7 @@ fn spline_path(e: &Entity, wcs: Affine) -> PathBuilder {
     if ctrl.len() >= 2 {
         let knots: Vec<f64> = e.all(40).collect();
         let weights: Vec<f64> = e.all(41).collect();
-        let degree = e.int(71).unwrap_or(3).clamp(1, 25) as usize;
+        let degree = e.int(71).unwrap_or(3).clamp(1, MAX_DEGREE as i64) as usize;
         nurbs(&mut b, degree, &ctrl, &knots, &weights);
     } else {
         let tangent = |code| e.f(code).map(|_| point(e, code));
@@ -533,8 +554,13 @@ impl Cursor<'_> {
         self.take(code).unwrap_or(0.0)
     }
 
+    /// A stated number of items, at most one per remaining group code: a
+    /// count of a million without data would otherwise loop a million times.
     fn count(&mut self, code: i32) -> usize {
-        (self.get(code).max(0.0) as usize).min(1_000_000)
+        let remaining = self.pairs.len() - self.at.min(self.pairs.len());
+        (self.get(code).max(0.0) as usize)
+            .min(1_000_000)
+            .min(remaining)
     }
 
     /// Skips forward to the next `code`.
@@ -604,6 +630,18 @@ impl Converter<'_> {
 
     fn push(&mut self, prim: Prim) -> Result<(), DxfError> {
         if let Prim::Path { segs, .. } = &prim {
+            // Huge values times a block transform overflow to infinity; such
+            // a path would vanish without a word.
+            let finite = |p: &P| p[0].is_finite() && p[1].is_finite();
+            let valid = segs.iter().all(|seg| match seg {
+                geom::Seg::Move(p) | geom::Seg::Line(p) => finite(p),
+                geom::Seg::Cubic(a, b, c) => finite(a) && finite(b) && finite(c),
+                geom::Seg::Close => true,
+            });
+            if !valid {
+                self.invalid += 1;
+                return Ok(());
+            }
             self.segments += segs.len();
             if segs.len() >= geom::MAX_PATH_SEGMENTS || self.segments > MAX_SEGMENTS {
                 return Err(DxfError::TooManyObjects);
@@ -646,6 +684,14 @@ impl Converter<'_> {
     }
 
     fn entity(&mut self, e: &Entity, ctx: &Ctx) -> Result<(), DxfError> {
+        self.visits += 1;
+        if self.visits > MAX_ENTITY_VISITS {
+            return Err(DxfError::TooManyObjects);
+        }
+        if self.visits.is_multiple_of(1024) {
+            crate::import::time_left(crate::import::TIME_LIMIT)
+                .map_err(|_| DxfError::TimeLimit(crate::import::TIME_LIMIT))?;
+        }
         if e.int(60) == Some(1) {
             return Ok(());
         }
@@ -942,6 +988,10 @@ impl Converter<'_> {
         let loops = cursor.count(91);
         let mut b = PathBuilder::new(m);
         for _ in 0..loops {
+            // The path is full; further loops would only be computed.
+            if b.overflowed() {
+                return Err(DxfError::TooManyObjects);
+            }
             let Some(flags) = cursor.find(92) else { break };
             b.break_path();
             if flags as i64 & 2 != 0 {
@@ -957,6 +1007,9 @@ impl Converter<'_> {
                 polyline(&mut b, &vertices, true);
             } else {
                 for _ in 0..cursor.count(93) {
+                    if b.overflowed() {
+                        return Err(DxfError::TooManyObjects);
+                    }
                     match cursor.get(72) as i64 {
                         1 => {
                             let from = cursor.point(10);
@@ -1019,7 +1072,7 @@ fn edge_sweep(start: f64, end: f64, ccw: bool) -> (f64, f64) {
 }
 
 fn hatch_spline(cursor: &mut Cursor, b: &mut PathBuilder) {
-    let degree = cursor.get(94).max(1.0) as usize;
+    let degree = (cursor.get(94).max(1.0) as usize).min(MAX_DEGREE);
     let rational = cursor.get(73) != 0.0;
     cursor.take(74);
     let knot_count = cursor.count(95);
@@ -1055,6 +1108,22 @@ fn hatch_spline(cursor: &mut Cursor, b: &mut PathBuilder) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn knot_span_is_found_by_binary_search() {
+        // Same span as the former linear search, including the last one.
+        let knots = [0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 3.0, 3.0, 3.0];
+        for t in [-1.0, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0] {
+            let linear = {
+                let mut k = 2;
+                while k < 5 && t >= knots[k + 1] {
+                    k += 1;
+                }
+                k
+            };
+            assert_eq!(knot_span(t, 2, &knots, 6), linear, "{t}");
+        }
+    }
 
     #[test]
     fn converts_linetype_patterns() {

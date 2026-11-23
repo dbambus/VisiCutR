@@ -130,6 +130,13 @@ fn precise(value: f64) -> String {
 }
 
 fn escape(text: &str) -> String {
+    // Control characters (`%%001`, `\U+0001`) are not allowed in XML and
+    // made the whole drawing unreadable.
+    let text: String = text
+        .chars()
+        .filter(|c| !c.is_control() || matches!(c, '\t' | '\n' | '\r'))
+        .filter(|c| !matches!(c, '\u{fffe}' | '\u{ffff}'))
+        .collect();
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")

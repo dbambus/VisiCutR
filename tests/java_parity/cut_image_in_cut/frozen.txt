@@ -1,0 +1,1 @@
+error: SVG enthält Rasterbilder; zuerst in Pfade umwandeln oder Gravieren wählen

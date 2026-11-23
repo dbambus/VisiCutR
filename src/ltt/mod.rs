@@ -163,7 +163,7 @@ fn raster_pair(out: &mut Vec<u8>, axis: Axis, x: i32, y: i32, pitch: i32) -> Res
     }
 }
 
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 pub struct PreparedStep {
     pub operation: Operation,
     pub name: String,
@@ -175,13 +175,14 @@ pub struct PreparedStep {
     pub parameter_sets: usize,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 pub struct OutputJob {
     pub name: String,
     pub operation: Operation,
     pub bytes: Vec<u8>,
 }
 
+#[derive(Clone)]
 pub struct PreparedJob {
     pub jobs: Vec<OutputJob>,
     pub description: String,
@@ -993,7 +994,7 @@ fn encode_vector_part(
         }
         encoder.polyline(&polyline)?;
     }
-    encoder.finish();
+    encoder.finish()?;
     (state.speed, state.power) = (encoder.speed, encoder.power);
     Ok((encoder.circles, encoder.curves))
 }
@@ -1777,6 +1778,131 @@ mod tests {
                 JobStep { objects: vec![0], power_percent: 50.0, speed_percent: 8.0, passes: 2, ..JobStep::new(Operation::Cut) },
                 JobStep { objects: vec![1], power_percent: 20.0, speed_percent: 70.0, passes: 1, ..JobStep::new(Operation::Engrave) },
             ], ..Default::default()
+        }
+    }
+
+    /// Follows the head through every vector part of a job: absolute and
+    /// relative moves, joint curves and circle commands. Returns the
+    /// positions (machine steps) and fails on any command it does not know,
+    /// so the decoder stays complete.
+    fn head_positions(bytes: &[u8]) -> Vec<(i64, i64)> {
+        let int = |at: usize| i64::from(i32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()));
+        let mut positions = Vec::new();
+        let mut start = 0;
+        while let Some(offset) = bytes[start..].windows(2).position(|w| w == [0x1b, 0x56]) {
+            let mut i = start + offset + 2;
+            // Header: pulse mode, colour code, "PS" and maybe the PPI divisor.
+            assert_eq!(&bytes[i..i + 2], [0x1b, 0x45]);
+            i += 9;
+            assert_eq!(&bytes[i..i + 2], [0x1b, 0x4e]);
+            i += 3;
+            assert_eq!(&bytes[i..i + 2], b"PS");
+            i += 2;
+            if bytes[i..].starts_with(&[0x1b, 0x50]) {
+                i += 4;
+            }
+            // Relative commands start where the last absolute move ended.
+            let mut head: Option<(i64, i64)> = None;
+            while i + 1 < bytes.len() {
+                match &bytes[i..i + 2] {
+                    b"PD" | b"PU" | b"PJ" | b"PF" => i += 2,
+                    b"PE" => i += 4,
+                    b"PA" => {
+                        head = Some((
+                            int(i + 2),
+                            i64::from(u32::from_be_bytes(bytes[i + 6..i + 10].try_into().unwrap())),
+                        ));
+                        positions.push(head.unwrap());
+                        i += 10;
+                    }
+                    b"PR" => {
+                        let (x, y) = head.expect("relative move without a start");
+                        head = Some((x + int(i + 2), y + int(i + 6)));
+                        positions.push(head.unwrap());
+                        i += 10;
+                    }
+                    b"PB" => {
+                        // Circle around head + (dx, dy) through the head.
+                        assert_eq!(&bytes[i + 2..i + 10], [0; 8]);
+                        let (x, y) = head.expect("circle without a start");
+                        let (cx, cy) = (x + int(i + 10), y + int(i + 14));
+                        let r = (((x - cx).pow(2) + (y - cy).pow(2)) as f64).sqrt().ceil() as i64;
+                        positions.extend([(cx - r, cy), (cx + r, cy), (cx, cy - r), (cx, cy + r)]);
+                        i += 18;
+                    }
+                    [0x1b, 0x53] | [0x1b, 0x4a] => i += 4,
+                    [0x1b, _] => break,
+                    other => panic!("unknown vector command {other:?} at {i}"),
+                }
+            }
+            start = i;
+        }
+        positions
+    }
+
+    #[test]
+    fn every_vector_command_keeps_the_head_on_the_bed() {
+        let max_x = i64::from(raw(BED_WIDTH));
+        let max_y = i64::from(MAX_RAW_Y);
+        let on_bed = |bytes: &[u8]| {
+            let positions = head_positions(bytes);
+            assert!(!positions.is_empty());
+            for (x, y) in positions {
+                assert!(
+                    (0..=max_x).contains(&x) && (0..=max_y).contains(&y),
+                    "{x}, {y}"
+                );
+            }
+        };
+        // Lines, a circle (circle command), a gentle curve (joint curve) near
+        // the edges of the bed.
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="990mm" height="590mm" viewBox="0 0 990 590"><path d="M0 0L990 0L990 590L0 590Z" fill="none" stroke="red"/><circle cx="20" cy="20" r="10" fill="none" stroke="red"/><path d="M100 300C300 100 600 500 980 300" fill="none" stroke="red"/></svg>"#;
+        let project = Project {
+            svg: svg.into(),
+            x_mm: 5.0,
+            y_mm: 5.0,
+            width_mm: 990.0,
+            height_mm: 590.0,
+            ..Default::default()
+        };
+        let prepared = prepare(&project).unwrap();
+        let has = |needle: &[u8]| {
+            prepared
+                .jobs
+                .iter()
+                .any(|j| j.bytes.windows(needle.len()).any(|w| w == needle))
+        };
+        assert!(has(b"PJPB"), "circle command");
+        assert!(has(b"PE"), "joint curve");
+        for job in &prepared.jobs {
+            on_bed(&job.bytes);
+        }
+        // LaserScript with `set` between two lines, first path deleted: the
+        // second path still starts with a move (see the audit, refuted).
+        let source = "move(10, 10); line(20, 10); set('power', 30); line(20, 20);";
+        let path = std::env::temp_dir().join(format!("visicut-head-{}.ls", std::process::id()));
+        std::fs::write(&path, source).unwrap();
+        let imported = crate::import::read_file(&path);
+        let _ = std::fs::remove_file(&path);
+        let mut project = Project {
+            svg: imported.unwrap().svg,
+            x_mm: 100.0,
+            y_mm: 100.0,
+            width_mm: 10.0,
+            height_mm: 10.0,
+            cut_order: CutOrder::VisiCut,
+            ..Default::default()
+        };
+        for job in &prepare(&project).unwrap().jobs {
+            on_bed(&job.bytes);
+        }
+        project = crate::compose::remove_objects(&project, &[0]).unwrap();
+        for job in &prepare(&project).unwrap().jobs {
+            let bytes = &job.bytes;
+            on_bed(bytes);
+            let first_move = bytes.windows(2).position(|w| w == b"PA").unwrap();
+            let first_line = bytes.windows(2).position(|w| w == b"PR").unwrap();
+            assert!(first_move < first_line, "a move comes first");
         }
     }
 

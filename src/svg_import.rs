@@ -222,7 +222,13 @@ pub fn embed_external_images(source: &str, base_dir: &Path) -> Imported {
         };
     };
     let mut cache: HashMap<PathBuf, Result<String, String>> = HashMap::new();
-    let folder = std::fs::canonicalize(base_dir).ok();
+    // `base_dir` may come from a project file: never touch a network folder
+    // and never let a whole drive count as the folder of the drawing.
+    let folder = is_drawing_folder(base_dir)
+        .then(|| std::fs::canonicalize(base_dir).ok())
+        .flatten()
+        .filter(|folder| is_drawing_folder(folder));
+    let base_dir = folder.as_deref();
     let mut reported = std::collections::HashSet::new();
     let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
     let mut length = source.len();
@@ -302,7 +308,7 @@ fn find_image(
     href: &str,
     shown: &str,
     absref: Option<&str>,
-    base_dir: &Path,
+    base_dir: Option<&Path>,
 ) -> Result<PathBuf, Option<String>> {
     let candidates = match classify(href) {
         Href::Skip => return Err(None),
@@ -325,7 +331,11 @@ fn find_image(
         .into_iter()
         .chain(absref.map(PathBuf::from))
         .filter(|path| !is_network_path(path))
-        .map(|path| base_dir.join(path));
+        .filter_map(|path| match base_dir {
+            Some(folder) => Some(folder.join(path)),
+            None => path.is_absolute().then_some(path),
+        })
+        .filter(|path| !is_network_path(path));
     candidates.find(|path| path.is_file()).ok_or_else(|| {
         Some(tr!(
             "Bild „{name}“ nicht gefunden und nicht eingebettet",
@@ -409,7 +419,13 @@ fn file_url_host(url: &str) -> Option<&str> {
 /// A path on another computer (`\\server\share`, `//server/share`, `\\?\UNC\…`).
 /// Windows connects to it over SMB and sends the user's credentials, so such
 /// paths are never opened; the check holds on every platform.
-fn is_network_path(path: &Path) -> bool {
+/// A local folder below a drive or file system root.
+pub fn is_drawing_folder(path: &Path) -> bool {
+    !path.as_os_str().is_empty() && !is_network_path(path) && path.parent().is_some()
+}
+
+/// UNC and device paths, which Windows opens over the network.
+pub fn is_network_path(path: &Path) -> bool {
     let text = path.to_string_lossy();
     let mut start = text.chars();
     if matches!(
@@ -681,6 +697,32 @@ mod tests {
             );
         let result = embed_external_images(&source, &dir.0);
         assert!(result.warnings[0].contains("nicht gefunden"));
+    }
+
+    #[test]
+    fn folder_from_a_project_file_is_neither_network_nor_root() {
+        // `Parametric.base_dir` comes from the `.vcr` file.
+        let dir = TempDir::new("base-dir");
+        std::fs::write(dir.0.join("red.png"), red_png()).unwrap();
+        let file = std::fs::canonicalize(dir.0.join("red.png")).unwrap();
+        let source = svg(r#"href="red.png""#);
+        for network in [r"\\attacker.example\s", "//attacker.example/s"] {
+            let result = embed_external_images(&source, Path::new(network));
+            assert_eq!(result.svg, source, "{network}");
+            assert!(result.warnings[0].contains("nicht gefunden"), "{network}");
+        }
+        // A drive or file system root is not the folder of the drawing:
+        // relative links are not resolved from it ...
+        let root = file.ancestors().last().unwrap();
+        let relative = file.strip_prefix(root).unwrap();
+        let source = svg(&format!(r#"href="{}""#, relative.display()));
+        let result = embed_external_images(&source, root);
+        assert_eq!(result.svg, source);
+        // ... and absolute links below it are embedded with the warning.
+        let source = svg(&format!(r#"href="{}""#, file_url(&file)));
+        let result = embed_external_images(&source, root);
+        assert!(result.svg.contains(&png_uri()));
+        assert!(result.warnings[0].contains("nicht im Ordner der Zeichnung"));
     }
 
     #[test]

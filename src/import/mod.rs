@@ -8,6 +8,7 @@ mod eps;
 mod error;
 mod gcode;
 mod pdf;
+pub use pdf::allow_ghostscript_for_postscript;
 mod plf;
 mod raster;
 
@@ -21,7 +22,8 @@ pub use plf::{
 };
 use std::path::Path;
 pub use worker::{
-    FLAG as WORKER_FLAG, serve as serve_worker, use_executable as use_worker_executable,
+    FLAG as WORKER_FLAG, WorkerAllocator, serve as serve_worker,
+    use_executable as use_worker_executable,
 };
 
 /// Largest file that is read for import.
@@ -255,7 +257,16 @@ mod tests {
         let mut entry = archive.by_index(0).unwrap();
         assert_eq!(entry.size(), 100);
         let mut budget = ZipBudget::new(50 * 1024 * 1024);
-        assert_eq!(budget.read(&mut entry, 1024 * 1024).unwrap(), None);
-        assert_eq!(budget.left, 49 * 1024 * 1024 - 1, "read 1 MB + 1 byte");
+        // Since zip 9.0.5 the crate stops at the stated size itself; either
+        // way no more than the entry limit is read.
+        match budget.read(&mut entry, 1024 * 1024) {
+            Ok(content) => assert_eq!(content, None),
+            Err(ImportError::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::InvalidData),
+            Err(e) => panic!("{e}"),
+        }
+        assert!(
+            budget.left >= 49 * 1024 * 1024 - 1,
+            "read at most 1 MB + 1 byte"
+        );
     }
 }

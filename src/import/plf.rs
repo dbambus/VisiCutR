@@ -330,7 +330,15 @@ pub fn read_parametric_svg(path: &Path) -> Result<Imported, ImportError> {
     parameter_file.push(".parameters");
     let parameter_file = PathBuf::from(parameter_file);
     if parameter_file.is_file() {
-        match std::fs::read_to_string(&parameter_file)
+        // Read one byte more than allowed; `read_saved_values` refuses it.
+        let read = std::fs::File::open(&parameter_file).and_then(|file| {
+            use std::io::Read;
+            let mut text = String::new();
+            file.take(parametric::MAX_SAVED_VALUES_BYTES as u64 + 1)
+                .read_to_string(&mut text)
+                .map(|_| text)
+        });
+        match read
             .map_err(ImportError::from)
             .and_then(|text| parametric::read_saved_values(&text))
         {
@@ -421,8 +429,22 @@ fn sanitize(name: &str) -> String {
     let cleaned = cleaned.trim_start_matches('.').trim();
     let count = cleaned.chars().count();
     let cleaned: String = cleaned.chars().skip(count.saturating_sub(120)).collect();
+    // Windows ignores trailing dots and spaces and opens devices for names
+    // like `COM1.svg` or `nul`.
+    let cleaned = cleaned.trim_end_matches(['.', ' ']).to_string();
+    let stem = cleaned.split('.').next().unwrap_or_default().trim_end();
+    let device = matches!(
+        stem.to_ascii_uppercase().as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || (stem.len() == 4
+        && stem
+            .get(..3)
+            .is_some_and(|p| p.eq_ignore_ascii_case("COM") || p.eq_ignore_ascii_case("LPT"))
+        && stem.as_bytes()[3].is_ascii_digit());
     if cleaned.is_empty() {
         "teil".into()
+    } else if device {
+        format!("_{cleaned}")
     } else {
         cleaned
     }
@@ -1432,6 +1454,13 @@ mod tests {
         assert_eq!(split_index("a.svg"), (0, "a.svg"));
         assert_eq!(sanitize("../../etc/pass wd"), "pass wd");
         assert_eq!(sanitize(".."), "teil");
+        // Windows device names.
+        assert_eq!(sanitize("COM1.svg"), "_COM1.svg");
+        assert_eq!(sanitize("nul"), "_nul");
+        assert_eq!(sanitize("lpt9.tar.svg"), "_lpt9.tar.svg");
+        assert_eq!(sanitize("bild. . "), "bild");
+        assert_eq!(sanitize("COM10.svg"), "COM10.svg");
+        assert_eq!(sanitize("éé.svg"), "éé.svg");
     }
 }
 

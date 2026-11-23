@@ -451,7 +451,7 @@ impl JobStep {
 }
 
 impl ParameterSet {
-    fn validate(&self) -> Result<(), ProjectError> {
+    pub fn validate(&self) -> Result<(), ProjectError> {
         if !self.power_percent.is_finite()
             || !(0.0..=100.0).contains(&self.power_percent)
             || !self.speed_percent.is_finite()
@@ -947,7 +947,7 @@ impl Project {
         }
         self.raster.validate()?;
         self.machine.validate()?;
-        if self.steps.len() > 64 {
+        if self.steps.len() > MAX_STEPS {
             return Err(ProjectError::TooManySteps);
         }
         let count = if self.steps.iter().any(|s| s.filters.is_none() && !s.rest) {
@@ -984,8 +984,82 @@ impl Project {
                 return Err(ProjectError::ObjectMissing);
             }
         }
+        // The other parts the same way, so that a damaged value surfaces on
+        // opening and not only when sending.
+        for part in &self.parts {
+            validate_part_values(part)?;
+        }
         Ok(())
     }
+}
+
+impl Project {
+    /// Image folders of parametric parts that come from the project file
+    /// and are no local folder (network share, drive root) are replaced by
+    /// `folder`, the folder of the project file.
+    pub fn replace_unsafe_image_folders(&mut self, folder: &std::path::Path) {
+        let parametric = self
+            .part_parametric
+            .iter_mut()
+            .chain(self.parts.iter_mut().filter_map(|p| p.parametric.as_mut()));
+        for parametric in parametric {
+            if !crate::svg_import::is_drawing_folder(std::path::Path::new(&parametric.base_dir)) {
+                parametric.base_dir = folder.display().to_string();
+            }
+        }
+    }
+}
+
+/// Most processing steps of a part (the LTT job holds 64).
+pub const MAX_STEPS: usize = 64;
+
+/// Sizes, position and laser values of a part that is not active.
+fn validate_part_values(part: &Part) -> Result<(), ProjectError> {
+    for (error, value) in [
+        (ProjectError::MotifWidth, part.width_mm),
+        (ProjectError::MotifHeight, part.height_mm),
+    ] {
+        if !value.is_finite() || value <= 0.0 || value > 100_000.0 {
+            return Err(error);
+        }
+    }
+    if !part.x_mm.is_finite() || !part.y_mm.is_finite() {
+        return Err(ProjectError::Position);
+    }
+    if !part.power_percent.is_finite() || !(0.0..=100.0).contains(&part.power_percent) {
+        return Err(ProjectError::Power);
+    }
+    if !part.speed_percent.is_finite() || !(0.1..=100.0).contains(&part.speed_percent) {
+        return Err(ProjectError::Speed);
+    }
+    if !(1..=100).contains(&part.passes) {
+        return Err(ProjectError::Passes);
+    }
+    part.raster.validate()?;
+    if part.steps.len() > MAX_STEPS {
+        return Err(ProjectError::TooManySteps);
+    }
+    for step in &part.steps {
+        if step.additional.len() > 15 {
+            return Err(ProjectError::TooManyParameterSets);
+        }
+        for set in step.parameters() {
+            set.validate()?;
+        }
+        step.raster.validate()?;
+        if !(-50..=50).contains(&step.engrave_shift_px) {
+            return Err(ProjectError::ExtraShift);
+        }
+        for filter in step
+            .filters
+            .iter()
+            .flatten()
+            .chain(part.ignore_filters.iter().flatten())
+        {
+            filter.validate()?;
+        }
+    }
+    Ok(())
 }
 
 /// Bed position (mm) of the drawing of a part placed at `x`/`y` with the
@@ -1048,6 +1122,47 @@ mod tests {
         p.x_mm = -10.1;
         assert!(p.validate().is_err());
     }
+    #[test]
+    fn image_folders_from_project_files_are_local() {
+        let mut p = project();
+        let parametric = |dir: &str| Parametric {
+            template: String::new(),
+            psvg: false,
+            base_dir: dir.into(),
+            values: Vec::new(),
+            placement: None,
+        };
+        p.part_parametric = Some(parametric(r"\\attacker.example\s"));
+        let mut part = p.active();
+        part.parametric = Some(parametric("/"));
+        p.parts.push(part.clone());
+        part.parametric = Some(parametric("/home/user/zeichnungen"));
+        p.parts.push(part);
+        p.replace_unsafe_image_folders(std::path::Path::new("/projekte"));
+        assert_eq!(p.part_parametric.as_ref().unwrap().base_dir, "/projekte");
+        assert_eq!(
+            p.parts[0].parametric.as_ref().unwrap().base_dir,
+            "/projekte"
+        );
+        assert_eq!(
+            p.parts[1].parametric.as_ref().unwrap().base_dir,
+            "/home/user/zeichnungen"
+        );
+    }
+
+    #[test]
+    fn other_parts_are_checked_on_opening() {
+        let mut p = project();
+        let mut part = p.active();
+        part.width_mm = 10.0;
+        part.height_mm = 10.0;
+        p.add_part(part.clone());
+        assert!(p.validate_document().is_ok());
+        // `parts` holds the parts that are not active.
+        p.parts[0].speed_percent = 0.0;
+        assert!(matches!(p.validate_document(), Err(ProjectError::Speed)));
+    }
+
     #[test]
     fn rejects_unknown_version_and_invalid_parameters() {
         let mut p = project();

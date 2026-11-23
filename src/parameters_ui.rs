@@ -15,9 +15,14 @@ const LIMIT: f64 = 1.0e6;
 
 /// Felder des aktiven Teils; berechnet sie neu, sobald sich Vorlage oder
 /// Werte ändern.
+type Rendered = Result<Vec<Parameter>, String>;
+
 #[derive(Default)]
 pub struct ParametersUi {
-    cached: Option<(Parametric, Result<Vec<Parameter>, String>)>,
+    cached: Option<(Parametric, Rendered)>,
+    /// Vorlage, deren Parameter im Hintergrund ermittelt werden (Skripte
+    /// laufen bis zu 5 s; das Fenster soll dabei nicht stehen).
+    pending: Option<(Parametric, std::sync::mpsc::Receiver<Rendered>)>,
 }
 
 impl ParametersUi {
@@ -29,10 +34,31 @@ impl ParametersUi {
         parametric: &Parametric,
     ) -> Option<Vec<(String, ParameterValue)>> {
         if self.cached.as_ref().is_none_or(|(p, _)| p != parametric) {
-            let parameters = visicut_core::import::render_parametric(parametric)
-                .map(|(_, parameters)| parameters)
-                .map_err(String::from);
-            self.cached = Some((parametric.clone(), parameters));
+            let running = self.pending.as_ref().is_some_and(|(p, _)| p == parametric);
+            if !running {
+                let job = parametric.clone();
+                let (sender, receiver) = std::sync::mpsc::channel();
+                let repaint = ui.ctx().clone();
+                std::thread::spawn(move || {
+                    let parameters = visicut_core::import::render_parametric(&job)
+                        .map(|(_, parameters)| parameters)
+                        .map_err(String::from);
+                    let _ = sender.send(parameters);
+                    repaint.request_repaint();
+                });
+                self.pending = Some((parametric.clone(), receiver));
+            }
+            let finished = self.pending.as_ref().and_then(|(_, r)| r.try_recv().ok());
+            match finished {
+                Some(parameters) => {
+                    self.cached = Some((parametric.clone(), parameters));
+                    self.pending = None;
+                }
+                None => {
+                    ui.spinner();
+                    return None;
+                }
+            }
         }
         let (_, parameters) = self.cached.as_mut()?;
         let parameters = match parameters {
@@ -56,6 +82,7 @@ impl ParametersUi {
     /// Verwirft eingegebene Werte, etwa wenn die Grafik nicht entstand.
     pub fn reset(&mut self) {
         self.cached = None;
+        self.pending = None;
     }
 }
 

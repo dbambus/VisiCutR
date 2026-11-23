@@ -4,8 +4,9 @@
 //! inflates streams without a size limit). A failed allocation aborts the
 //! whole process, so once the application names its own executable
 //! ([`use_executable`]) these jobs run in `visicutr --import-worker`, which is
-//! killed after the time limit and, on Linux, may not use more than
-//! [`MEMORY`]. A hostile file can then only end that process.
+//! killed after the time limit and may not use more than [`MEMORY`]
+//! ([`WorkerAllocator`] on all platforms, on Linux also the address space).
+//! A hostile file can then only end that process.
 //!
 //! Without an executable (unit tests) the jobs run in this process.
 use super::ImportError;
@@ -18,9 +19,108 @@ use std::time::{Duration, Instant};
 
 /// Command-line flag of the worker process.
 pub const FLAG: &str = "--import-worker";
-/// Address space of the worker process (Linux).
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+/// Memory of the worker process: heap on all platforms
+/// ([`WorkerAllocator`]), address space on Linux.
 pub const MEMORY: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Heap bytes the process may hold; `usize::MAX`: not counted (the
+/// application itself).
+static HEAP_LIMIT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(usize::MAX);
+/// Heap bytes allocated since the limit was set (negative after freeing
+/// memory allocated before).
+static HEAP_USED: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+/// Global allocator of the application. In the worker process ([`serve`])
+/// it refuses allocations beyond [`MEMORY`]; the failed allocation ends the
+/// worker instead of filling the computer's memory (Windows and macOS have
+/// no address-space limit like Linux). Without a limit it only forwards to
+/// the system allocator.
+pub struct WorkerAllocator;
+
+impl WorkerAllocator {
+    fn reserve(size: usize) -> bool {
+        use std::sync::atomic::Ordering::Relaxed;
+        let limit = HEAP_LIMIT.load(Relaxed);
+        if limit == usize::MAX {
+            return true;
+        }
+        let size = size as isize;
+        let used = HEAP_USED.fetch_add(size, Relaxed) + size;
+        if used > limit as isize {
+            HEAP_USED.fetch_sub(size, Relaxed);
+            return false;
+        }
+        true
+    }
+
+    fn release(size: usize) {
+        use std::sync::atomic::Ordering::Relaxed;
+        if HEAP_LIMIT.load(Relaxed) != usize::MAX {
+            HEAP_USED.fetch_sub(size as isize, Relaxed);
+        }
+    }
+}
+
+// SAFETY: every call is forwarded to the system allocator with the same
+// layout; only the bookkeeping and the refusal (null) are added.
+unsafe impl std::alloc::GlobalAlloc for WorkerAllocator {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        if !Self::reserve(layout.size()) {
+            return std::ptr::null_mut();
+        }
+        // SAFETY: as documented for `GlobalAlloc::alloc`.
+        let pointer = unsafe { std::alloc::System.alloc(layout) };
+        if pointer.is_null() {
+            Self::release(layout.size());
+        }
+        pointer
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: std::alloc::Layout) -> *mut u8 {
+        if !Self::reserve(layout.size()) {
+            return std::ptr::null_mut();
+        }
+        // SAFETY: as documented for `GlobalAlloc::alloc_zeroed`.
+        let pointer = unsafe { std::alloc::System.alloc_zeroed(layout) };
+        if pointer.is_null() {
+            Self::release(layout.size());
+        }
+        pointer
+    }
+
+    unsafe fn dealloc(&self, pointer: *mut u8, layout: std::alloc::Layout) {
+        // SAFETY: `pointer` was allocated by the system allocator with `layout`.
+        unsafe { std::alloc::System.dealloc(pointer, layout) };
+        Self::release(layout.size());
+    }
+
+    unsafe fn realloc(
+        &self,
+        pointer: *mut u8,
+        layout: std::alloc::Layout,
+        new_size: usize,
+    ) -> *mut u8 {
+        let old = layout.size();
+        if new_size > old && !Self::reserve(new_size - old) {
+            return std::ptr::null_mut();
+        }
+        // SAFETY: as documented for `GlobalAlloc::realloc`.
+        let moved = unsafe { std::alloc::System.realloc(pointer, layout, new_size) };
+        match (moved.is_null(), new_size > old) {
+            (true, true) => Self::release(new_size - old),
+            (false, false) => Self::release(old - new_size),
+            _ => {}
+        }
+        moved
+    }
+}
+
+/// Limits the heap of this process to `bytes` (see [`WorkerAllocator`]).
+fn limit_heap(bytes: u64) {
+    use std::sync::atomic::Ordering::Relaxed;
+    HEAP_USED.store(0, Relaxed);
+    HEAP_LIMIT.store(usize::try_from(bytes).unwrap_or(usize::MAX - 1), Relaxed);
+}
 /// Time for one PDF page (as for Ghostscript).
 pub(super) const PDF_TIME_LIMIT: Duration = Duration::from_secs(60);
 /// Largest answer of the worker (a drawing or an SVG of at most 20 MB).
@@ -102,6 +202,7 @@ impl Job {
 /// Entry point of the worker process: reads one job from stdin, writes the
 /// result to stdout. Returns the exit code.
 pub fn serve() -> i32 {
+    limit_heap(MEMORY);
     let mut input = Vec::new();
     if std::io::stdin().read_to_end(&mut input).is_err() {
         return 2;
@@ -110,6 +211,12 @@ pub fn serve() -> i32 {
         return 2;
     };
     drop(input);
+    // Ends on its own, even if the application died and nobody kills it.
+    let lifetime = Duration::from_millis(limit_ms) + 2 * GRACE;
+    std::thread::spawn(move || {
+        std::thread::sleep(lifetime);
+        std::process::exit(3);
+    });
     let result = job
         .run_here(Duration::from_millis(limit_ms))
         .map_err(String::from);

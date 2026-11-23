@@ -11,13 +11,15 @@ use visicut_core::{
 pub struct VectorizeUi {
     open: bool,
     name: String,
-    bitmap: Option<Bitmap>,
+    bitmap: Option<std::sync::Arc<Bitmap>>,
     threshold: u8,
     invert: bool,
     width_mm: f64,
     /// Ergebnis für die Optionen in `result_for`; wird bei jeder Änderung neu berechnet.
     result: Option<Result<Vectorized, String>>,
     result_for: Option<Options>,
+    /// Laufende Berechnung im Hintergrund (große Bilder dauern).
+    computing: Option<std::sync::mpsc::Receiver<Result<Vectorized, String>>>,
 }
 
 impl Default for VectorizeUi {
@@ -31,6 +33,7 @@ impl Default for VectorizeUi {
             width_mm: 0.0,
             result: None,
             result_for: None,
+            computing: None,
         }
     }
 }
@@ -49,7 +52,7 @@ impl VectorizeUi {
                 // Standardgröße wie beim Bildimport: 72 DPI.
                 let (width, _) = bitmap.dimensions();
                 self.width_mm = width as f64 * 25.4 / 72.0;
-                self.bitmap = Some(bitmap);
+                self.bitmap = Some(std::sync::Arc::new(bitmap));
                 self.name = name;
                 self.result = None;
                 self.result_for = None;
@@ -79,12 +82,30 @@ impl VectorizeUi {
             return None;
         }
         let options = self.options();
-        if self.result_for != Some(options) {
-            self.result = self
-                .bitmap
-                .as_ref()
-                .map(|bitmap| bitmap.vectorize(&options).map_err(String::from));
+        if self.result_for != Some(options)
+            && let Some(bitmap) = self.bitmap.clone()
+        {
+            // Im Hintergrund, damit das Fenster beim Ziehen am Schwellwert
+            // nicht steht; ein älteres Ergebnis wird verworfen.
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let repaint = ctx.clone();
+            std::thread::spawn(move || {
+                let _ = sender.send(bitmap.vectorize(&options).map_err(String::from));
+                repaint.request_repaint();
+            });
+            self.computing = Some(receiver);
+            self.result = None;
             self.result_for = Some(options);
+        }
+        if let Some(receiver) = &self.computing {
+            match receiver.try_recv() {
+                Ok(result) => {
+                    self.result = Some(result);
+                    self.computing = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.computing = None,
+            }
         }
         let mut open = self.open;
         let mut apply = false;
@@ -117,8 +138,8 @@ impl VectorizeUi {
                         ui.label(tr!(
                             "{count} Pfade · {width} × {height} mm",
                             count = result.paths,
-                            width = format!("{:.1}", result.width_mm),
-                            height = format!("{:.1}", result.height_mm)
+                            width = visicut_core::i18n::number(result.width_mm, 1),
+                            height = visicut_core::i18n::number(result.height_mm, 1)
                         ));
                     }
                     Some(Ok(_)) => {
@@ -126,6 +147,9 @@ impl VectorizeUi {
                     }
                     Some(Err(error)) => {
                         ui.colored_label(egui::Color32::from_rgb(170, 40, 40), error);
+                    }
+                    None if self.computing.is_some() => {
+                        ui.spinner();
                     }
                     None => {}
                 }

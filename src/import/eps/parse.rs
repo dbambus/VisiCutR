@@ -7,6 +7,9 @@ use std::rc::Rc;
 
 /// Deepest allowed nesting of `{ }` procedures in the source.
 const MAX_NESTING: usize = 100;
+/// Objects of a whole program. Each takes 24 bytes and names a string of
+/// their own: 25 MB of single-letter names held 1.5 to 2 GB.
+pub(super) const MAX_OBJECTS: usize = 2_000_000;
 
 /// A PostScript object as far as the interpreter needs it.
 #[derive(Clone, Debug)]
@@ -30,6 +33,7 @@ pub(super) fn parse(src: &[u8]) -> Result<Rc<[Obj]>, EpsError> {
     let mut root: Vec<Obj> = Vec::new();
     // Procedures that are still open, innermost last.
     let mut open: Vec<Vec<Obj>> = Vec::new();
+    let mut objects = 0usize;
     let mut i = 0;
     while i < src.len() {
         let byte = src[i];
@@ -86,6 +90,10 @@ pub(super) fn parse(src: &[u8]) -> Result<Rc<[Obj]>, EpsError> {
                 (token_object(&text), end)
             }
         };
+        objects += 1;
+        if objects > MAX_OBJECTS {
+            return Err(EpsError::TooManyObjects);
+        }
         match open.last_mut() {
             Some(body) => body.push(obj),
             None => root.push(obj),

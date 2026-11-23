@@ -51,6 +51,9 @@ pub enum ImportError {
     PostScriptUnreadable(io::Error),
     /// The built-in interpreter failed and Ghostscript is not installed.
     NeedsGhostscript(EpsError),
+    /// Only Ghostscript could read the file, but it is not allowed for
+    /// PostScript (setting of the application).
+    GhostscriptNotAllowed(EpsError),
     NotPdf,
     PdfEncrypted,
     PdfDamaged,
@@ -189,6 +192,12 @@ impl fmt::Display for ImportError {
                 error = error
             ),
             Self::NeedsGhostscript(reason) => format!("{reason}. {}", ghostscript_missing()),
+            Self::GhostscriptNotAllowed(reason) => format!(
+                "{reason}. {}",
+                tr(
+                    "Nur Ghostscript könnte die Datei lesen; das lässt sich in den Einstellungen unter „Import“ erlauben."
+                )
+            ),
             Self::NotPdf => tr("Datei ist keine gültige PDF-Datei").to_string(),
             Self::PdfEncrypted => tr("PDF ist verschlüsselt oder passwortgeschützt; \
                 bitte eine ungeschützte Kopie speichern")

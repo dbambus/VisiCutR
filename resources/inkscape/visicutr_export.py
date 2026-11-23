@@ -142,9 +142,17 @@ def inkscape_version(inkscape):
     return (int(match.group(1)), int(match.group(2))) if match else (1, 2)
 
 
+SAFE_ID = re.compile(r"^[A-Za-z0-9_.:-]+$")
+
+
 def inkscape_command(inkscape, version, path, ids):
     """Inkscape-Aufruf, der nur die Auswahl behält und Texte, Klone und Formen
     in Pfade umwandelt (Ablauf wie in Java-VisiCut)."""
+    # Ein ";" oder "," in einer ID würde weitere Aktionen anhängen.
+    safe = [i for i in ids if SAFE_ID.match(i)]
+    if ids and not safe:
+        raise ValueError("Die Auswahl hat keine verwendbaren Element-IDs")
+    ids = safe
     if version >= (1, 2):
         actions = ["unlock-all"]
         actions.append("select-by-id:" + ",".join(ids) if ids else "select-all:all")

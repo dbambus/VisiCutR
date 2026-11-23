@@ -1,0 +1,1 @@
+error: Motiv ist höher als der Umfang des Werkstücks (314,2 mm bei 100.0 mm Durchmesser)

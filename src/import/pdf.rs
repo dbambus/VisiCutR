@@ -35,6 +35,20 @@ pub fn read_pdf(path: &Path) -> Result<Imported, ImportError> {
 /// file goes to Ghostscript; without Ghostscript the message names the
 /// operator that stopped the interpreter.
 pub fn read_postscript(path: &Path) -> Result<Imported, ImportError> {
+    read_postscript_with(path)
+}
+
+/// Whether PostScript the own interpreter cannot read may go to
+/// Ghostscript. The application asks for it in its settings; the library
+/// (tests, tools) allows it.
+static GHOSTSCRIPT_FOR_POSTSCRIPT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
+pub fn allow_ghostscript_for_postscript(allowed: bool) {
+    GHOSTSCRIPT_FOR_POSTSCRIPT.store(allowed, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn read_postscript_with(path: &Path) -> Result<Imported, ImportError> {
     let data = std::fs::read(path).map_err(ImportError::PostScriptUnreadable)?;
     match eps::interpret(&data) {
         Ok(imported) => Ok(Imported {
@@ -42,6 +56,11 @@ pub fn read_postscript(path: &Path) -> Result<Imported, ImportError> {
             ..imported
         }),
         Err(reason) => {
+            // Ghostscript had ways around -dSAFER (CVE-2023-36664,
+            // CVE-2024-29510): only with the user's consent.
+            if !GHOSTSCRIPT_FOR_POSTSCRIPT.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(ImportError::GhostscriptNotAllowed(reason));
+            }
             if ghostscript::find().is_none() {
                 return Err(ImportError::NeedsGhostscript(reason));
             }

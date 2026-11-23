@@ -123,9 +123,14 @@ fn words(line: &str, number: usize, warnings: &mut Vec<String>) -> Vec<(char, f6
 impl Converter {
     fn line(&mut self, number: usize, line: &str) {
         let (mut x, mut y, mut i, mut j, mut r) = (None, None, None, None, None);
+        // Non-modal commands of this line: dwell (G4) and set position (G92).
+        let mut dwell = false;
+        let mut set_position = false;
         for (letter, value) in words(line, number, &mut self.warnings) {
             match letter {
                 'G' => match (value * 10.0).round() as i64 {
+                    40 => dwell = true,
+                    920 => set_position = true,
                     0 | 10 | 20 | 30 => self.mode = (value.round()) as u8,
                     200 => self.unit_mm = INCH_MM,
                     210 => self.unit_mm = 1.0,
@@ -142,6 +147,18 @@ impl Converter {
                 'R' => r = Some(value),
                 _ => {}
             }
+        }
+        // `G4 X2` waits two seconds; it is no move.
+        if dwell {
+            return;
+        }
+        if set_position {
+            // The current point gets new coordinates; nothing moves.
+            let unit = self.unit_mm;
+            let (px, py) = self.position;
+            self.position = (x.map_or(px, |v| v * unit), y.map_or(py, |v| v * unit));
+            self.pen = false;
+            return;
         }
         let arc = matches!(self.mode, 2 | 3);
         if x.is_none() && y.is_none() && !(arc && (i.is_some() || j.is_some())) {
@@ -411,6 +428,18 @@ mod tests {
         );
         let (width, height) = size(gcode);
         assert!((width - 30.0).abs() < 0.01 && (height - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn dwell_is_no_move_and_g92_sets_the_position() {
+        // `G4 X2` waits; it must not draw a line to X=2.
+        let result = contours("G1 X10 Y0\nG4 X2\nG1 X20 Y0\n", (0.0, 0.0));
+        assert_eq!(result.len(), 1);
+        assert_points(&result[0], &[[0.0, 0.0], [10.0, 0.0], [20.0, 0.0]]);
+        // After G92 X0 the current point (10, 0) counts as 0.
+        let result = contours("G1 X10 Y0\nG92 X0 Y0\nG1 X5 Y0\n", (0.0, 0.0));
+        assert_eq!(result.len(), 2, "{result:?}");
+        assert_points(&result[1], &[[0.0, 0.0], [5.0, 0.0]]);
     }
 
     #[test]

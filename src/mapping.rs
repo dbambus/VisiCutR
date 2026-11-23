@@ -633,10 +633,12 @@ impl Templates {
 
     pub fn save(&self, dir: &Path) -> Result<(), MappingError> {
         std::fs::create_dir_all(dir)?;
-        let temporary = dir.join(format!("{TEMPLATES_FILE}.tmp"));
         let json = serde_json::to_string_pretty(self).map_err(MappingError::Json)?;
-        std::fs::write(&temporary, json)?;
-        Ok(std::fs::rename(&temporary, dir.join(TEMPLATES_FILE))?)
+        Ok(crate::atomic::write(
+            &dir.join(TEMPLATES_FILE),
+            json.as_bytes(),
+            false,
+        )?)
     }
 
     /// Built-in templates followed by the own ones.

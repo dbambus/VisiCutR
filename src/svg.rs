@@ -9,6 +9,8 @@ pub enum SvgError {
     /// Nested deeper than [`MAX_NESTING`].
     TooDeep,
     TooLarge,
+    /// Entity declarations that carry markup or expand too far.
+    Entities,
     Unreadable(usvg::Error),
     PreviewTooLarge,
 }
@@ -21,6 +23,10 @@ impl fmt::Display for SvgError {
                 depth = MAX_NESTING
             ),
             Self::TooLarge => tr("SVG ist größer als 20 MB").to_string(),
+            Self::Entities => {
+                tr("SVG enthält Entity-Definitionen mit Elementen oder zu großer Ausdehnung")
+                    .to_string()
+            }
             Self::Unreadable(error) => {
                 tr!("SVG konnte nicht gelesen werden: {error}", error = error)
             }
@@ -48,11 +54,150 @@ pub const MAX_NESTING: usize = 256;
 /// Refuses XML nested deeper than [`MAX_NESTING`]. Counts start and end
 /// tags without building a tree (and without recursion), skipping comments,
 /// CDATA, processing instructions, declarations and quoted attribute values.
+///
+/// Entities are checked too, since roxmltree parses their values as content:
+/// elements inside an entity escape the count above, and many references to
+/// a large entity are not caught by roxmltree's own limits.
 pub fn check_nesting(text: &str) -> Result<(), SvgError> {
+    check_entities(text)?;
     if nesting_depth(text) > MAX_NESTING {
         return Err(SvgError::TooDeep);
     }
     Ok(())
+}
+
+/// Most text all entity references of a document may expand to.
+pub const MAX_ENTITY_EXPANSION: usize = 20 * 1024 * 1024;
+
+/// Internal entities of the DOCTYPE may hold text (Illustrator declares
+/// namespace URIs this way) but no markup, no parameter entities, and all
+/// references together expand to at most [`MAX_ENTITY_EXPANSION`].
+fn check_entities(text: &str) -> Result<(), SvgError> {
+    let Some((entities, body_start)) = entity_declarations(text)? else {
+        return Ok(());
+    };
+    if entities.is_empty() {
+        return Ok(());
+    }
+    // Expanded length of each entity; references nest at most 8 deep.
+    fn expanded(name: &str, entities: &[(&str, &str)], depth: usize) -> Result<usize, SvgError> {
+        let Some((_, value)) = entities.iter().find(|(n, _)| *n == name) else {
+            return Ok(0);
+        };
+        if depth > 8 {
+            return Err(SvgError::Entities);
+        }
+        let mut total = value.len();
+        for reference in references(value) {
+            let inner = expanded(reference, entities, depth + 1)?;
+            total = total
+                .checked_add(inner)
+                .filter(|t| *t <= MAX_ENTITY_EXPANSION)
+                .ok_or(SvgError::Entities)?;
+        }
+        Ok(total)
+    }
+    let mut lengths = Vec::with_capacity(entities.len());
+    for (name, _) in &entities {
+        lengths.push((*name, expanded(name, &entities, 0)?));
+    }
+    let mut total = 0usize;
+    for reference in references(&text[body_start..]) {
+        if let Some((_, length)) = lengths.iter().find(|(n, _)| *n == reference) {
+            total = total
+                .checked_add(*length)
+                .filter(|t| *t <= MAX_ENTITY_EXPANSION)
+                .ok_or(SvgError::Entities)?;
+        }
+    }
+    Ok(())
+}
+
+/// Names of general entity references (`&name;`, not `&#…;`) in `text`.
+fn references(text: &str) -> impl Iterator<Item = &str> {
+    text.split('&').skip(1).filter_map(|rest| {
+        let name = &rest[..rest.find(';')?];
+        let valid = !name.is_empty()
+            && !name.starts_with('#')
+            && name
+                .chars()
+                .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | ':'));
+        valid.then_some(name)
+    })
+}
+
+/// The internal entities `(name, value)` of the DOCTYPE and where the
+/// document after it starts; `None` without an internal subset. Values with
+/// markup and parameter entities are refused.
+#[allow(clippy::type_complexity)]
+fn entity_declarations(text: &str) -> Result<Option<(Vec<(&str, &str)>, usize)>, SvgError> {
+    let Some(doctype) = text.find("<!DOCTYPE") else {
+        return Ok(None);
+    };
+    let bytes = text.as_bytes();
+    // The internal subset starts at '[' before the DOCTYPE's '>'.
+    let mut i = doctype + 9;
+    let mut quote = None;
+    loop {
+        match (quote, bytes.get(i)) {
+            (_, None) => return Ok(None),
+            (None, Some(b'"' | b'\'')) => quote = Some(bytes[i]),
+            (Some(q), Some(c)) if *c == q => quote = None,
+            (None, Some(b'>')) => return Ok(None),
+            (None, Some(b'[')) => break,
+            _ => {}
+        }
+        i += 1;
+    }
+    i += 1;
+    let mut entities = Vec::new();
+    // End of a declaration: the '>' outside quotes.
+    let declaration_end = |from: usize| {
+        let mut quote = None;
+        for (offset, c) in bytes[from..].iter().enumerate() {
+            match (quote, c) {
+                (None, b'"' | b'\'') => quote = Some(*c),
+                (Some(q), c) if *c == q => quote = None,
+                (None, b'>') => return from + offset + 1,
+                _ => {}
+            }
+        }
+        bytes.len()
+    };
+    while i < bytes.len() {
+        let rest = &text[i..];
+        if rest.starts_with(']') {
+            return Ok(Some((entities, declaration_end(i))));
+        } else if rest.starts_with("<!--") {
+            i = rest.find("-->").map_or(bytes.len(), |p| i + p + 3);
+        } else if let Some(declaration) = rest.strip_prefix("<!ENTITY") {
+            let end = declaration_end(i);
+            let declaration = declaration.trim_start();
+            if declaration.starts_with('%') {
+                return Err(SvgError::Entities);
+            }
+            let name_end = declaration
+                .find(char::is_whitespace)
+                .unwrap_or(declaration.len());
+            let name = &declaration[..name_end];
+            let value = declaration[name_end..].trim_start();
+            if let Some(q) = value.chars().next().filter(|c| matches!(c, '"' | '\'')) {
+                let close = value[1..].find(q).ok_or(SvgError::Entities)?;
+                let value = &value[1..1 + close];
+                // `&#60;` turns into markup when the entity is declared.
+                if value.contains('<') || value.contains('%') || value.contains("&#") {
+                    return Err(SvgError::Entities);
+                }
+                entities.push((name, value));
+            }
+            i = end;
+        } else if rest.starts_with('<') {
+            i = declaration_end(i);
+        } else {
+            i += rest.chars().next().map_or(1, char::len_utf8);
+        }
+    }
+    Ok(Some((entities, bytes.len())))
 }
 
 fn nesting_depth(text: &str) -> usize {
@@ -289,12 +434,75 @@ pub fn options() -> usvg::Options<'static> {
     // Embedded projects must remain portable: external resources are not resolved.
     usvg::Options {
         image_href_resolver: usvg::ImageHrefResolver {
-            resolve_data: usvg::ImageHrefResolver::default_data_resolver(),
+            resolve_data: Box::new(|mime, data, _| resolve_data(mime, data)),
             resolve_string: Box::new(|_, _| None),
         },
         fontdb: fonts(),
         ..Default::default()
     }
+}
+
+/// Largest embedded raster image decoded (pixels). tiny-skia allocates the
+/// whole image from the size in its header: a PNG of a few bytes stating
+/// 100 000 × 100 000 pixels asked for 40 GB and ended the application.
+pub const MAX_IMAGE_PIXELS: u64 = 64_000_000;
+
+/// usvg's `data:` resolver with limits: raster images up to
+/// [`MAX_IMAGE_PIXELS`], SVG images unpacked to at most 20 MB and checked
+/// like any other drawing (usvg would unpack gzip without limit and parse
+/// the inner document unchecked).
+fn resolve_data(mime: &str, data: std::sync::Arc<Vec<u8>>) -> Option<usvg::ImageKind> {
+    use usvg::ImageKind;
+    let raster = |data: std::sync::Arc<Vec<u8>>| {
+        let size = imagesize::blob_size(&data).ok()?;
+        let pixels = (size.width as u64).checked_mul(size.height as u64)?;
+        let kind = match imagesize::image_type(&data).ok()? {
+            imagesize::ImageType::Jpeg => ImageKind::JPEG(data),
+            imagesize::ImageType::Png => ImageKind::PNG(data),
+            imagesize::ImageType::Gif => ImageKind::GIF(data),
+            imagesize::ImageType::Webp => ImageKind::WEBP(data),
+            _ => return None,
+        };
+        (pixels <= MAX_IMAGE_PIXELS).then_some(kind)
+    };
+    match mime {
+        "image/jpg" | "image/jpeg" | "image/png" | "image/gif" | "image/webp" => raster(data),
+        "image/svg+xml" => sub_svg(&data),
+        "text/plain" => raster(data.clone()).or_else(|| sub_svg(&data)),
+        _ => None,
+    }
+}
+
+/// An SVG image inside a drawing, without images of its own (like usvg).
+fn sub_svg(data: &[u8]) -> Option<usvg::ImageKind> {
+    const LIMIT: usize = 20 * 1024 * 1024;
+    let plain = if data.starts_with(&[0x1f, 0x8b]) {
+        use std::io::Read;
+        let mut plain = Vec::new();
+        flate2::read::GzDecoder::new(data)
+            .take(LIMIT as u64 + 1)
+            .read_to_end(&mut plain)
+            .ok()?;
+        plain
+    } else {
+        data.to_vec()
+    };
+    if plain.len() > LIMIT {
+        return None;
+    }
+    let text = std::str::from_utf8(&plain).ok()?;
+    check_nesting(text).ok()?;
+    let options = usvg::Options {
+        image_href_resolver: usvg::ImageHrefResolver {
+            resolve_data: Box::new(|_, _, _| None),
+            resolve_string: Box::new(|_, _| None),
+        },
+        fontdb: fonts(),
+        ..Default::default()
+    };
+    usvg::Tree::from_str(text, &options)
+        .ok()
+        .map(usvg::ImageKind::SVG)
 }
 
 /// Bounding box of the drawing without stroke widths as fractions of the
@@ -390,6 +598,88 @@ mod tests {
             super::render(&deep(100_000)),
             Err(super::SvgError::TooDeep)
         ));
+    }
+
+    #[test]
+    fn entities_with_elements_or_large_expansion_are_refused() {
+        use super::{SvgError, check_nesting};
+        // Illustrator: namespace URIs as entities.
+        let illustrator = r#"<?xml version="1.0"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "x.dtd" [
+  <!ENTITY ns_svg "http://www.w3.org/2000/svg">
+  <!-- a comment with ] and > -->
+  <!ENTITY ns_flows "http://ns.adobe.com/Flows/1.0/">
+]><svg xmlns="&ns_svg;" xmlns:f="&ns_flows;">&amp;&#38;</svg>"#;
+        assert!(check_nesting(illustrator).is_ok());
+        // Elements in an entity overflowed the stack in roxmltree.
+        let markup = format!(
+            r#"<!DOCTYPE svg [<!ENTITY a "{}{}">]><svg>&a;</svg>"#,
+            "<g>".repeat(1000),
+            "</g>".repeat(1000)
+        );
+        assert!(matches!(check_nesting(&markup), Err(SvgError::Entities)));
+        // 12 MB entity referenced 255 times from a second one.
+        let big = format!(
+            r#"<!DOCTYPE svg [<!ENTITY a "{}"><!ENTITY b "{}">]><svg x="&b;&b;"/>"#,
+            "x".repeat(12 * 1024 * 1024),
+            "&a;".repeat(255)
+        );
+        assert!(matches!(check_nesting(&big), Err(SvgError::Entities)));
+        let many = format!(
+            r#"<!DOCTYPE svg [<!ENTITY a "{}">]><svg x="{}"/>"#,
+            "x".repeat(1024 * 1024),
+            "&a;".repeat(21)
+        );
+        assert!(matches!(check_nesting(&many), Err(SvgError::Entities)));
+        let escaped = r#"<!DOCTYPE svg [<!ENTITY a "&#60;g>&#60;/g>">]><svg>&a;</svg>"#;
+        assert!(matches!(check_nesting(escaped), Err(SvgError::Entities)));
+        let parameter = r#"<!DOCTYPE svg [<!ENTITY % p "<!ENTITY a 'x'>"> %p;]><svg/>"#;
+        assert!(matches!(check_nesting(parameter), Err(SvgError::Entities)));
+    }
+
+    #[test]
+    fn embedded_images_are_checked_before_decoding() {
+        use base64::Engine;
+        let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+        let image = |mime: &str, data: &[u8]| {
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><image width="10" height="10" href="data:{mime};base64,{}"/></svg>"#,
+                encode(data)
+            )
+        };
+        let images = |source: &str| {
+            let tree = usvg::Tree::from_str(source, &super::options()).unwrap();
+            tree.root().children().len()
+        };
+        // A real PNG is drawn.
+        let mut pixmap = tiny_skia::Pixmap::new(2, 2).unwrap();
+        pixmap.fill(tiny_skia::Color::BLACK);
+        let png = pixmap.encode_png().unwrap();
+        assert_eq!(images(&image("image/png", &png)), 1);
+        // The same PNG claiming 100 000 × 100 000 pixels is not decoded.
+        let mut bomb = png.clone();
+        bomb[16..20].copy_from_slice(&100_000u32.to_be_bytes());
+        bomb[20..24].copy_from_slice(&100_000u32.to_be_bytes());
+        assert_eq!(images(&image("image/png", &bomb)), 0);
+        assert_eq!(images(&image("text/plain", &bomb)), 0);
+        // SVG images: deep nesting and gzip beyond 20 MB are refused.
+        let small = r#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1"/></svg>"#;
+        assert_eq!(images(&image("image/svg+xml", small.as_bytes())), 1);
+        let deep = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg">{}{}</svg>"#,
+            "<g>".repeat(100_000),
+            "</g>".repeat(100_000)
+        );
+        assert_eq!(images(&image("image/svg+xml", deep.as_bytes())), 0);
+        let gzip = |bytes: &[u8]| {
+            use std::io::Write;
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+            encoder.write_all(bytes).unwrap();
+            encoder.finish().unwrap()
+        };
+        assert_eq!(images(&image("image/svg+xml", &gzip(small.as_bytes()))), 1);
+        let padded = small.replace("<rect", &format!("<!--{}--><rect", " ".repeat(21 << 20)));
+        assert_eq!(images(&image("image/svg+xml", &gzip(padded.as_bytes()))), 0);
     }
 
     use super::*;

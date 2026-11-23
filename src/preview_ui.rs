@@ -113,6 +113,12 @@ impl PreviewUi {
     /// Requests the preview tab and prepares the job unless a current result exists.
     pub fn request(&mut self, ctx: &egui::Context, project: &Project, status: &mut String) {
         self.open = true;
+        self.start(ctx, project, status);
+    }
+
+    /// Prepares the job in the background unless a current result exists,
+    /// without showing the preview tab (export and send wait for it).
+    pub fn start(&mut self, ctx: &egui::Context, project: &Project, status: &mut String) {
         let current = self.key(project);
         match &self.state {
             State::Ready { fingerprint, .. } | State::Computing { fingerprint, .. }
@@ -214,6 +220,21 @@ impl PreviewUi {
             self.playback.pause();
         } else if self.playback.playing {
             ctx.request_repaint();
+        }
+    }
+
+    /// The prepared job for the current project, its error, or `None` while
+    /// none is ready.
+    pub fn prepared(&self, project: &Project) -> Option<Result<PreparedJob, String>> {
+        let current = self.key(project);
+        match &self.state {
+            State::Ready { fingerprint, ready } if *fingerprint == current => {
+                Some(Ok(ready.job.clone()))
+            }
+            State::Failed { fingerprint, error } if *fingerprint == current => {
+                Some(Err(error.clone()))
+            }
+            _ => None,
         }
     }
 
@@ -759,10 +780,13 @@ pub fn clock(seconds: f64) -> String {
     )
 }
 
-/// Number with German decimal comma, without trailing ",0".
+/// Number with the decimal separator of the language, without trailing 0.
 fn decimal(value: f64) -> String {
-    let text = format!("{value:.1}");
-    text.strip_suffix(".0").unwrap_or(&text).replace('.', ",")
+    let text = visicut_core::i18n::number(value, 1);
+    text.strip_suffix(".0")
+        .or_else(|| text.strip_suffix(",0"))
+        .unwrap_or(&text)
+        .to_string()
 }
 
 pub fn bytes(count: usize) -> String {

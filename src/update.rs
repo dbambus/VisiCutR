@@ -117,8 +117,10 @@ fn newer_release(json: &str, current: &str) -> Result<Option<Release>, UpdateErr
     }
     Ok(Some(Release {
         version: tag.trim_start_matches(['v', 'V']).to_string(),
+        // Only pages of the project's releases are opened in the browser.
         url: value["html_url"]
             .as_str()
+            .filter(|url| url.starts_with(&format!("{RELEASES_PAGE}/")) && !url.contains(".."))
             .unwrap_or(RELEASES_PAGE)
             .to_string(),
         notes: value["body"]
@@ -181,6 +183,11 @@ mod tests {
 
     #[test]
     fn reads_github_release_answers() {
+        let foreign = r#"{"tag_name":"v0.20.0","html_url":"https://example.com/visicutr.exe","draft":false,"prerelease":false}"#;
+        assert_eq!(
+            newer_release(foreign, "0.19.0").unwrap().unwrap().url,
+            RELEASES_PAGE
+        );
         let answer = r#"{"tag_name":"v0.20.0","html_url":"https://github.com/dbambus/VisiCutR/releases/tag/v0.20.0","body":"- Neu\n","draft":false,"prerelease":false}"#;
         let release = newer_release(answer, "0.19.0").unwrap().unwrap();
         assert_eq!(release.version, "0.20.0");

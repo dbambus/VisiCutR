@@ -48,7 +48,9 @@ esac
 
 mkdir -p "$(dirname "$desktop")" "$(dirname "$mime")" \
   "$(dirname "$icon_png")" "$(dirname "$icon_svg")"
-sed "s|@EXEC@|\"$exe\"|" "$here/desktop/visicutr.desktop" > "$desktop"
+# In Exec= steht % für Platzhalter wie %F; ein % im Pfad wird verdoppelt.
+exec_path=$(printf '%s' "$exe" | sed 's/%/%%/g')
+sed "s|@EXEC@|\"$exec_path\"|" "$here/desktop/visicutr.desktop" > "$desktop"
 cp "$here/desktop/visicutr-mime.xml" "$mime"
 cp "$here/desktop/visicutr.png" "$icon_png"
 cp "$here/desktop/visicutr.svg" "$icon_svg"

@@ -358,13 +358,21 @@ impl DeviceStore {
         for device in devices {
             match self.devices.iter_mut().find(|d| d.name == device.name) {
                 Some(existing) => {
-                    *existing = device;
+                    *existing = keep_local(existing, device);
                     replaced += 1;
                 }
                 None => self.devices.push(device),
             }
         }
         replaced
+    }
+
+    /// Backup of an unreadable device list (`devices.json.bak`), so that the
+    /// next save does not overwrite it; `None` if there is nothing to keep.
+    pub fn backup_damaged(dir: &Path) -> Option<PathBuf> {
+        let path = dir.join(STORE_FILE);
+        let backup = dir.join(format!("{STORE_FILE}.bak"));
+        std::fs::copy(&path, &backup).ok().map(|_| backup)
     }
 
     /// Kopie des Geräts `index` unter einem freien Namen am Ende der Liste;
@@ -394,6 +402,16 @@ impl DeviceStore {
             return Ok(Self::default());
         }
         let source = std::fs::read_to_string(&path)?;
+        // Lists of older versions were readable by everyone (camera passwords).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(&path)
+                && meta.permissions().mode() & 0o077 != 0
+            {
+                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            }
+        }
         let store: Self =
             serde_json::from_str(&source).map_err(|error| DeviceError::Damaged { path, error })?;
         store.validate()?;
@@ -413,26 +431,41 @@ impl DeviceStore {
         self.validate()?;
         std::fs::create_dir_all(dir)?;
         let json = serde_json::to_string_pretty(self).map_err(DeviceError::Json)?;
-        // Write atomically and durably so a crash or power cut never leaves a
-        // truncated device list, readable only by the user (camera passwords).
-        let temporary = dir.join(format!("{STORE_FILE}.{}.tmp", std::process::id()));
-        let written = (|| {
-            use std::io::Write;
-            let mut options = std::fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-            let mut file = options.open(&temporary)?;
-            file.write_all(json.as_bytes())?;
-            file.sync_all()?;
-            drop(file);
-            std::fs::rename(&temporary, dir.join(STORE_FILE))
-        })();
-        if written.is_err() {
-            let _ = std::fs::remove_file(&temporary);
-        }
-        Ok(written?)
+        // Readable only by the user (camera passwords).
+        Ok(crate::atomic::write(
+            &dir.join(STORE_FILE),
+            json.as_bytes(),
+            true,
+        )?)
     }
+}
+
+/// A FabLab device replacing a local one of the same name. What exports
+/// leave out or only this computer knows stays: camera login (same camera
+/// host), camera calibration and an own engrave shift calibration.
+fn keep_local(local: &LaserDevice, mut incoming: LaserDevice) -> LaserDevice {
+    let host = |url: &str| {
+        let rest = url.trim().split_once("://").map_or(url, |(_, rest)| rest);
+        rest.split(['/', '?', '#'])
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+    };
+    if incoming.camera_password.is_empty()
+        && incoming.camera_user.is_empty()
+        && host(&incoming.camera_url) == host(&local.camera_url)
+    {
+        incoming.camera_user = local.camera_user.clone();
+        incoming.camera_password = local.camera_password.clone();
+    }
+    if incoming.camera_calibration.is_none() {
+        incoming.camera_calibration = local.camera_calibration.clone();
+    }
+    let default_shift = MachineSettings::default().engrave_shift;
+    if incoming.machine.engrave_shift == default_shift {
+        incoming.machine.engrave_shift = local.machine.engrave_shift;
+    }
+    incoming
 }
 
 /// Per-user settings directory; `VISICUTR_CONFIG_DIR` overrides it (tests).
@@ -612,6 +645,19 @@ pub fn from_visicut_xml(source: &str) -> Result<LaserDevice, DeviceError> {
 /// Imports LTT devices from a VisiCut device XML, a `.vcsettings`/GitHub
 /// settings archive, or a VisiCutR device export (JSON).
 pub fn import_bytes(bytes: &[u8]) -> Result<Vec<LaserDevice>, DeviceError> {
+    let mut devices = import_unchecked(bytes)?;
+    // The camera is only fetched over HTTP; a path from someone else's
+    // settings would be opened as a file (on Windows a UNC share).
+    for device in &mut devices {
+        let url = device.camera_url.trim();
+        if !url.is_empty() && !url.starts_with("http://") && !url.starts_with("https://") {
+            device.camera_url.clear();
+        }
+    }
+    Ok(devices)
+}
+
+fn import_unchecked(bytes: &[u8]) -> Result<Vec<LaserDevice>, DeviceError> {
     if bytes.starts_with(b"PK") {
         return import_archive(bytes);
     }
@@ -788,6 +834,67 @@ pub fn download(url: &str) -> Result<Vec<LaserDevice>, DeviceError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn damaged_lists_are_kept_and_old_ones_made_private() {
+        let dir = std::env::temp_dir().join(format!("visicutr-devbak-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(STORE_FILE), "{\"unknown\": 1}").unwrap();
+        assert!(DeviceStore::load(&dir).is_err());
+        let backup = DeviceStore::backup_damaged(&dir).unwrap();
+        assert_eq!(std::fs::read(backup).unwrap(), b"{\"unknown\": 1}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            DeviceStore::default().save(&dir).unwrap();
+            let path = dir.join(STORE_FILE);
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+            DeviceStore::load(&dir).unwrap();
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn fablab_devices_keep_what_only_this_computer_knows() {
+        let mut local = LaserDevice::fau();
+        local.camera_user = "laser".into();
+        local.camera_password = "geheim".into();
+        local.machine.engrave_shift[0] += 3.0;
+        let mut store = DeviceStore {
+            devices: vec![local.clone()],
+            ..DeviceStore::default()
+        };
+        let mut incoming = LaserDevice::fau();
+        incoming.camera_calibration = None;
+        incoming.hostname = "neu".into();
+        assert_eq!(store.replace(vec![incoming]), 1);
+        let merged = &store.devices[0];
+        assert_eq!(merged.hostname, "neu");
+        assert_eq!(merged.camera_password, "geheim");
+        assert_eq!(merged.camera_calibration, local.camera_calibration);
+        assert_eq!(merged.machine.engrave_shift, local.machine.engrave_shift);
+        // Another camera host does not get the login.
+        let mut other = LaserDevice::fau();
+        other.camera_url = "http://192.0.2.9/image".into();
+        store.replace(vec![other]);
+        assert!(store.devices[0].camera_password.is_empty());
+    }
+
+    #[test]
+    fn imported_devices_keep_only_http_camera_urls() {
+        let mut store = DeviceStore::default();
+        store.devices[0].camera_url = r"\\attacker.example\s\a.jpg".into();
+        let json = serde_json::to_vec(&store).unwrap();
+        assert!(import_bytes(&json).unwrap()[0].camera_url.is_empty());
+        store.devices[0].camera_url = "https://cam.example/image".into();
+        let json = serde_json::to_vec(&store).unwrap();
+        assert_eq!(
+            import_bytes(&json).unwrap()[0].camera_url,
+            "https://cam.example/image"
+        );
+    }
 
     #[test]
     fn legacy_settings_folder_moves_once() {

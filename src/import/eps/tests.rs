@@ -204,3 +204,10 @@ fn unclosed_procedure_is_an_error() {
     let message = error(b"%%BoundingBox: 0 0 10 10\n1 { 0 0 moveto\n");
     assert!(matches!(message, EpsError::UnclosedProcedure), "{message}");
 }
+
+#[test]
+fn programs_with_millions_of_objects_are_refused() {
+    let mut data = b"%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 10 10\n".to_vec();
+    data.extend(b"a ".repeat(super::parse::MAX_OBJECTS + 1));
+    assert!(matches!(error(&data), EpsError::TooManyObjects));
+}

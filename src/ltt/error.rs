@@ -87,7 +87,7 @@ impl fmt::Display for LttError {
             }
             Self::TallerThanCircumference { diameter_mm } => tr!(
                 "Motiv ist höher als der Umfang des Werkstücks ({circumference} mm bei {diameter} mm Durchmesser)",
-                circumference = format!("{:.1}", std::f32::consts::PI * diameter_mm),
+                circumference = crate::i18n::number(f64::from(std::f32::consts::PI * diameter_mm), 1),
                 diameter = format!("{diameter_mm:.1}")
             ),
             Self::InvalidPart { part, error } => format!("{part}: {error}"),

@@ -425,6 +425,8 @@ struct PendingExport {
 /// geschieht: Große oder aufwendige Dateien halten so das Fenster nicht an.
 struct Reading {
     result: std::sync::mpsc::Receiver<import::Prefetched>,
+    /// Ab einer kurzen Wartezeit zeigt ein Dialog das Lesen mit „Abbrechen“.
+    started: std::time::Instant,
     then: Deferred,
     /// Wahl aus der Rückfrage „Zeichnung größer als die Zeichenfläche“.
     fit_policy: Option<bool>,
@@ -432,10 +434,39 @@ struct Reading {
 
 /// Ein Import, der nach dem Lesen der Dateien weiterläuft.
 enum Deferred {
-    Open(PathBuf),
+    /// Öffnen nach dem Lesen; `dirty`: Das Projekt war beim Aufschieben
+    /// schon ungesichert, die Rückfrage dazu ist beantwortet.
+    Open {
+        path: PathBuf,
+        dirty: bool,
+    },
     Drop(Vec<PathBuf>),
     Request(instance::Request),
     Reload,
+}
+
+/// Projekt aus dem Verlauf. Der Verlauf kennt den Gerätewechsel nicht:
+/// Adresse und Maschinenwerte gehören immer zum gewählten Lasercutter.
+fn restored(devices: &devices_ui::DeviceUi, mut project: Project) -> Project {
+    devices.apply(&mut project);
+    project
+}
+
+/// Zeichnung (Adresse, Länge), Zahl der Teile und aktives Teil: ändert sich
+/// beim Öffnen, Widerrufen und bei Werkzeugen, nicht beim Verschieben.
+type ProjectIdentity = (usize, usize, usize, usize);
+/// Ergebnis eines Werkzeugs im Hintergrund: Projekt und Hinweise.
+type ComposedResult = Result<(Project, Vec<String>), String>;
+
+/// Eine Geste (Ziehen, Tippen in X/Y/B/H) bekommt einen Widerrufen-Schritt.
+#[derive(Default)]
+struct Gesture {
+    /// Projekt und Lage zu Beginn des Bilds.
+    start: Option<(ProjectIdentity, [f32; 4])>,
+    /// Für die laufende Geste ist schon ein Schritt gemerkt.
+    open: bool,
+    /// In diesem Bild hat eine Aktion selbst einen Schritt gemerkt.
+    explicit: bool,
 }
 
 struct Snapshot {
@@ -689,6 +720,8 @@ struct VisiCutR {
     remnants: remnant_ui::RemnantUi,
     compose: compose_ui::ComposeUi,
     history: History<Snapshot>,
+    /// Laufende Änderung von Lage oder Größe (Ziehen, Felder).
+    gesture: Gesture,
     /// Sprache und zuletzt geöffnete Dateien.
     settings: settings::AppSettings,
     /// Felder für die Parameter eines parametrischen Teils.
@@ -732,6 +765,12 @@ struct CanvasView {
     hover_outline: Option<(u64, usize, Vec<visicut_core::geometry::Contour>)>,
     /// Umrisse aller Objekte für den Treffertest auf der Arbeitsfläche.
     all_outlines: Option<(u64, Vec<Vec<visicut_core::geometry::Contour>>)>,
+    /// Umrisse aller Objekte, die im Hintergrund berechnet werden (bei
+    /// tausend Pfaden dauert das; das Fenster soll dabei nicht stehen).
+    outlines_pending: Option<(
+        u64,
+        std::sync::mpsc::Receiver<Vec<Vec<visicut_core::geometry::Contour>>>,
+    )>,
     zoom: f32,
     /// Bildpunkte je mm auf dem Bildschirm, zuletzt in `bed` berechnet.
     view_scale: f32,
@@ -758,6 +797,10 @@ struct Background {
     instance: Option<instance::Listener>,
     /// Übergebene Dateien, die auf das Ende eines Dialogs warten.
     handed_over: Option<instance::Request>,
+    /// Export oder Senden wartet auf den im Hintergrund vorbereiteten Auftrag.
+    after_preview: Option<Command>,
+    /// Neu erzeugte Grafik eines parametrischen Teils (Projektstand, Ergebnis).
+    parameters: Option<(ProjectIdentity, std::sync::mpsc::Receiver<ComposedResult>)>,
     /// Lasercutter, Material und Senden aus der Befehlszeile; warten, bis
     /// die Dateien geöffnet sind.
     launch_options: Option<instance::Options>,
@@ -910,6 +953,7 @@ impl VisiCutR {
                 show_grid: true,
                 hover_outline: None,
                 all_outlines: None,
+                outlines_pending: None,
                 handle_drag: None,
             },
             copied: None,
@@ -931,6 +975,8 @@ impl VisiCutR {
                 lab_check: None,
                 instance: None,
                 handed_over: None,
+                after_preview: None,
+                parameters: None,
                 launch_options: None,
             },
             devices,
@@ -939,6 +985,7 @@ impl VisiCutR {
             remnants: remnant_ui::RemnantUi::default(),
             compose: compose_ui::ComposeUi::default(),
             history: History::default(),
+            gesture: Gesture::default(),
             settings,
             parameters: Default::default(),
             inkscape: None,
@@ -950,6 +997,7 @@ impl VisiCutR {
     /// Startet die fälligen Prüfungen auf ein neues Release und neue
     /// FabLab-Einstellungen.
     fn start_due_checks(&mut self) {
+        import::allow_ghostscript_for_postscript(self.settings.ghostscript_for_postscript);
         // Alle 14 Tage im Hintergrund nach einem neuen Release fragen.
         if !self.settings.update_check_disabled
             && visicut_core::update::is_due(
@@ -1292,6 +1340,7 @@ impl VisiCutR {
         self.background.reading.is_some()
             || self.messages.alert.is_some()
             || self.pending.asking()
+            || self.pending.import.is_some()
             || self.background.lab_offer.is_some()
     }
 
@@ -1322,6 +1371,7 @@ impl VisiCutR {
         }
         self.background.reading = Some(Reading {
             result,
+            started: std::time::Instant::now(),
             then,
             fit_policy: self.fit_policy,
         });
@@ -1334,6 +1384,14 @@ impl VisiCutR {
         let Some(reading) = &self.background.reading else {
             return;
         };
+        // Erst nach offenen Dialogen: Eine Sende-Bestätigung gilt für den
+        // Stand, den sie zeigt; das Ergebnis wartet so lange.
+        if self.pending.asking()
+            || self.messages.alert.is_some()
+            || self.background.lab_offer.is_some()
+        {
+            return;
+        }
         let prefetched = match reading.result.try_recv() {
             Ok(prefetched) => prefetched,
             Err(std::sync::mpsc::TryRecvError::Empty) => return,
@@ -1352,7 +1410,13 @@ impl VisiCutR {
         let fit_policy = std::mem::replace(&mut self.fit_policy, fit_policy);
         match then {
             // Mit Rückfrage, falls inzwischen ungesicherte Änderungen entstanden.
-            Deferred::Open(path) => self.request(ctx, Replace::Open(path)),
+            // Neue Rückfrage nur, wenn inzwischen ungesicherte Änderungen
+            // entstanden; sonst führte „Nicht sichern“ bei fehlgeschlagenem
+            // Zwischenspeichern wieder in denselben Dialog.
+            Deferred::Open { path, dirty } if self.file.dirty && !dirty => {
+                self.request(ctx, Replace::Open(path))
+            }
+            Deferred::Open { path, .. } => self.perform(ctx, Replace::Open(path)),
             Deferred::Drop(paths) => self.drop_files(ctx, paths),
             Deferred::Request(request) => self.open_request(ctx, request),
             Deferred::Reload => self.reload(ctx),
@@ -1633,7 +1697,11 @@ impl VisiCutR {
             return Err(tr("Datei ist größer als 25 MB").into());
         }
         if import::is_importable(path) {
-            if self.read_first(ctx, &[path.to_owned()], Deferred::Open(path.to_owned())) {
+            let then = Deferred::Open {
+                path: path.to_owned(),
+                dirty: self.file.dirty,
+            };
+            if self.read_first(ctx, &[path.to_owned()], then) {
                 return Ok(());
             }
             let mut imported = import::read_file(path)?;
@@ -1654,8 +1722,10 @@ impl VisiCutR {
             self.finish_import(ctx, path, imported)
         } else {
             let source = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-            let project: Project = serde_json::from_str(&source)
+            let mut project: Project = serde_json::from_str(&source)
                 .map_err(|e| tr!("Ungültiges Projekt: {error}", error = e))?;
+            // Bildordner aus der Datei: keine Netzwerkfreigaben, kein Laufwerk.
+            project.replace_unsafe_image_folders(path.parent().unwrap_or(Path::new(".")));
             // Entwürfe ohne Motiv oder außerhalb des Betts lassen sich öffnen.
             project.validate_document()?;
             (self.textures.active, self.textures.parts) = self.textures_for(ctx, &project)?;
@@ -1739,7 +1809,7 @@ impl VisiCutR {
 
     /// Wendet Lasercutter, Material und Dicke aus der Befehlszeile an; mit
     /// `--execute` folgt die Sende-Bestätigung.
-    fn apply_launch_options(&mut self, options: instance::Options) {
+    fn apply_launch_options(&mut self, ctx: &egui::Context, options: instance::Options) {
         let mut problems = Vec::new();
         if let Some(name) = &options.device
             && let Err(e) =
@@ -1767,7 +1837,7 @@ impl VisiCutR {
             match self.project.validate() {
                 Ok(()) => {
                     self.sendable = !self.busy();
-                    self.send();
+                    self.send(ctx);
                 }
                 Err(e) => self.report(tr!("Senden nicht möglich: {error}", error = e)),
             }
@@ -2001,6 +2071,12 @@ impl VisiCutR {
             Replace::Vectorized { svg, name } => self.import(ctx, svg, name, Vec::new()),
             Replace::Calibration(points) => self.calibration_page(ctx, &points),
             Replace::ShiftPattern(power) => self.shift_pattern(ctx, power),
+            // Auch nach den Rückfragen nicht mitten in einer Übertragung.
+            Replace::Quit if self.busy() => {
+                self.messages.status =
+                    tr("Bitte die laufende Übertragung vor dem Beenden abwarten").into();
+                Ok(())
+            }
             Replace::Quit => {
                 self.allow_close = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -2049,6 +2125,8 @@ impl VisiCutR {
             .all_parts()
             .into_iter()
             .filter_map(|part| part.source_file.map(PathBuf::from))
+            // `reload_parts` reports these; they are not read.
+            .filter(|path| !visicut_core::svg_import::is_network_path(path))
             .collect();
         if self.read_first(ctx, &sources, Deferred::Reload) {
             return;
@@ -2077,11 +2155,42 @@ impl VisiCutR {
         ctx: &egui::Context,
         values: Vec<(String, visicut_core::import::ParameterValue)>,
     ) {
-        match visicut_core::compose::set_parameters(&self.project, values) {
-            Ok((project, notes)) => self.apply_composed(ctx, project, notes),
+        // Im Hintergrund (Skripte laufen bis zu 5 s); das Ergebnis gilt nur
+        // für den Stand, aus dem es berechnet wurde.
+        let project = self.project.clone();
+        let identity = self.project_identity();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let repaint = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = sender.send(
+                visicut_core::compose::set_parameters(&project, values).map_err(|e| e.to_string()),
+            );
+            repaint.request_repaint();
+        });
+        self.background.parameters = Some((identity, receiver));
+        self.messages.status = tr("Grafik wird neu erzeugt …").into();
+    }
+
+    fn poll_parameters(&mut self, ctx: &egui::Context) {
+        let Some((identity, receiver)) = &self.background.parameters else {
+            return;
+        };
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err(tr("Grafik konnte nicht erzeugt werden").into())
+            }
+        };
+        let current = *identity == self.project_identity();
+        self.background.parameters = None;
+        match result {
+            Ok((project, notes)) if current => self.apply_composed(ctx, project, notes),
+            // Das Projekt hat sich inzwischen geändert: Ergebnis verwerfen.
+            Ok(_) => self.parameters.reset(),
             Err(e) => {
                 self.parameters.reset();
-                self.report(e.to_string());
+                self.report(e);
             }
         }
     }
@@ -2110,8 +2219,26 @@ impl VisiCutR {
                 .map(|o| o.len())
                 .unwrap_or(0)
         };
+        let added = project
+            .part_count()
+            .saturating_sub(self.project.part_count());
         self.project = project;
         (self.textures.active, self.textures.parts) = textures;
+        // Mehrere neue Teile (etwa mehrere abgelegte Dateien): jedes bekommt
+        // die Bibliothekswerte, nicht nur das zuletzt hinzugefügte.
+        if new_part && added > 1 {
+            let (active, total) = (self.project.active_part, self.project.part_count());
+            for part in total - added..total {
+                if part == active {
+                    continue;
+                }
+                self.project.select_part(part);
+                for index in 0..self.project.steps.len() {
+                    self.jobs.apply_preset_to(&mut self.project, index);
+                }
+            }
+            self.project.select_part(active);
+        }
         for index in old_steps..self.project.steps.len() {
             // Steps of the existing motif keep its parameters.
             if self.project.steps[index]
@@ -2217,10 +2344,62 @@ impl VisiCutR {
     fn checkpoint(&mut self) {
         let snapshot = self.snapshot();
         self.history.record(snapshot);
+        self.gesture.explicit = true;
+    }
+
+    /// Lage und Größe des aktiven Teils zu Beginn des Bilds, für Widerrufen
+    /// von Ziehen, Anfassern und den Feldern X/Y/B/H (siehe
+    /// [`Self::end_frame_geometry`]).
+    fn begin_frame_geometry(&mut self, ctx: &egui::Context) {
+        // Eine Geste endet, wenn keine Taste gedrückt ist und kein Feld den
+        // Fokus hat; die nächste Änderung bekommt dann einen eigenen Schritt.
+        let idle = !ctx.input(|i| i.pointer.any_down()) && ctx.memory(|m| m.focused().is_none());
+        if idle {
+            self.gesture.open = false;
+        }
+        self.gesture.start = Some((self.project_identity(), self.geometry()));
+        self.gesture.explicit = false;
+    }
+
+    /// Hat sich in diesem Bild nur die Lage des aktiven Teils geändert und
+    /// hat keine Aktion selbst einen Schritt gemerkt, wird der Stand vor der
+    /// Geste gemerkt: einmal je Geste, nicht je Bild.
+    fn end_frame_geometry(&mut self) {
+        let Some((identity, before)) = self.gesture.start.take() else {
+            return;
+        };
+        if self.gesture.explicit
+            || self.gesture.open
+            || identity != self.project_identity()
+            || before == self.geometry()
+        {
+            return;
+        }
+        let mut snapshot = self.snapshot();
+        let p = &mut snapshot.project;
+        [p.x_mm, p.y_mm, p.width_mm, p.height_mm] = before;
+        self.history.record(snapshot);
+        self.gesture.open = true;
+    }
+
+    /// Dasselbe Projekt wie zu Beginn des Bilds (kein Öffnen, Widerrufen
+    /// oder Werkzeug, das die Zeichnung ersetzt).
+    fn project_identity(&self) -> ProjectIdentity {
+        (
+            self.project.svg.as_ptr() as usize,
+            self.project.svg.len(),
+            self.project.part_count(),
+            self.project.active_part,
+        )
+    }
+
+    fn geometry(&self) -> [f32; 4] {
+        let p = &self.project;
+        [p.x_mm, p.y_mm, p.width_mm, p.height_mm]
     }
 
     fn restore(&mut self, snapshot: Snapshot) {
-        self.project = snapshot.project;
+        self.project = restored(&self.devices, snapshot.project);
         self.textures.active = snapshot.texture;
         self.textures.parts = snapshot.part_textures;
         self.file.dirty = true;
@@ -2304,16 +2483,46 @@ impl VisiCutR {
         }
     }
 
-    fn export(&mut self) {
+    /// Der fertige Auftrag aus der Vorschau. Fehlt er, wird er im
+    /// Hintergrund vorbereitet und `then` läuft danach erneut; die Oberfläche
+    /// bleibt dabei bedienbar.
+    fn prepared_or_start(&mut self, ctx: &egui::Context, then: Command) -> Option<PreparedJob> {
+        match self.preview.prepared(&self.project) {
+            Some(Ok(prepared)) => Some(prepared),
+            Some(Err(e)) => {
+                self.report(e);
+                None
+            }
+            None => {
+                self.preview
+                    .start(ctx, &self.project, &mut self.messages.status);
+                self.background.after_preview = Some(then);
+                None
+            }
+        }
+    }
+
+    /// Export oder Senden, die auf die Vorbereitung im Hintergrund warten.
+    fn poll_after_preview(&mut self, ctx: &egui::Context) {
+        let Some(command) = self.background.after_preview else {
+            return;
+        };
+        if self.preview.prepared(&self.project).is_some() {
+            self.background.after_preview = None;
+            self.run(ctx, command);
+        } else if self.preview.outdated() {
+            // Das Projekt hat sich geändert: neu vorbereiten.
+            self.preview
+                .start(ctx, &self.project, &mut self.messages.status);
+        }
+    }
+
+    fn export(&mut self, ctx: &egui::Context) {
         if !self.sendable {
             return;
         }
-        let single_job = self.preview.single_job;
-        let prepared = match ltt::require_material(&self.project)
-            .and_then(|()| ltt::prepare_with(&self.project, single_job))
-        {
-            Ok(prepared) => prepared,
-            Err(e) => return self.report(e.to_string()),
+        let Some(prepared) = self.prepared_or_start(ctx, Command::Export) else {
+            return;
         };
         let mut jobs = prepared.jobs;
         if jobs.len() == 1 {
@@ -2371,16 +2580,18 @@ impl VisiCutR {
         );
     }
 
-    fn send(&mut self) {
+    fn send(&mut self, ctx: &egui::Context) {
         if !self.sendable {
             return;
         }
-        let single_job = self.preview.single_job;
-        match ltt::require_material(&self.project)
-            .and_then(|()| ltt::prepare_with(&self.project, single_job))
-        {
-            Ok(prepared) => self.pending.send = Some(prepared),
-            Err(e) => self.report(e.to_string()),
+        // Eine eben getippte Adresse gilt (siehe `commit_draft`).
+        self.devices
+            .commit_draft(&mut self.project, &mut self.messages.status);
+        if self.project.validate().is_err() {
+            return;
+        }
+        if let Some(prepared) = self.prepared_or_start(ctx, Command::Send) {
+            self.pending.send = Some(prepared);
         }
     }
 
@@ -2404,6 +2615,8 @@ impl VisiCutR {
     fn switch_page(&mut self, ctx: &egui::Context, page: Page) {
         self.navigation.page = page;
         if page == Page::Preview && self.preview.outdated() && !self.project.svg.is_empty() {
+            self.devices
+                .commit_draft(&mut self.project, &mut self.messages.status);
             self.preview
                 .request(ctx, &self.project, &mut self.messages.status);
         }
@@ -2618,6 +2831,21 @@ impl VisiCutR {
                 if picked != chosen {
                     self.settings.language = picked.map(|l| l.code().to_owned());
                     i18n::set_language(self.settings.language());
+                    self.save_settings();
+                }
+            });
+            form::section(ui, tr("Import"), |ui| {
+                if ui
+                    .checkbox(
+                        &mut self.settings.ghostscript_for_postscript,
+                        tr("EPS/PS-Dateien, die VisiCutR selbst nicht liest, mit Ghostscript öffnen"),
+                    )
+                    .on_hover_text(tr("Ghostscript läuft eingeschränkt (-dSAFER), hatte aber Sicherheitslücken. Nur für Dateien aus vertrauenswürdiger Quelle einschalten."))
+                    .changed()
+                {
+                    import::allow_ghostscript_for_postscript(
+                        self.settings.ghostscript_for_postscript,
+                    );
                     self.save_settings();
                 }
             });
@@ -2980,7 +3208,7 @@ impl VisiCutR {
                     self.report(e);
                 }
             }
-            Command::Export => self.export(),
+            Command::Export => self.export(ctx),
             Command::ExportPlf => self.export_plf(),
             Command::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Command::Devices => self.show_settings(SettingsPage::Devices),
@@ -3007,7 +3235,7 @@ impl VisiCutR {
             Command::About => self.show_settings(SettingsPage::General),
             Command::Materials => self.show_settings(SettingsPage::Materials),
             Command::Preview => self.navigation.show_preview = true,
-            Command::Send => self.send(),
+            Command::Send => self.send(ctx),
             Command::Text => self.compose.open(compose_ui::Tool::Text),
             Command::Shape => self.compose.open(compose_ui::Tool::Shape),
             Command::Sign => self.compose.open(compose_ui::Tool::Sign),
@@ -4329,22 +4557,51 @@ impl VisiCutR {
             .filter(|p| bed.contains(*p) && ui.rect_contains_pointer(bed));
         self.jobs.canvas_hover = match pointer {
             Some(pos) if objects_mode && self.canvas.handle_drag.is_none() => {
-                if self
+                let current = self
                     .canvas
                     .all_outlines
                     .as_ref()
-                    .is_none_or(|(k, _)| *k != key)
-                {
-                    let outlines =
-                        visicut_core::geometry::object_outlines(&self.project).unwrap_or_default();
-                    self.canvas.all_outlines = Some((key, outlines));
+                    .is_some_and(|(k, _)| *k == key);
+                if !current {
+                    let pending = self
+                        .canvas
+                        .outlines_pending
+                        .as_ref()
+                        .filter(|(k, _)| *k == key);
+                    match pending.map(|(_, receiver)| receiver.try_recv()) {
+                        Some(Ok(outlines)) => {
+                            self.canvas.all_outlines = Some((key, outlines));
+                            self.canvas.outlines_pending = None;
+                        }
+                        Some(Err(std::sync::mpsc::TryRecvError::Empty)) => {
+                            ui.ctx()
+                                .request_repaint_after(std::time::Duration::from_millis(100));
+                        }
+                        Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
+                            self.canvas.all_outlines = Some((key, Vec::new()));
+                            self.canvas.outlines_pending = None;
+                        }
+                        None => {
+                            let project = self.project.clone();
+                            let (sender, receiver) = std::sync::mpsc::channel();
+                            let repaint = ui.ctx().clone();
+                            std::thread::spawn(move || {
+                                let outlines = visicut_core::geometry::object_outlines(&project)
+                                    .unwrap_or_default();
+                                let _ = sender.send(outlines);
+                                repaint.request_repaint();
+                            });
+                            self.canvas.outlines_pending = Some((key, receiver));
+                        }
+                    }
                 }
                 let [x, y] = view.to_mm(pos);
                 let mm = [
                     f64::from(x - self.project.x_mm),
                     f64::from(y - self.project.y_mm),
                 ];
-                self.canvas.all_outlines.as_ref().and_then(|(_, outlines)| {
+                let ready = self.canvas.all_outlines.as_ref().filter(|(k, _)| *k == key);
+                ready.and_then(|(_, outlines)| {
                     visicut_core::geometry::object_at(outlines, mm, f64::from(4.0 / scale))
                 })
             }
@@ -4437,7 +4694,7 @@ impl VisiCutR {
             }
         });
         if edit_text && let Some(text) = &text {
-            self.compose.edit_text(text);
+            self.compose.edit_text(text, self.project.active_part);
         }
     }
 
@@ -4640,6 +4897,7 @@ impl VisiCutR {
         self.overwrite_dialog(ctx);
         self.clear_cache_dialog(ctx);
         self.send_dialog(ctx);
+        self.reading_dialog(ctx);
         // Hinweise zuletzt, damit sie über anderen Dialogen liegen.
         self.alert_dialog(ctx);
     }
@@ -4716,14 +4974,16 @@ impl VisiCutR {
                 }
             });
         });
+        // Abgebrochen: Startoptionen wie `--execute` gelten dem Projekt, das
+        // nicht geöffnet wurde, nicht dem alten.
         match choice {
             Some(true) => match self.save(false) {
                 Ok(true) => self.perform(ctx, action),
-                Ok(false) => {}
+                Ok(false) => self.background.launch_options = None,
                 Err(e) => self.report(tr!("Sichern nicht möglich: {error}", error = e)),
             },
             Some(false) => self.perform(ctx, action),
-            None if modal.should_close() => {}
+            None if modal.should_close() => self.background.launch_options = None,
             None => self.pending.replace = Some(action),
         }
     }
@@ -4764,7 +5024,9 @@ impl VisiCutR {
         match choice {
             Some(whole) => {
                 self.fit_policy = Some(whole);
-                if pending.replace {
+                // Mehrere Dateien auf ein leeres Projekt: alle hinzufügen,
+                // nicht nur die erste öffnen.
+                if pending.replace && pending.paths.len() == 1 {
                     if let Err(e) = self.open_path(ctx, &pending.paths[0]) {
                         self.report(e);
                     }
@@ -4828,6 +5090,40 @@ impl VisiCutR {
             self.clear_cache();
         } else if !modal.should_close() {
             self.pending.clear_cache = Some(count);
+        }
+    }
+
+    /// Lesen im Hintergrund, nach einer kurzen Wartezeit mit „Abbrechen“.
+    /// Das Abbrechen verwirft das Ergebnis; der Lesevorgang endet spätestens
+    /// mit der Importfrist.
+    fn reading_dialog(&mut self, ctx: &egui::Context) {
+        const DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+        let Some(reading) = &self.background.reading else {
+            return;
+        };
+        if self.pending.asking() {
+            return;
+        }
+        let waited = reading.started.elapsed();
+        if waited < DELAY {
+            ctx.request_repaint_after(DELAY - waited);
+            return;
+        }
+        let mut cancel = false;
+        egui::Modal::new(egui::Id::new("reading")).show(ctx, |ui| {
+            ui.set_width(320.0);
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(tr("Dateien werden gelesen …"));
+            });
+            ui.add_space(10.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                cancel = ui.button(tr("Abbrechen")).clicked();
+            });
+        });
+        if cancel {
+            self.background.reading = None;
+            self.messages.status = tr("Lesen der Dateien abgebrochen").into();
         }
     }
 
@@ -5299,9 +5595,13 @@ impl eframe::App for VisiCutR {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         #[cfg(feature = "screenshot")]
         self.capture(ctx);
+        self.begin_frame_geometry(ctx);
         self.poll_send(ctx);
         self.poll_reading(ctx);
-        self.sendable = !self.busy() && self.project.validate().is_ok();
+        self.poll_parameters(ctx);
+        // Während des Lesens könnte das Ergebnis das Projekt noch ändern.
+        self.sendable =
+            !self.busy() && self.background.reading.is_none() && self.project.validate().is_ok();
         self.follow_device_origin();
         self.handle_close_request(ctx);
         self.take_dropped_files(ctx);
@@ -5313,12 +5613,15 @@ impl eframe::App for VisiCutR {
         self.tool_windows(ctx);
         if self.navigation.show_preview {
             self.navigation.show_preview = false;
+            self.devices
+                .commit_draft(&mut self.project, &mut self.messages.status);
             self.preview
                 .request(ctx, &self.project, &mut self.messages.status);
         }
         let mut commands = Vec::new();
         let send_enabled = self.sendable && !self.busy();
         self.sync_pages(ctx);
+        self.poll_after_preview(ctx);
         egui::TopBottomPanel::top("tabs")
             .frame(
                 egui::Frame::new()
@@ -5341,6 +5644,7 @@ impl eframe::App for VisiCutR {
             self.run(ctx, command);
         }
         self.dialogs(ctx);
+        self.end_frame_geometry();
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
             "{}{} — VisiCutR",
             self.project.name,
@@ -5425,7 +5729,7 @@ impl VisiCutR {
             && self.background.handed_over.is_none()
             && let Some(options) = self.background.launch_options.take()
         {
-            self.apply_launch_options(options);
+            self.apply_launch_options(ctx, options);
         }
         if !self.modal_open() && !self.busy() {
             let opened = open_files::take();
@@ -5600,6 +5904,10 @@ fn window_icon() -> Option<egui::IconData> {
     })
 }
 
+/// Zählt im Hilfsprozess den Speicher und begrenzt ihn (import::worker).
+#[global_allocator]
+static ALLOCATOR: import::WorkerAllocator = import::WorkerAllocator;
+
 fn main() -> eframe::Result {
     // Hilfsprozess für Skripte und PDF-Seiten aus Dateien (import::worker).
     if std::env::args().nth(1).as_deref() == Some(import::WORKER_FLAG) {
@@ -5663,6 +5971,35 @@ mod tests {
             history.record(step);
         }
         assert_eq!(history.undo.len(), UNDO_STEPS);
+    }
+
+    #[test]
+    fn undo_keeps_target_and_machine_of_the_selected_device() {
+        use visicut_core::device::{DeviceStore, LaserDevice};
+        let a = LaserDevice::fau();
+        let mut b = LaserDevice::fau();
+        b.name = "B".into();
+        b.hostname = "192.0.2.2".into();
+        b.port = 5001;
+        b.rotary_axis = false;
+        b.machine.curve_acceleration_mm_s2 += 1.0;
+        let mut devices = devices_ui::DeviceUi::from_store(DeviceStore {
+            devices: vec![a, b.clone()],
+            ..DeviceStore::default()
+        });
+        let mut before = Project::default();
+        devices.apply(&mut before);
+        before.rotary_axis = devices.device().rotary_axis;
+        let mut history = History::default();
+        history.record(before);
+        devices.store.selected = 1;
+        let mut current = Project::default();
+        devices.apply(&mut current);
+        let project = restored(&devices, history.undo(current).unwrap());
+        assert_eq!(project.hostname, b.hostname);
+        assert_eq!(project.port, b.port);
+        assert_eq!(project.machine, b.machine);
+        assert!(!project.rotary_axis);
     }
 
     #[test]

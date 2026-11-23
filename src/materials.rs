@@ -32,6 +32,10 @@ pub enum MaterialError {
     DuplicateProfile {
         label: String,
     },
+    /// Passes or further parameter sets outside the limits of a job.
+    ParameterSets {
+        label: String,
+    },
 }
 
 impl fmt::Display for MaterialError {
@@ -58,7 +62,11 @@ impl fmt::Display for MaterialError {
                 label = label
             ),
             Self::Speed { label } => tr!(
-                "{label}: Geschwindigkeit muss zwischen 0 und 100 % liegen",
+                "{label}: Geschwindigkeit muss zwischen 0,1 und 100 % liegen",
+                label = label
+            ),
+            Self::ParameterSets { label } => tr!(
+                "{label}: Durchgänge (1 bis 100) oder weitere Parametersätze (höchstens 15, Leistung 0 bis 100 %, Geschwindigkeit 0,1 bis 100 %) ungültig",
                 label = label
             ),
             Self::DuplicateProfile { label } => tr!(
@@ -162,26 +170,48 @@ impl Library {
             return Ok((Self::bundled(), false));
         }
         let source = std::fs::read_to_string(&path)?;
-        let library: Self = serde_json::from_str(&source)
+        let mut library: Self = serde_json::from_str(&source)
             .map_err(|error| MaterialError::Damaged { path, error })?;
+        library.raise_old_limits();
         library.validate()?;
         Ok((library, true))
+    }
+
+    /// Earlier versions saved speeds below 0.1 % and passes outside 1 … 100,
+    /// which could never be sent; they are raised to the nearest valid value
+    /// instead of making the whole library unreadable.
+    fn raise_old_limits(&mut self) {
+        for profile in self.materials.iter_mut().flat_map(|m| &mut m.profiles) {
+            if profile.speed_percent.is_finite() {
+                profile.speed_percent = profile.speed_percent.max(0.1);
+            }
+            profile.passes = profile.passes.clamp(1, 100);
+            for set in &mut profile.additional {
+                if set.speed_percent.is_finite() {
+                    set.speed_percent = set.speed_percent.max(0.1);
+                }
+                set.passes = set.passes.clamp(1, 100);
+            }
+        }
     }
 
     pub fn save(&self, dir: &Path) -> Result<(), MaterialError> {
         self.validate()?;
         std::fs::create_dir_all(dir)?;
-        let temporary = dir.join(format!("{FILE}.tmp"));
         let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(&temporary, json)?;
-        Ok(std::fs::rename(&temporary, dir.join(FILE))?)
+        Ok(crate::atomic::write(
+            &dir.join(FILE),
+            json.as_bytes(),
+            false,
+        )?)
     }
 
-    /// Back to the bundled FAU catalogue.
+    /// Back to the bundled FAU catalogue. The own library is kept as
+    /// `materials.json.bak` and can be imported again.
     pub fn reset(dir: &Path) -> Result<Self, MaterialError> {
         let path = dir.join(FILE);
         if path.exists() {
-            std::fs::remove_file(path)?;
+            std::fs::rename(&path, dir.join(format!("{FILE}.bak")))?;
         }
         Ok(Self::bundled())
     }
@@ -205,8 +235,16 @@ impl Library {
                 if !p.power_percent.is_finite() || !(0.0..=100.0).contains(&p.power_percent) {
                     return Err(MaterialError::Power { label });
                 }
-                if !p.speed_percent.is_finite() || !(0.0..=100.0).contains(&p.speed_percent) {
+                // The same limits as for sending (`ParameterSet::validate`), so a
+                // profile that cannot be sent cannot be saved either.
+                if !p.speed_percent.is_finite() || !(0.1..=100.0).contains(&p.speed_percent) {
                     return Err(MaterialError::Speed { label });
+                }
+                let sets_valid = (1..=100).contains(&p.passes)
+                    && p.additional.len() <= 15
+                    && p.additional.iter().all(|s| s.validate().is_ok());
+                if !sets_valid {
+                    return Err(MaterialError::ParameterSets { label });
                 }
                 if material.profiles[..j].iter().any(|q| {
                     q.operation == p.operation && (q.thickness_mm - p.thickness_mm).abs() < 1e-4
@@ -247,6 +285,30 @@ impl Library {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn libraries_follow_the_limits_of_sending_and_old_values_are_raised() {
+        let mut library = Library::bundled();
+        library.materials[0].profiles[0].passes = 0;
+        assert!(matches!(
+            library.validate(),
+            Err(MaterialError::ParameterSets { .. })
+        ));
+        library.materials[0].profiles[0].passes = 1;
+        library.materials[0].profiles[0].speed_percent = 0.0;
+        assert!(matches!(
+            library.validate(),
+            Err(MaterialError::Speed { .. })
+        ));
+        // A library of an earlier version with speed 0 still loads.
+        let dir = std::env::temp_dir().join(format!("visicutr-matlimit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(FILE), serde_json::to_vec(&library).unwrap()).unwrap();
+        let (loaded, own) = Library::load(&dir).unwrap();
+        assert!(own);
+        assert_eq!(loaded.materials[0].profiles[0].speed_percent, 0.1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn bundled_source_is_known() {
@@ -298,6 +360,9 @@ mod tests {
         ));
         assert_eq!(Library::reset(&dir).unwrap(), Library::bundled());
         assert!(!Library::load(&dir).unwrap().1);
+        // The own library survives as a backup that can be imported again.
+        let backup = std::fs::read(dir.join(format!("{FILE}.bak"))).unwrap();
+        assert!(!Library::import(&backup).unwrap().materials.is_empty());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

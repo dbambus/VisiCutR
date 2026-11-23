@@ -4,7 +4,10 @@
 // curveWithKnownSpeed, circle, reinterpolateWithMaximumDistance,
 // cuttingTimeForPxDistance) and LibLaserCut Circle.fromPointList.
 // LGPL-3.0-or-later; original author Maximilian Gaukler.
-use super::{Axis, LttError, NOMINAL_CUT_SPEED, RASTER_DPI, word};
+use super::{
+    Axis, BED_WIDTH, LttError, MAX_RAW_Y, MAX_ROTARY_STEPS, NOMINAL_CUT_SPEED, RASTER_DPI, raw,
+    word,
+};
 use crate::project::LIBLASERCUT_CURVE_ACCELERATION;
 use crate::timeline::{MotionKind, Program};
 
@@ -111,6 +114,9 @@ pub struct Encoder<'a> {
     pub pierce_delay: f64,
     /// A move to a contour start happened since the laser was last switched on.
     moved: bool,
+    /// A command led the head outside the bed; [`Self::finish`] refuses the
+    /// job. The points are checked before, this guards the encoder itself.
+    outside: bool,
 }
 
 impl<'a> Encoder<'a> {
@@ -140,6 +146,7 @@ impl<'a> Encoder<'a> {
             curve_acceleration: LIBLASERCUT_CURVE_ACCELERATION,
             pierce_delay: 0.0,
             moved: false,
+            outside: false,
         }
     }
 
@@ -192,7 +199,24 @@ impl<'a> Encoder<'a> {
         }
     }
 
+    /// Whether the head at the (prescaled) 500-DPI point stays on the bed,
+    /// in the machine steps the commands are sent in.
+    fn on_bed(&self, x: f64, y: f64) -> bool {
+        let x_ok = (x as i32)
+            .checked_mul(8)
+            .is_some_and(|x| (0..=raw(BED_WIDTH) as i32).contains(&x));
+        let y_raw = self.axis.absolute_scaled(y as i32, self.prescale_y);
+        let y_max = match self.axis.rotary_radius_mm {
+            Some(_) => MAX_ROTARY_STEPS,
+            None => MAX_RAW_Y,
+        };
+        x.is_finite() && y.is_finite() && x_ok && (0..=y_max).contains(&y_raw)
+    }
+
     fn go_to(&mut self, x: f64, y: f64, relative: bool) {
+        if !self.on_bed(x, y) {
+            self.outside = true;
+        }
         if relative {
             self.out.extend(b"PR");
             // Truncate before subtracting so increments sum to the position.
@@ -234,8 +258,13 @@ impl<'a> Encoder<'a> {
         time
     }
 
-    pub fn finish(&mut self) {
+    /// Laser off; refuses the commands if one of them left the bed.
+    pub fn finish(&mut self) -> Result<(), LttError> {
         self.set_laser(false);
+        if self.outside {
+            return Err(LttError::OutsideBed);
+        }
+        Ok(())
     }
 
     /// curveOrLine: cut the polyline from the current point, split at corners,
@@ -301,6 +330,16 @@ impl<'a> Encoder<'a> {
         if self.speed > max_speed {
             self.set_speed(max_speed);
             self.set_power(old_power * max_speed / old_speed);
+        }
+        let (cx, cy) = center;
+        let extremes = [
+            (cx - radius_px, cy),
+            (cx + radius_px, cy),
+            (cx, cy - radius_px),
+            (cx, cy + radius_px),
+        ];
+        if !extremes.iter().all(|&(x, y)| self.on_bed(x, y)) {
+            self.outside = true;
         }
         self.set_laser(true);
         self.out.extend(b"PJPB");
@@ -601,7 +640,7 @@ mod tests {
         );
         e.move_to(points[0].0, points[0].1);
         let t = e.polyline(&points[1..]).unwrap();
-        e.finish();
+        e.finish().unwrap();
         let (c, k) = (e.circles, e.curves);
         assert!(program.duration_seconds > 0.0);
         (out, t, c, k)
@@ -609,6 +648,48 @@ mod tests {
 
     fn has(bytes: &[u8], pattern: &[u8]) -> bool {
         bytes.windows(pattern.len()).any(|w| w == pattern)
+    }
+
+    #[test]
+    fn commands_leaving_the_bed_are_refused_by_the_encoder() {
+        // Points are checked before encoding; the encoder must not rely on it
+        // (a move left out would make relative commands start at home).
+        let encode = |axis: Axis, moves: &[(f64, f64)]| {
+            let mut out = Vec::new();
+            let mut e = Encoder::new(&mut out, axis, 50.0, 50.0, None, MotionKind::Cut);
+            e.move_to(moves[0].0, moves[0].1);
+            e.polyline(&moves[1..]).unwrap();
+            e.finish()
+        };
+        let xy = Axis::xy();
+        assert!(encode(xy, &[(100.0, 100.0), (600.0, 100.0)]).is_ok());
+        let width = 1000.0 / 25.4 * RASTER_DPI;
+        let height = 600.0 / 25.4 * RASTER_DPI;
+        for moves in [
+            [(100.0, 100.0), (-100.0, 100.0)],
+            [(100.0, 100.0), (width + 10.0, 100.0)],
+            [(100.0, 100.0), (100.0, height + 10.0)],
+            [(100.0, -50.0), (100.0, 100.0)],
+        ] {
+            assert!(
+                matches!(encode(xy, &moves), Err(LttError::OutsideBed)),
+                "{moves:?}"
+            );
+        }
+        // A circle command whose ring crosses the edge.
+        let r = 200.0;
+        let ring: Vec<_> = (0..=64)
+            .map(|i| {
+                let a = i as f64 / 64.0 * 2.0 * std::f64::consts::PI;
+                (100.0 + r * a.cos(), 300.0 + r * a.sin())
+            })
+            .collect();
+        let mut out = Vec::new();
+        let mut e = Encoder::new(&mut out, xy, 50.0, 50.0, None, MotionKind::Cut);
+        e.move_to(ring[0].0, ring[0].1);
+        let _ = e.polyline(&ring[1..]);
+        assert!(e.circles > 0 || e.outside);
+        assert!(matches!(e.finish(), Err(LttError::OutsideBed)));
     }
 
     #[test]

@@ -1,0 +1,1 @@
+error: SVG enthält keine dunklen Gravurpixel

@@ -20,6 +20,9 @@ pub struct AppSettings {
     pub single_job: bool,
     /// Keine automatische Update-Prüfung (Einstellungen).
     pub update_check_disabled: bool,
+    /// EPS/PS, die der eigene Interpreter nicht liest, an Ghostscript geben
+    /// (Einstellungen → Import; aus, weil Ghostscript Sicherheitslücken hatte).
+    pub ghostscript_for_postscript: bool,
     /// Zeit der letzten Update-Prüfung in Sekunden seit 1970.
     pub last_update_check: u64,
     /// FabLab, dessen Einstellungen beim Start auf eine neue Fassung geprüft
@@ -40,8 +43,10 @@ pub struct LabSubscription {
 
 impl LabSubscription {
     /// Einmal am Tag prüfen.
+    /// Auch wenn die Uhr zurückgestellt wurde (sonst ruhte die Prüfung, bis
+    /// sie den alten Stand wieder erreicht).
     pub fn is_due(&self, now: u64) -> bool {
-        now.saturating_sub(self.last_check) >= 24 * 60 * 60
+        now < self.last_check || now - self.last_check >= 24 * 60 * 60
     }
 }
 
@@ -102,6 +107,19 @@ fn strip_verbatim(path: PathBuf) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lab_check_is_due_after_a_day_or_when_the_clock_went_back() {
+        let lab = LabSubscription {
+            name: String::new(),
+            url: String::new(),
+            fingerprint: String::new(),
+            last_check: 1_000_000,
+        };
+        assert!(!lab.is_due(1_000_000 + 3600));
+        assert!(lab.is_due(1_000_000 + 24 * 3600));
+        assert!(lab.is_due(999_000));
+    }
 
     #[test]
     fn recent_files_are_unique_newest_first_and_limited() {

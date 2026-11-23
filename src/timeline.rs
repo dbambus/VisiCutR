@@ -13,7 +13,7 @@ pub enum MotionKind {
     Dwell,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct Motion {
     pub kind: MotionKind,
     pub from_mm: [f64; 2],
@@ -22,7 +22,7 @@ pub struct Motion {
     pub end_seconds: f64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct Program {
     pub operation: Operation,
     pub start_mm: [f64; 2],
@@ -101,7 +101,7 @@ impl Program {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct Run {
     pub program_index: usize,
     pub pass: u32,
@@ -111,7 +111,7 @@ pub struct Run {
     pub end_seconds: f64,
 }
 
-#[derive(Default, Serialize)]
+#[derive(Default, Serialize, Clone)]
 pub struct Timeline {
     pub programs: Vec<Program>,
     pub runs: Vec<Run>,

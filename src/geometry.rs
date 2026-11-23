@@ -419,7 +419,16 @@ fn script_settings(id: &str) -> Option<(Vec<ScriptSetting>, Vec<ScriptSetting>, 
             }
         };
         let (power, speed) = text.split_once(':')?;
-        Some((value(power)?, value(speed)?))
+        // Scripts may `set` anything; only the values the driver accepts
+        // count (0 … 100 % power, 0.1 … 100 % speed): speed 0 made the time
+        // estimate infinite and 200 % power scaled circles wrongly.
+        let power = value(power)?
+            .filter(|v| v.is_finite())
+            .map(|v| v.clamp(0.0, 100.0));
+        let speed = value(speed)?
+            .filter(|v| v.is_finite())
+            .map(|v| v.clamp(0.1, 100.0));
+        Some((power, speed))
     };
     let (mut sets, mut after, mut joined) = (Vec::new(), Vec::new(), false);
     for field in fields {
@@ -2066,5 +2075,18 @@ mod clip_tests {
             "on the frame edge"
         );
         assert_eq!(object_at(&outlines, [150.0, 50.0], 1.0), None);
+    }
+}
+
+#[cfg(test)]
+mod script_tests {
+    #[test]
+    fn script_values_are_limited_to_what_the_driver_accepts() {
+        let (sets, _, _) = super::script_settings("laserscript-0_e200:0_en:NaN").unwrap();
+        assert_eq!(sets, [(Some(100.0), Some(0.1)), (None, None)]);
+        let (sets, after, joined) = super::script_settings("laserscript-3_e30:50_tn:n_j").unwrap();
+        assert_eq!(sets, [(Some(30.0), Some(50.0))]);
+        assert_eq!(after, [(None, None)]);
+        assert!(joined);
     }
 }

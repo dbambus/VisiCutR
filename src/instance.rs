@@ -16,8 +16,11 @@ use std::time::Duration;
 
 /// Port und Kennwort der laufenden Oberfläche im Einstellungsordner.
 const FILE: &str = "instance.json";
-/// Längste Anfrage; Pfade sind kurz.
-const MAX_REQUEST: u64 = 64 * 1024;
+/// Längste Anfrage (viele lange Pfade, etwa ein ganzer Ordner).
+const MAX_REQUEST: u64 = 4 * 1024 * 1024;
+/// Gleichzeitig bediente Verbindungen; weitere warten nicht, sie werden
+/// geschlossen.
+const MAX_CONNECTIONS: usize = 8;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -219,6 +222,9 @@ fn send(address: &Address, request: &Request) -> std::io::Result<()> {
     };
     let mut line = serde_json::to_vec(&message)?;
     line.push(b'\n');
+    if line.len() as u64 > MAX_REQUEST {
+        return Err(std::io::Error::other("Anfrage zu groß"));
+    }
     stream.write_all(&line)?;
     let mut reply = String::new();
     BufReader::new(stream).take(16).read_line(&mut reply)?;
@@ -240,7 +246,7 @@ pub struct Listener {
 impl Listener {
     /// Öffnet einen freien Port an 127.0.0.1 und legt die Adresse in `dir`
     /// ab. `notify` läuft nach jeder Anfrage (weckt die Oberfläche).
-    pub fn start(dir: &Path, notify: impl Fn() + Send + 'static) -> std::io::Result<Self> {
+    pub fn start(dir: &Path, notify: impl Fn() + Send + Sync + 'static) -> std::io::Result<Self> {
         let server = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
         let token = random_token();
         let address = Address {
@@ -249,18 +255,36 @@ impl Listener {
         };
         std::fs::create_dir_all(dir)?;
         let file = dir.join(FILE);
-        write_private(&file, &serde_json::to_vec(&address)?)?;
+        // Eine zweite Instanz (`--demo`, fehlgeschlagene Übergabe) lässt die
+        // Adresse einer laufenden stehen; sonst fände nach ihrem Ende kein
+        // Start mehr die erste.
+        if !running(&file) {
+            write_private(&file, &serde_json::to_vec(&address)?)?;
+        }
         let (sender, receiver) = std::sync::mpsc::channel();
-        let expected = token.clone();
+        let expected = std::sync::Arc::new(token.clone());
+        let notify = std::sync::Arc::new(notify);
+        let active = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         std::thread::spawn(move || {
+            use std::sync::atomic::Ordering;
             for stream in server.incoming() {
                 let Ok(stream) = stream else { continue };
-                if let Some(request) = receive(stream, &expected) {
-                    if sender.send(request).is_err() {
-                        break;
-                    }
-                    notify();
+                // Jede Verbindung in einem eigenen Thread: Ein Prozess, der
+                // nichts sendet, hält die übrigen nicht auf.
+                if active.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    continue;
                 }
+                let (sender, expected) = (sender.clone(), expected.clone());
+                let (notify, active) = (notify.clone(), active.clone());
+                std::thread::spawn(move || {
+                    if let Some(request) = receive(stream, &expected)
+                        && sender.send(request).is_ok()
+                    {
+                        notify();
+                    }
+                    active.fetch_sub(1, Ordering::SeqCst);
+                });
             }
         });
         Ok(Self {
@@ -289,15 +313,40 @@ impl Drop for Listener {
     }
 }
 
+/// Ob unter der Adresse in `file` eine Oberfläche Verbindungen annimmt.
+fn running(file: &Path) -> bool {
+    std::fs::read(file)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Address>(&bytes).ok())
+        .is_some_and(|address| {
+            let socket = SocketAddr::from((Ipv4Addr::LOCALHOST, address.port));
+            TcpStream::connect_timeout(&socket, CONNECT_TIMEOUT).is_ok()
+        })
+}
+
 /// Liest eine Anfrage und bestätigt sie; falsches Kennwort oder Unsinn
-/// bleiben unbeantwortet.
+/// bleiben unbeantwortet. Die Frist gilt für die ganze Anfrage, nicht je
+/// Leseaufruf.
 fn receive(stream: TcpStream, token: &str) -> Option<Request> {
-    stream.set_read_timeout(Some(REPLY_TIMEOUT)).ok()?;
+    let deadline = std::time::Instant::now() + REPLY_TIMEOUT;
     stream.set_write_timeout(Some(REPLY_TIMEOUT)).ok()?;
-    let mut reader = BufReader::new(stream.try_clone().ok()?).take(MAX_REQUEST);
-    let mut line = String::new();
-    reader.read_line(&mut line).ok()?;
-    let message: Message = serde_json::from_str(&line).ok()?;
+    let mut bytes = Vec::new();
+    let mut chunk = [0u8; 8192];
+    let mut reader = stream.try_clone().ok()?;
+    while !bytes.contains(&b'\n') {
+        let left = deadline.checked_duration_since(std::time::Instant::now())?;
+        reader
+            .set_read_timeout(Some(left.max(Duration::from_millis(1))))
+            .ok()?;
+        let read = reader.read(&mut chunk).ok()?;
+        if read == 0 || bytes.len() as u64 + read as u64 > MAX_REQUEST {
+            return None;
+        }
+        bytes.extend_from_slice(&chunk[..read]);
+    }
+    let end = bytes.iter().position(|b| *b == b'\n')?;
+    let line = std::str::from_utf8(&bytes[..end]).ok()?;
+    let message: Message = serde_json::from_str(line).ok()?;
     if message.token != token {
         return None;
     }
@@ -473,18 +522,41 @@ mod tests {
         };
         assert!(send(&forged, &Request::default()).is_err());
         assert_eq!(listener.try_recv(), None);
-        // Eine neuere Instanz hat die Adresse überschrieben: nicht löschen.
+        // Eine zweite Instanz lässt die Adresse der laufenden stehen und
+        // entfernt sie beim Beenden nicht.
+        let second = Listener::start(&dir, || {}).unwrap();
+        drop(second);
+        assert!(dir.join(FILE).exists());
+        assert!(forward(&dir, &Request::default()));
+        assert_eq!(
+            listener.receiver.recv_timeout(REPLY_TIMEOUT).ok(),
+            Some(Request::default())
+        );
+        // Ist die erste beendet, übernimmt der nächste Start die Adresse.
+        drop(listener);
+        assert!(!dir.join(FILE).exists());
         let (woken, wake) = std::sync::mpsc::channel();
         let newer = Listener::start(&dir, move || {
             let _ = woken.send(());
         })
         .unwrap();
-        drop(listener);
-        assert!(dir.join(FILE).exists());
         assert!(forward(&dir, &Request::default()));
         // Die Bestätigung kommt vor der Übergabe an die Oberfläche: warten.
         wake.recv_timeout(REPLY_TIMEOUT).unwrap();
         assert_eq!(newer.try_recv(), Some(Request::default()));
+        // Ein Prozess, der nichts sendet, hält Übergaben nicht auf.
+        let file: Address =
+            serde_json::from_slice(&std::fs::read(dir.join(FILE)).unwrap()).unwrap();
+        let _silent = TcpStream::connect((Ipv4Addr::LOCALHOST, file.port)).unwrap();
+        let many = Request {
+            files: (0..2000)
+                .map(|i| PathBuf::from(format!("/ein/langer/pfad/{i:04}/zeichnung.svg")))
+                .collect(),
+            ..Request::default()
+        };
+        assert!(forward(&dir, &many), "über 64 KiB");
+        wake.recv_timeout(REPLY_TIMEOUT).unwrap();
+        assert_eq!(newer.try_recv(), Some(many));
         // Verwaiste Adresse (Absturz): Port ist zu, also selbst starten.
         drop(newer);
         let closed = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();

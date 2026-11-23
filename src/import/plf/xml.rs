@@ -180,6 +180,12 @@ pub fn strip_doctype(source: &str) -> String {
     }
     let mut body = source[end..].to_string();
     for (reference, value) in entities {
+        // Each pass grows the text at most this much; stop before it gets
+        // out of hand (documents that pass `check_nesting` stay below).
+        let grown = body.matches(&reference).count() * value.len();
+        if body.len().saturating_add(grown) > crate::svg::MAX_ENTITY_EXPANSION {
+            break;
+        }
         body = body.replace(&reference, &value);
     }
     format!("{}{body}", &source[..start])

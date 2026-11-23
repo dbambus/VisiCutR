@@ -3,6 +3,22 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## 1.0.2 – 23.11.2026
+
+Laserwerte lassen sich direkt als Materialprofil sichern (#10).
+
+- **Als Profil sichern:** Weichen Leistung, Geschwindigkeit oder
+  Durchgänge in der Bearbeitung vom Materialprofil ab oder gibt es für
+  Material, Stärke und Verfahren noch keines, sichert ein Knopf die Werte
+  als Profil in der Materialbibliothek. Ein eigenes Material wird dabei
+  aufgenommen; beim gesamten Motiv bleiben weitere Parametersätze eines
+  Profils erhalten.
+- **Hinweise lesbarer:** Erklärende Hinweise in Materialien,
+  Gerätedialog, Bearbeitung und Vorschau stehen in der normalen
+  Hinweisschrift statt in der kleinsten Schrift.
+- **Intern:** Fehler als eigene Typen statt Text, App-Zustand in
+  Gruppen gebündelt, lange Funktionen zerlegt und weniger `unwrap`.
+
 ## 1.0.1 – 04.11.2026
 
 Überarbeitete Objektleiste: eigenes Skalieren-Feld und klarere Felder für

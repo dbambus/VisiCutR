@@ -1336,6 +1336,15 @@ impl VisiCutR {
         self.background.send_result.is_some()
     }
 
+    /// Erst nach offenen Dialogen dürfen Hintergrundergebnisse das Projekt
+    /// ändern: Eine Sende-Bestätigung gilt für den Stand, den sie zeigt; das
+    /// Ergebnis wartet so lange.
+    fn dialog_open(&self) -> bool {
+        self.pending.asking()
+            || self.messages.alert.is_some()
+            || self.background.lab_offer.is_some()
+    }
+
     fn modal_open(&self) -> bool {
         self.background.reading.is_some()
             || self.messages.alert.is_some()
@@ -1384,12 +1393,7 @@ impl VisiCutR {
         let Some(reading) = &self.background.reading else {
             return;
         };
-        // Erst nach offenen Dialogen: Eine Sende-Bestätigung gilt für den
-        // Stand, den sie zeigt; das Ergebnis wartet so lange.
-        if self.pending.asking()
-            || self.messages.alert.is_some()
-            || self.background.lab_offer.is_some()
-        {
+        if self.dialog_open() {
             return;
         }
         let prefetched = match reading.result.try_recv() {
@@ -2175,6 +2179,9 @@ impl VisiCutR {
         let Some((identity, receiver)) = &self.background.parameters else {
             return;
         };
+        if self.dialog_open() {
+            return;
+        }
         let result = match receiver.try_recv() {
             Ok(result) => result,
             Err(std::sync::mpsc::TryRecvError::Empty) => return,
@@ -5599,9 +5606,12 @@ impl eframe::App for VisiCutR {
         self.poll_send(ctx);
         self.poll_reading(ctx);
         self.poll_parameters(ctx);
-        // Während des Lesens könnte das Ergebnis das Projekt noch ändern.
-        self.sendable =
-            !self.busy() && self.background.reading.is_none() && self.project.validate().is_ok();
+        // Während des Lesens oder Erzeugens könnte das Ergebnis das Projekt
+        // noch ändern.
+        self.sendable = !self.busy()
+            && self.background.reading.is_none()
+            && self.background.parameters.is_none()
+            && self.project.validate().is_ok();
         self.follow_device_origin();
         self.handle_close_request(ctx);
         self.take_dropped_files(ctx);

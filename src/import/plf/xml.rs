@@ -136,7 +136,7 @@ pub fn escape_text(value: &str) -> String {
 /// declares (Adobe Illustrator declares namespace URIs this way), because the
 /// rest of the app parses SVG without DTD support.
 pub fn strip_doctype(source: &str) -> String {
-    let Some(start) = source.find("<!DOCTYPE") else {
+    let Some(start) = crate::svg::doctype_start(source) else {
         return source.to_string();
     };
     let mut end = None;
@@ -218,5 +218,14 @@ mod tests {
         let stripped = strip_doctype(source);
         assert!(!stripped.contains("DOCTYPE"));
         assert!(stripped.contains("xmlns=\"http://www.w3.org/2000/svg\""));
+    }
+
+    #[test]
+    fn strips_the_doctype_after_comments() {
+        let source = r#"<!-- <!DOCTYPE x> --><!DOCTYPE svg [<!ENTITY ns "http://www.w3.org/2000/svg">]><svg xmlns="&ns;"/>"#;
+        assert_eq!(
+            strip_doctype(source),
+            r#"<!-- <!DOCTYPE x> --><svg xmlns="http://www.w3.org/2000/svg"/>"#
+        );
     }
 }

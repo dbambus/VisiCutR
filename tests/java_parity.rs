@@ -406,7 +406,8 @@ fn check_frozen(
         return Ok(());
     }
     match fs::read_to_string(&path) {
-        Ok(frozen) if frozen == actual => Ok(()),
+        // Git for Windows checks text files out with CRLF.
+        Ok(frozen) if frozen.replace("\r\n", "\n") == actual => Ok(()),
         Ok(frozen) => Err(format!(
             "{name}: Rust-Ausgabe der dokumentierten Abweichung hat sich geändert \
              (eingefroren: {}, jetzt: {}); gewollt? VISICUTR_FREEZE_PARITY=1",

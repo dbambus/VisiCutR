@@ -131,7 +131,7 @@ fn references(text: &str) -> impl Iterator<Item = &str> {
 /// markup and parameter entities are refused.
 #[allow(clippy::type_complexity)]
 fn entity_declarations(text: &str) -> Result<Option<(Vec<(&str, &str)>, usize)>, SvgError> {
-    let Some(doctype) = text.find("<!DOCTYPE") else {
+    let Some(doctype) = doctype_start(text) else {
         return Ok(None);
     };
     let bytes = text.as_bytes();
@@ -198,6 +198,29 @@ fn entity_declarations(text: &str) -> Result<Option<(Vec<(&str, &str)>, usize)>,
         }
     }
     Ok(Some((entities, bytes.len())))
+}
+
+/// Where the DOCTYPE starts: in the prolog, after the byte order mark, the
+/// XML declaration, comments, processing instructions and white space.
+/// `<!DOCTYPE` inside a comment before it is not the DOCTYPE; searching for
+/// the first occurrence let a comment hide the real one from the checks.
+pub fn doctype_start(text: &str) -> Option<usize> {
+    let mut i = text.len() - text.trim_start_matches('\u{feff}').len();
+    loop {
+        i = text.len() - text[i..].trim_start().len();
+        let rest = &text[i..];
+        if rest.starts_with("<!DOCTYPE") {
+            return Some(i);
+        }
+        let (close, from) = if rest.starts_with("<!--") {
+            ("-->", 4)
+        } else if rest.starts_with("<?") {
+            ("?>", 2)
+        } else {
+            return None;
+        };
+        i += from + rest[from..].find(close)? + close.len();
+    }
 }
 
 fn nesting_depth(text: &str) -> usize {
@@ -634,6 +657,43 @@ mod tests {
         assert!(matches!(check_nesting(escaped), Err(SvgError::Entities)));
         let parameter = r#"<!DOCTYPE svg [<!ENTITY % p "<!ENTITY a 'x'>"> %p;]><svg/>"#;
         assert!(matches!(check_nesting(parameter), Err(SvgError::Entities)));
+        // A comment or processing instruction before the DOCTYPE that
+        // mentions `<!DOCTYPE` does not hide the real one.
+        for prefix in [
+            "<!-- <!DOCTYPE x> -->",
+            "\u{feff}<?xml version=\"1.0\"?>\n<!-- a -->\n<?pi <!DOCTYPE x> ?>",
+        ] {
+            let hidden = format!("{prefix}{markup}");
+            assert!(
+                roxmltree::Document::parse_with_options(
+                    &hidden.replace("&a;", ""),
+                    roxmltree::ParsingOptions {
+                        allow_dtd: true,
+                        ..Default::default()
+                    }
+                )
+                .is_ok()
+            );
+            assert!(
+                matches!(check_nesting(&hidden), Err(SvgError::Entities)),
+                "{prefix}"
+            );
+            let hidden = format!("{prefix}{many}");
+            assert!(
+                matches!(check_nesting(&hidden), Err(SvgError::Entities)),
+                "{prefix}"
+            );
+        }
+    }
+
+    #[test]
+    fn doctype_only_in_the_prolog() {
+        assert_eq!(
+            super::doctype_start("<!-- <!DOCTYPE x> --> <!DOCTYPE y>"),
+            Some(22)
+        );
+        assert_eq!(super::doctype_start("<svg/><!DOCTYPE x>"), None);
+        assert_eq!(super::doctype_start("<!-- unclosed <!DOCTYPE x>"), None);
     }
 
     #[test]

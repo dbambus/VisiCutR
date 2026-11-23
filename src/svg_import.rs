@@ -630,7 +630,10 @@ mod tests {
     }
 
     fn file_url(path: &Path) -> String {
-        let text = path.to_string_lossy().replace('\\', "/");
+        // Inkscape writes file:///C:/…, not the verbatim form of `canonicalize`.
+        let text = path.to_string_lossy();
+        let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+        let text = text.replace('\\', "/");
         let text = if text.starts_with('/') {
             text
         } else {

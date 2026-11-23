@@ -1,1 +1,1 @@
-1 jobs, 2104 bytes, fnv1a befa5c6f7701e5b1
+error: Rust-Import lehnt ab: Schrift-Operator „findfont“ wird nicht unterstützt. Nur Ghostscript könnte die Datei lesen; das lässt sich in den Einstellungen unter „Import“ erlauben.

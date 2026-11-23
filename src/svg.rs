@@ -280,6 +280,14 @@ pub struct Preview {
     pub pixmap: tiny_skia::Pixmap,
 }
 
+static SYSTEM_FONTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Without system fonts, text comes out the same on every computer (tests
+/// that freeze output). Takes effect only before the first [`fonts`] call.
+pub fn use_system_fonts(used: bool) {
+    SYSTEM_FONTS.store(used, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// System fonts plus the fonts bundled with egui (Ubuntu Light, Hack), loaded once.
 ///
 /// Preview, engraving, cutting and the mapping all share this database so text
@@ -291,7 +299,9 @@ pub fn fonts() -> Arc<fontdb::Database> {
     FONTS
         .get_or_init(|| {
             let mut db = fontdb::Database::new();
-            db.load_system_fonts();
+            if SYSTEM_FONTS.load(std::sync::atomic::Ordering::Relaxed) {
+                db.load_system_fonts();
+            }
             let mut family = |data: &'static [u8]| {
                 let ids = db.load_font_source(fontdb::Source::Binary(Arc::new(data)));
                 ids.first()

@@ -55,7 +55,7 @@ fn memory_bombs_end_only_the_worker() {
     ] {
         let path = laserscript(name, source);
         let error = import::read_file(&path).err().expect(name);
-        assert!(error.contains("abgebrochen"), "{name}: {error}");
+        assert!(error.to_string().contains("abgebrochen"), "{name}: {error}");
     }
 }
 

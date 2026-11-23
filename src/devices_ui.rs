@@ -905,11 +905,12 @@ fn device_rows(ui: &mut egui::Ui, device: &mut LaserDevice) {
                 .desired_width(width)
                 .desired_rows(4),
         );
-        ui.small(tr(
-            "Autofokus, Druckluft und Absaugung stellt der LTT-Treiber \
+        crate::form::caption(
+            ui,
+            tr("Autofokus, Druckluft und Absaugung stellt der LTT-Treiber \
              nicht ein; dieser Text erinnert nach dem Senden 10 s lang daran. \
-             $jobname wird durch die Auftragsnamen ersetzt.",
-        ));
+             $jobname wird durch die Auftragsnamen ersetzt."),
+        );
     });
     ui.end_row();
 }
@@ -1100,7 +1101,7 @@ fn machine_rows(ui: &mut egui::Ui, machine: &mut MachineSettings) -> bool {
                     ui.end_row();
                 }
             });
-            ui.small(tr("Beim Gravieren, in 1/4000 Zoll (8 = ein Pixel)"));
+            crate::form::caption(ui, tr("Beim Gravieren, in 1/4000 Zoll (8 = ein Pixel)"));
             ui.button(tr("Zeilenversatz kalibrieren …")).clicked()
         })
         .inner;
@@ -1127,9 +1128,10 @@ fn machine_rows(ui: &mut egui::Ui, machine: &mut MachineSettings) -> bool {
             }
         });
         if machine.experimental_curves() {
-            ui.small(tr(
-                "Experimentell: Kurven werden anders geplant als in VisiCut.",
-            ));
+            crate::form::caption(
+                ui,
+                tr("Experimentell: Kurven werden anders geplant als in VisiCut."),
+            );
         }
     });
     ui.end_row();
@@ -1140,9 +1142,10 @@ fn machine_rows(ui: &mut egui::Ui, machine: &mut MachineSettings) -> bool {
                 .range(0.0..=1000.0)
                 .suffix(" ms"),
         );
-        ui.small(tr(
-            "pddelay der Gerätekonfiguration; nur für die Zeitschätzung.",
-        ));
+        crate::form::caption(
+            ui,
+            tr("pddelay der Gerätekonfiguration; nur für die Zeitschätzung."),
+        );
     });
     ui.end_row();
     ui.label("");

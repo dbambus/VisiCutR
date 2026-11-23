@@ -260,6 +260,92 @@ pub fn apply_step_preset(library: &Library, project: &mut Project, index: usize)
     true
 }
 
+/// Parameters of the whole motif as a profile of its material and thickness.
+pub fn whole_profile(project: &Project) -> MaterialProfile {
+    MaterialProfile {
+        thickness_mm: project.thickness_mm,
+        operation: project.operation,
+        power_percent: project.power_percent,
+        speed_percent: project.speed_percent,
+        passes: project.passes,
+        additional: Vec::new(),
+        source: None,
+    }
+}
+
+/// Parameters of one step as a profile of the project's material and thickness.
+pub fn step_profile(project: &Project, step: &JobStep) -> MaterialProfile {
+    MaterialProfile {
+        thickness_mm: project.thickness_mm,
+        operation: step.operation,
+        power_percent: step.power_percent,
+        speed_percent: step.speed_percent,
+        passes: step.passes,
+        additional: step.additional.clone(),
+        source: None,
+    }
+}
+
+/// Whether `candidate` can be stored and differs from the current profile.
+/// Profiles with 0 % power or speed count as "not applicable" (see
+/// [`preset`]), so they are not offered. `keep_additional` ignores the
+/// further parameter sets, which the whole motif does not edit.
+pub fn offers_profile(
+    project: &Project,
+    current: Option<&MaterialProfile>,
+    candidate: &MaterialProfile,
+    keep_additional: bool,
+) -> bool {
+    if project.material.trim().is_empty()
+        || candidate.power_percent <= 0.0
+        || candidate.speed_percent <= 0.0
+    {
+        return false;
+    }
+    let Some(p) = current else {
+        return true;
+    };
+    (p.power_percent - candidate.power_percent).abs() > 1e-4
+        || (p.speed_percent - candidate.speed_percent).abs() > 1e-4
+        || p.passes != candidate.passes
+        || (!keep_additional && p.additional != candidate.additional)
+}
+
+/// Stores `profile` for the material `name`: replaces the profile of the same
+/// operation and thickness or adds it; an own material is added to the
+/// library. `keep_additional` keeps the further sets of a replaced profile.
+pub fn store_profile(
+    materials: &mut Vec<Material>,
+    name: &str,
+    mut profile: MaterialProfile,
+    keep_additional: bool,
+) {
+    let index = match materials.iter().position(|m| m.name == name) {
+        Some(i) => i,
+        None => {
+            materials.push(Material {
+                id: unique_id(materials),
+                name: name.into(),
+                profiles: Vec::new(),
+            });
+            materials.len() - 1
+        }
+    };
+    let profiles = &mut materials[index].profiles;
+    let existing = profiles.iter_mut().find(|p| {
+        p.operation == profile.operation && same_thickness(p.thickness_mm, profile.thickness_mm)
+    });
+    match existing {
+        Some(p) => {
+            if keep_additional {
+                profile.additional = std::mem::take(&mut p.additional);
+            }
+            *p = profile;
+        }
+        None => profiles.push(profile),
+    }
+}
+
 /// Takes over the material profiles for the motif or every step; returns
 /// how many parameter sets changed.
 pub fn apply_presets(library: &Library, project: &mut Project) -> usize {
@@ -402,7 +488,8 @@ fn profile_table(ui: &mut egui::Ui, material: &mut Material, drop: &mut Option<u
             ui.end_row();
             for (g, (thickness, members)) in groups.iter().enumerate() {
                 if g > 0 {
-                    ui.add_space(6.0);
+                    // Im Grid ist `add_space` nicht erlaubt (Debug-Assert in egui).
+                    ui.allocate_space(egui::vec2(0.0, 6.0));
                     ui.end_row();
                 }
                 if thickness_row(ui, &mut material.profiles, *thickness, members, height) {
@@ -580,10 +667,13 @@ fn material_details(ui: &mut egui::Ui, material: Option<&mut Material>, height: 
             ui.label(tr("Name"));
             ui.text_edit_singleline(&mut material.name);
         });
-        ui.small(tr("\
+        crate::form::caption(
+            ui,
+            tr("\
             Leistung und Geschwindigkeit in Prozent wie am LTT. Je Stärke ist \
              ein Profil pro Verfahren möglich; 0 % Leistung gilt als \
-             „nicht übernehmbar“."));
+             „nicht übernehmbar“."),
+        );
         let mut drop = None;
         // Die Symbolleiste schließt unten mit der der Materialliste ab.
         let used = ui.cursor().top() - top;
@@ -866,7 +956,7 @@ fn raster_options(
                 });
         });
     } else {
-        ui.small(tr("Graustufen: Leistung folgt der Helligkeit."));
+        crate::form::caption(ui, tr("Graustufen: Leistung folgt der Helligkeit."));
     }
     crate::form::row(ui, tr("Auflösung"), |ui| {
         crate::form::Dropdown::from_id_salt(("dpi", id))
@@ -882,9 +972,10 @@ fn raster_options(
             .on_hover_text(tr("Punkte und Zeilen je Zoll beim Gravieren: höher ist feiner, braucht aber mehr Zeilen und Zeit (1000 DPI doppelt so viele wie 500). Alle Gravuren eines Auftrags brauchen dieselbe Auflösung."));
     });
     if settings.dpi != 500 {
-        ui.small(tr(
-            "Nur 500 DPI ist am Gerät erprobt; den ersten Auftrag beaufsichtigen.",
-        ));
+        crate::form::caption(
+            ui,
+            tr("Nur 500 DPI ist am Gerät erprobt; den ersten Auftrag beaufsichtigen."),
+        );
     }
     crate::form::row(ui, tr("Helligkeit"), |ui| {
         changed |= ui
@@ -989,6 +1080,38 @@ fn parameters(
     changed
 }
 
+/// „Als Profil sichern“; `true` when clicked.
+fn store_button_for(
+    ui: &mut egui::Ui,
+    material: &str,
+    thickness: f32,
+    operation: Operation,
+) -> bool {
+    ui.button(tr("Als Profil sichern"))
+        .on_hover_text(tr!(
+            "Leistung, Geschwindigkeit und Durchgänge als Profil für {material}, {thickness} mm, {operation} in der Materialbibliothek sichern",
+            material = material,
+            thickness = thickness,
+            operation = operation_title(operation)
+        ))
+        .clicked()
+}
+
+/// Message of the last „Als Profil sichern“ of this step (`None`: whole motif).
+fn show_profile_status(
+    ui: &mut egui::Ui,
+    status: Option<&(Option<usize>, Result<String, String>)>,
+    step: Option<usize>,
+) {
+    match status {
+        Some((s, Ok(message))) if *s == step => crate::form::caption(ui, message.clone()),
+        Some((s, Err(error))) if *s == step => {
+            ui.colored_label(WARNING, error);
+        }
+        _ => {}
+    }
+}
+
 fn comparison_title(compare: bool, inverted: bool) -> &'static str {
     match (compare, inverted) {
         (false, false) => "=",
@@ -1008,7 +1131,7 @@ fn filters(
     let mut changed = false;
     let mut remove = None;
     if filters.is_empty() {
-        ui.small(tr("Ohne Bedingung: alle Objekte"));
+        crate::form::caption(ui, tr("Ohne Bedingung: alle Objekte"));
     }
     for (i, filter) in filters.iter_mut().enumerate() {
         ui.horizontal(|ui| {
@@ -1497,6 +1620,9 @@ pub struct JobUi {
     renaming: Option<(String, String)>,
     /// Result of the last template action.
     template_status: Option<Result<String, String>>,
+    /// Result of „Als Profil sichern“: the step (`None` for the whole motif)
+    /// and the message.
+    profile_status: Option<(Option<usize>, Result<String, String>)>,
 }
 
 impl JobUi {
@@ -1528,6 +1654,7 @@ impl JobUi {
             template_name: String::new(),
             renaming: None,
             template_status: None,
+            profile_status: None,
         };
         (ui, error)
     }
@@ -1579,13 +1706,11 @@ impl JobUi {
         }
     }
 
-    /// Opens the material library editor (also from the menu, Ctrl+Shift+M).
     /// Objekt, das im Kontextmenü der Objektliste gelöscht wurde.
     pub fn take_deleted_object(&mut self) -> Option<usize> {
         self.delete_object.take()
     }
 
-    /// Material profile for a new step, if the library has one.
     /// Materialbibliothek eines FabLabs: ersetzt die bisherige und wird gesichert.
     pub fn adopt_library(&mut self, library: Library) -> Result<(), String> {
         library.save(&device::config_dir())?;
@@ -1613,6 +1738,7 @@ impl JobUi {
         apply_step_preset(self.active(), project, index);
     }
 
+    /// Opens the material library editor (also from the menu, Ctrl+Shift+M).
     pub fn open_library(&mut self) {
         if self.editor.is_none() {
             self.editor = Some(Editor {
@@ -1691,13 +1817,28 @@ impl JobUi {
             *dirty = true;
         }
         let profile = preset(self.active(), project, project.operation).cloned();
-        *dirty |= parameters(
+        let changed = parameters(
             ui,
             &mut project.power_percent,
             &mut project.speed_percent,
             &mut project.passes,
             profile.as_ref(),
         );
+        *dirty |= changed;
+        let candidate = whole_profile(project);
+        if offers_profile(project, profile.as_ref(), &candidate, true)
+            && store_button_for(
+                ui,
+                &project.material,
+                project.thickness_mm,
+                project.operation,
+            )
+        {
+            self.profile_status = Some((None, self.store_profile(project, candidate, true)));
+        } else if changed {
+            self.profile_status = None;
+        }
+        show_profile_status(ui, self.profile_status.as_ref(), None);
         if project.operation.is_raster() {
             *dirty |= raster_options(ui, "whole", &mut project.raster, project.operation);
         }
@@ -1709,7 +1850,7 @@ impl JobUi {
             ui.colored_label(WARNING, e);
         }
         if self.document.objects.is_empty() {
-            ui.small(tr("Keine auswählbaren Objekte in der SVG."));
+            crate::form::caption(ui, tr("Keine auswählbaren Objekte in der SVG."));
             return;
         }
         let library = &self.library;
@@ -1990,6 +2131,8 @@ impl JobUi {
             ui.colored_label(WARNING, e);
         }
         let mut edits = StepEdits::default();
+        let mut store = None;
+        let mut clear_status = false;
         for i in 0..project.steps.len() {
             let objects = match &selections {
                 Ok(s) => s.get(i).map_or(0, Vec::len),
@@ -2002,6 +2145,9 @@ impl JobUi {
                 continue;
             }
             let profile = preset(self.active(), project, project.steps[i].operation).cloned();
+            let candidate = step_profile(project, &project.steps[i]);
+            let offered = offers_profile(project, profile.as_ref(), &candidate, false);
+            let (material, thickness) = (project.material.clone(), project.thickness_mm);
             let step = &mut project.steps[i];
             crate::form::section(ui, &tr!("Schritt {number}", number = i + 1), |ui| {
                 step_header(ui, i, step, objects, &mut edits);
@@ -2014,16 +2160,29 @@ impl JobUi {
                         tr("Zum Markieren zuerst eine eigene Leistung einstellen."),
                     );
                 }
-                *dirty |= parameters(
+                let mut changed = parameters(
                     ui,
                     &mut step.power_percent,
                     &mut step.speed_percent,
                     &mut step.passes,
                     profile.as_ref(),
                 );
-                *dirty |= additional_parameter_sets(ui, step);
+                changed |= additional_parameter_sets(ui, step);
+                if offered && store_button_for(ui, &material, thickness, step.operation) {
+                    store = Some((i, candidate));
+                } else if changed {
+                    clear_status |= self.profile_status.as_ref().is_some_and(|s| s.0 == Some(i));
+                }
+                show_profile_status(ui, self.profile_status.as_ref(), Some(i));
+                *dirty |= changed;
                 *dirty |= step_options(ui, i, step);
             });
+        }
+        if let Some((i, candidate)) = store {
+            let result = self.store_profile(project, candidate, false);
+            self.profile_status = Some((Some(i), result));
+        } else if clear_status {
+            self.profile_status = None;
         }
         *dirty |= self.apply_step_edits(project, edits);
     }
@@ -2235,6 +2394,41 @@ impl JobUi {
             .is_some_and(|e| e.draft != self.library.materials)
     }
 
+    /// Stores `profile` for the project's material in the library and saves
+    /// it; an open library editor gets the same change.
+    fn store_profile(
+        &mut self,
+        project: &Project,
+        profile: MaterialProfile,
+        keep_additional: bool,
+    ) -> Result<String, String> {
+        let label = format!(
+            "{}, {} mm, {}",
+            project.material,
+            profile.thickness_mm,
+            operation_title(profile.operation)
+        );
+        let mut library = self.library.clone();
+        store_profile(
+            &mut library.materials,
+            &project.material,
+            profile.clone(),
+            keep_additional,
+        );
+        library.save(&device::config_dir())?;
+        self.library = library;
+        self.custom = true;
+        if let Some(editor) = &mut self.editor {
+            store_profile(
+                &mut editor.draft,
+                &project.material,
+                profile,
+                keep_additional,
+            );
+        }
+        Ok(tr!("Profil gesichert: {label}", label = label))
+    }
+
     /// Sichert den Entwurf der Materialbibliothek (wie „Sichern“).
     pub fn save_library(&mut self) -> Result<(), String> {
         let Some(editor) = &self.editor else {
@@ -2318,6 +2512,98 @@ mod tests {
             passes: 2,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn storing_a_profile_replaces_the_same_operation_and_thickness() {
+        let mut materials = library().materials;
+        let mut project = project();
+        project.power_percent = 42.0;
+        let candidate = whole_profile(&project);
+        let original = library();
+        let current = preset(&original, &project, Operation::Engrave);
+        assert!(offers_profile(&project, current, &candidate, true));
+        store_profile(&mut materials, "Pappel", candidate.clone(), true);
+        let pappel = &materials[0];
+        assert_eq!(pappel.profiles.len(), 5);
+        assert_eq!(pappel.profiles[2], candidate);
+        let stored = Library {
+            materials,
+            ..library()
+        };
+        let current = preset(&stored, &project, Operation::Engrave);
+        assert!(!offers_profile(&project, current, &candidate, true));
+    }
+
+    #[test]
+    fn storing_from_the_whole_motif_keeps_further_parameter_sets() {
+        let mut materials = library().materials;
+        let set = ParameterSet {
+            power_percent: 10.0,
+            speed_percent: 50.0,
+            passes: 1,
+        };
+        materials[0].profiles[1].additional = vec![set.clone()];
+        let mut project = project();
+        (project.operation, project.power_percent) = (Operation::Cut, 85.0);
+        store_profile(&mut materials, "Pappel", whole_profile(&project), true);
+        assert_eq!(materials[0].profiles[1].power_percent, 85.0);
+        assert_eq!(materials[0].profiles[1].additional, [set]);
+
+        let mut step = JobStep::new(Operation::Cut);
+        step.power_percent = 70.0;
+        let candidate = step_profile(&project, &step);
+        let current = materials[0].profiles[1].clone();
+        assert!(offers_profile(&project, Some(&current), &candidate, false));
+        store_profile(&mut materials, "Pappel", candidate, false);
+        assert!(materials[0].profiles[1].additional.is_empty());
+    }
+
+    #[test]
+    fn storing_adds_new_thicknesses_and_own_materials() {
+        let mut materials = library().materials;
+        let mut project = project();
+        project.thickness_mm = 6.0;
+        store_profile(&mut materials, "Pappel", whole_profile(&project), true);
+        assert_eq!(thicknesses(&materials[0]), [0.0, 3.0, 4.0, 6.0]);
+
+        project.material = "Kork".into();
+        assert!(offers_profile(
+            &project,
+            None,
+            &whole_profile(&project),
+            true
+        ));
+        store_profile(&mut materials, "Kork", whole_profile(&project), true);
+        let kork = materials.last().unwrap();
+        assert_eq!((kork.name.as_str(), kork.profiles.len()), ("Kork", 1));
+        assert_ne!(kork.id, materials[0].id);
+        Library {
+            materials,
+            ..library()
+        }
+        .validate()
+        .unwrap();
+    }
+
+    #[test]
+    fn no_profile_is_offered_without_material_or_power() {
+        let mut project = project();
+        project.power_percent = 0.0;
+        assert!(!offers_profile(
+            &project,
+            None,
+            &whole_profile(&project),
+            true
+        ));
+        project.power_percent = 40.0;
+        project.material.clear();
+        assert!(!offers_profile(
+            &project,
+            None,
+            &whole_profile(&project),
+            true
+        ));
     }
 
     #[test]

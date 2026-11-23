@@ -1027,11 +1027,14 @@ fn simulation(ui: &mut egui::Ui, ready: &Ready, project: &Project, playback: &mu
             ));
         }
     });
-    ui.small(tr(
-        "Geplant: blass · Bearbeitet: kräftig · Gelber Punkt: Laserkopf · \
+    crate::form::caption(
+        ui,
+        tr(
+            "Geplant: blass · Bearbeitet: kräftig · Gelber Punkt: Laserkopf · \
          Rot: Schneiden · Blau: Gravieren · Orange: 3D-Gravur · Violett: Markieren · \
          Grau gestrichelt: Leerfahrt",
-    ));
+        ),
+    );
 }
 
 /// Maps bed millimetres into the simulation rectangle.

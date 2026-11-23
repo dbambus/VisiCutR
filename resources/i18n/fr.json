@@ -1057,5 +1057,8 @@
   "Skalieren": "Mettre à l'échelle",
   "Größe": "Taille",
   "Gleichmäßig skalieren": "Mise à l'échelle uniforme",
-  "Faktor eingeben; Enter skaliert": "Saisir un facteur ; Entrée met à l'échelle"
+  "Faktor eingeben; Enter skaliert": "Saisir un facteur ; Entrée met à l'échelle",
+  "Als Profil sichern": "Enregistrer comme profil",
+  "Leistung, Geschwindigkeit und Durchgänge als Profil für {material}, {thickness} mm, {operation} in der Materialbibliothek sichern": "Enregistrer puissance, vitesse et passes comme profil pour {material}, {thickness} mm, {operation} dans la bibliothèque de matériaux",
+  "Profil gesichert: {label}": "Profil enregistré : {label}"
 }

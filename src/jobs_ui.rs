@@ -488,7 +488,8 @@ fn profile_table(ui: &mut egui::Ui, material: &mut Material, drop: &mut Option<u
             ui.end_row();
             for (g, (thickness, members)) in groups.iter().enumerate() {
                 if g > 0 {
-                    ui.add_space(6.0);
+                    // Im Grid ist `add_space` nicht erlaubt (Debug-Assert in egui).
+                    ui.allocate_space(egui::vec2(0.0, 6.0));
                     ui.end_row();
                 }
                 if thickness_row(ui, &mut material.profiles, *thickness, members, height) {
@@ -666,10 +667,13 @@ fn material_details(ui: &mut egui::Ui, material: Option<&mut Material>, height: 
             ui.label(tr("Name"));
             ui.text_edit_singleline(&mut material.name);
         });
-        ui.small(tr("\
+        crate::form::caption(
+            ui,
+            tr("\
             Leistung und Geschwindigkeit in Prozent wie am LTT. Je Stärke ist \
              ein Profil pro Verfahren möglich; 0 % Leistung gilt als \
-             „nicht übernehmbar“."));
+             „nicht übernehmbar“."),
+        );
         let mut drop = None;
         // Die Symbolleiste schließt unten mit der der Materialliste ab.
         let used = ui.cursor().top() - top;
@@ -952,7 +956,7 @@ fn raster_options(
                 });
         });
     } else {
-        ui.small(tr("Graustufen: Leistung folgt der Helligkeit."));
+        crate::form::caption(ui, tr("Graustufen: Leistung folgt der Helligkeit."));
     }
     crate::form::row(ui, tr("Auflösung"), |ui| {
         crate::form::Dropdown::from_id_salt(("dpi", id))
@@ -968,9 +972,10 @@ fn raster_options(
             .on_hover_text(tr("Punkte und Zeilen je Zoll beim Gravieren: höher ist feiner, braucht aber mehr Zeilen und Zeit (1000 DPI doppelt so viele wie 500). Alle Gravuren eines Auftrags brauchen dieselbe Auflösung."));
     });
     if settings.dpi != 500 {
-        ui.small(tr(
-            "Nur 500 DPI ist am Gerät erprobt; den ersten Auftrag beaufsichtigen.",
-        ));
+        crate::form::caption(
+            ui,
+            tr("Nur 500 DPI ist am Gerät erprobt; den ersten Auftrag beaufsichtigen."),
+        );
     }
     crate::form::row(ui, tr("Helligkeit"), |ui| {
         changed |= ui
@@ -1126,7 +1131,7 @@ fn filters(
     let mut changed = false;
     let mut remove = None;
     if filters.is_empty() {
-        ui.small(tr("Ohne Bedingung: alle Objekte"));
+        crate::form::caption(ui, tr("Ohne Bedingung: alle Objekte"));
     }
     for (i, filter) in filters.iter_mut().enumerate() {
         ui.horizontal(|ui| {
@@ -1845,7 +1850,7 @@ impl JobUi {
             ui.colored_label(WARNING, e);
         }
         if self.document.objects.is_empty() {
-            ui.small(tr("Keine auswählbaren Objekte in der SVG."));
+            crate::form::caption(ui, tr("Keine auswählbaren Objekte in der SVG."));
             return;
         }
         let library = &self.library;

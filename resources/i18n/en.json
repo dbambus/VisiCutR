@@ -1057,5 +1057,8 @@
   "Skalieren": "Scale",
   "Größe": "Size",
   "Gleichmäßig skalieren": "Uniform scale",
-  "Faktor eingeben; Enter skaliert": "Enter a factor; Enter scales"
+  "Faktor eingeben; Enter skaliert": "Enter a factor; Enter scales",
+  "Als Profil sichern": "Save as profile",
+  "Leistung, Geschwindigkeit und Durchgänge als Profil für {material}, {thickness} mm, {operation} in der Materialbibliothek sichern": "Save power, speed and passes as the profile for {material}, {thickness} mm, {operation} in the material library",
+  "Profil gesichert: {label}": "Profile saved: {label}"
 }

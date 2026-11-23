@@ -1057,5 +1057,8 @@
   "Skalieren": "Scala",
   "Größe": "Dimensione",
   "Gleichmäßig skalieren": "Scala uniforme",
-  "Faktor eingeben; Enter skaliert": "Inserisci un fattore; Invio scala"
+  "Faktor eingeben; Enter skaliert": "Inserisci un fattore; Invio scala",
+  "Als Profil sichern": "Salva come profilo",
+  "Leistung, Geschwindigkeit und Durchgänge als Profil für {material}, {thickness} mm, {operation} in der Materialbibliothek sichern": "Salva potenza, velocità e passate come profilo per {material}, {thickness} mm, {operation} nella libreria materiali",
+  "Profil gesichert: {label}": "Profilo salvato: {label}"
 }

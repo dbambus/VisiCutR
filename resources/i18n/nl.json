@@ -1057,5 +1057,8 @@
   "Skalieren": "Schalen",
   "Größe": "Grootte",
   "Gleichmäßig skalieren": "Uniform schalen",
-  "Faktor eingeben; Enter skaliert": "Factor invoeren; Enter schaalt"
+  "Faktor eingeben; Enter skaliert": "Factor invoeren; Enter schaalt",
+  "Als Profil sichern": "Opslaan als profiel",
+  "Leistung, Geschwindigkeit und Durchgänge als Profil für {material}, {thickness} mm, {operation} in der Materialbibliothek sichern": "Vermogen, snelheid en doorgangen opslaan als profiel voor {material}, {thickness} mm, {operation} in de materiaalbibliotheek",
+  "Profil gesichert: {label}": "Profiel opgeslagen: {label}"
 }

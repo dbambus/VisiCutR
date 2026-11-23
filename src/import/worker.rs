@@ -8,8 +8,8 @@
 //! [`MEMORY`]. A hostile file can then only end that process.
 //!
 //! Without an executable (unit tests) the jobs run in this process.
+use super::ImportError;
 use super::plf::{self, ParameterValue};
-use crate::i18n::tr;
 use base64::Engine as _;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -67,7 +67,7 @@ impl Job {
         }
     }
 
-    fn run_here(self, limit: Duration) -> Result<Output, String> {
+    fn run_here(self, limit: Duration) -> Result<Output, ImportError> {
         match self {
             Job::LaserScript { source, max_points } => {
                 plf::laserscript_here(source, limit, max_points).map(Output::Drawing)
@@ -80,7 +80,7 @@ impl Job {
             Job::Pdf { data } => {
                 let data = base64::engine::general_purpose::STANDARD
                     .decode(data)
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| ImportError::Encoding(e.to_string()))?;
                 super::pdf::convert_here(data).map(|imported| Output::Drawn {
                     svg: imported.svg,
                     warnings: imported.warnings,
@@ -90,7 +90,7 @@ impl Job {
     }
 
     /// In the worker process if there is one, else in this one.
-    pub(super) fn run(self, limit: Duration) -> Result<Output, String> {
+    pub(super) fn run(self, limit: Duration) -> Result<Output, ImportError> {
         let limit = super::time_left(limit)?;
         match EXECUTABLE.get() {
             Some(executable) => run_in_worker(executable, &self, limit),
@@ -110,7 +110,9 @@ pub fn serve() -> i32 {
         return 2;
     };
     drop(input);
-    let result = job.run_here(Duration::from_millis(limit_ms));
+    let result = job
+        .run_here(Duration::from_millis(limit_ms))
+        .map_err(String::from);
     let Ok(output) = serde_json::to_vec(&result) else {
         return 2;
     };
@@ -125,8 +127,9 @@ pub fn serve() -> i32 {
     0
 }
 
-fn run_in_worker(executable: &Path, job: &Job, limit: Duration) -> Result<Output, String> {
-    let input = serde_json::to_vec(&(job, limit.as_millis() as u64)).map_err(|e| e.to_string())?;
+fn run_in_worker(executable: &Path, job: &Job, limit: Duration) -> Result<Output, ImportError> {
+    let input = serde_json::to_vec(&(job, limit.as_millis() as u64))
+        .map_err(|e| ImportError::Encoding(e.to_string()))?;
     let mut command = std::process::Command::new(executable);
     command
         .arg(FLAG)
@@ -157,13 +160,8 @@ fn run_in_worker(executable: &Path, job: &Job, limit: Duration) -> Result<Output
             });
         }
     }
-    let mut child = command.spawn().map_err(|e| {
-        crate::tr!(
-            "Hilfsprozess für den Import konnte nicht gestartet werden: {error}",
-            error = e
-        )
-    })?;
-    let mut stdout = child.stdout.take().ok_or("stdout")?;
+    let mut child = command.spawn().map_err(ImportError::WorkerStart)?;
+    let mut stdout = child.stdout.take().ok_or(ImportError::WorkerOutput)?;
     let reader = std::thread::spawn(move || {
         let mut output = Vec::new();
         (&mut stdout)
@@ -186,17 +184,14 @@ fn run_in_worker(executable: &Path, job: &Job, limit: Duration) -> Result<Output
             Err(e) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(e.to_string());
+                return Err(e.into());
             }
         }
     };
     let Some(status) = status else {
         let _ = child.kill();
         let _ = child.wait();
-        return Err(crate::tr!(
-            "Import nach {seconds} s abgebrochen (Datei zu aufwendig)",
-            seconds = limit.as_secs_f32()
-        ));
+        return Err(ImportError::WorkerTimeout(limit));
     };
     let output = reader
         .join()
@@ -206,8 +201,9 @@ fn run_in_worker(executable: &Path, job: &Job, limit: Duration) -> Result<Output
     match output {
         Some(output) if status.success() => {
             serde_json::from_slice::<Result<Output, String>>(&output)
-                .map_err(|_| String::from(tr("Import ist unerwartet abgebrochen")))?
+                .map_err(|_| ImportError::WorkerAborted)?
+                .map_err(ImportError::Reported)
         }
-        _ => Err(tr("Import abgebrochen: zu viel Speicher belegt oder unerwartet beendet").into()),
+        _ => Err(ImportError::WorkerKilled),
     }
 }

@@ -1,7 +1,42 @@
 use crate::{i18n::tr, tr};
 use resvg::usvg::fontdb;
 use resvg::{tiny_skia, usvg};
+use std::fmt;
 use std::sync::{Arc, OnceLock};
+
+#[derive(Debug)]
+pub enum SvgError {
+    /// Nested deeper than [`MAX_NESTING`].
+    TooDeep,
+    TooLarge,
+    Unreadable(usvg::Error),
+    PreviewTooLarge,
+}
+
+impl fmt::Display for SvgError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = match self {
+            Self::TooDeep => tr!(
+                "SVG ist tiefer als {depth} Ebenen verschachtelt",
+                depth = MAX_NESTING
+            ),
+            Self::TooLarge => tr("SVG ist größer als 20 MB").to_string(),
+            Self::Unreadable(error) => {
+                tr!("SVG konnte nicht gelesen werden: {error}", error = error)
+            }
+            Self::PreviewTooLarge => tr("Vorschau zu groß").to_string(),
+        };
+        f.write_str(&text)
+    }
+}
+
+impl std::error::Error for SvgError {}
+
+impl From<SvgError> for String {
+    fn from(error: SvgError) -> Self {
+        error.to_string()
+    }
+}
 
 /// Deepest element nesting accepted in XML from files. roxmltree and usvg
 /// walk the tree recursively; 256 levels need less than 384 KB of stack,
@@ -13,12 +48,9 @@ pub const MAX_NESTING: usize = 256;
 /// Refuses XML nested deeper than [`MAX_NESTING`]. Counts start and end
 /// tags without building a tree (and without recursion), skipping comments,
 /// CDATA, processing instructions, declarations and quoted attribute values.
-pub fn check_nesting(text: &str) -> Result<(), String> {
+pub fn check_nesting(text: &str) -> Result<(), SvgError> {
     if nesting_depth(text) > MAX_NESTING {
-        return Err(tr!(
-            "SVG ist tiefer als {depth} Ebenen verschachtelt",
-            depth = MAX_NESTING
-        ));
+        return Err(SvgError::TooDeep);
     }
     Ok(())
 }
@@ -76,7 +108,8 @@ fn nesting_depth(text: &str) -> usize {
 pub struct Preview {
     pub width_mm: f32,
     pub height_mm: f32,
-    pub image: eframe::egui::ColorImage,
+    /// The drawing rendered at preview resolution (premultiplied RGBA).
+    pub pixmap: tiny_skia::Pixmap,
 }
 
 /// System fonts plus the fonts bundled with egui (Ubuntu Light, Hack), loaded once.
@@ -274,11 +307,17 @@ pub fn content_fraction(source: &str) -> [f32; 4] {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     source.hash(&mut hasher);
     let key = hasher.finish();
-    if let Some((_, fraction)) = CACHE.lock().unwrap().iter().find(|(k, _)| *k == key) {
+    // A panic while holding the lock leaves a valid cache behind.
+    let lock = || {
+        CACHE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    };
+    if let Some((_, fraction)) = lock().iter().find(|(k, _)| *k == key) {
         return *fraction;
     }
     let fraction = measure_content(source).unwrap_or([0.0, 0.0, 1.0, 1.0]);
-    let mut cache = CACHE.lock().unwrap();
+    let mut cache = lock();
     if cache.len() >= 64 {
         cache.remove(0);
     }
@@ -306,18 +345,17 @@ fn measure_content(source: &str) -> Option<[f32; 4]> {
     .filter(|f| f.iter().all(|v| v.is_finite()))
 }
 
-pub fn render(source: &str) -> Result<Preview, String> {
+pub fn render(source: &str) -> Result<Preview, SvgError> {
     if source.len() > 20 * 1024 * 1024 {
-        return Err(tr("SVG ist größer als 20 MB").into());
+        return Err(SvgError::TooLarge);
     }
     check_nesting(source)?;
-    let tree = usvg::Tree::from_str(source, &options())
-        .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
+    let tree = usvg::Tree::from_str(source, &options()).map_err(SvgError::Unreadable)?;
     let size = tree.size();
     let scale = (1600.0 / size.width().max(size.height())).min(2.0);
     let width = (size.width() * scale).ceil().max(1.0) as u32;
     let height = (size.height() * scale).ceil().max(1.0) as u32;
-    let mut pixmap = tiny_skia::Pixmap::new(width, height).ok_or(tr("Vorschau zu groß"))?;
+    let mut pixmap = tiny_skia::Pixmap::new(width, height).ok_or(SvgError::PreviewTooLarge)?;
     resvg::render(
         &tree,
         tiny_skia::Transform::from_scale(scale, scale),
@@ -327,24 +365,8 @@ pub fn render(source: &str) -> Result<Preview, String> {
     Ok(Preview {
         width_mm,
         height_mm,
-        image: color_image(pixmap),
+        pixmap,
     })
-}
-
-/// The pixmap as an egui image.
-pub fn color_image(pixmap: tiny_skia::Pixmap) -> eframe::egui::ColorImage {
-    let size = [pixmap.width() as usize, pixmap.height() as usize];
-    // tiny-skia stores premultiplied RGBA; convert before handing pixels to egui.
-    let mut pixels = pixmap.take();
-    for pixel in pixels.chunks_exact_mut(4) {
-        let alpha = pixel[3] as u32;
-        if alpha > 0 {
-            for channel in &mut pixel[..3] {
-                *channel = ((*channel as u32 * 255 + alpha / 2) / alpha).min(255) as u8;
-            }
-        }
-    }
-    eframe::egui::ColorImage::from_rgba_unmultiplied(size, &pixels)
 }
 
 #[cfg(test)]
@@ -364,8 +386,10 @@ mod tests {
         assert!(super::check_nesting(&deep(super::MAX_NESTING - 1)).is_ok());
         assert!(super::check_nesting(&deep(super::MAX_NESTING)).is_err());
         // 100 000 levels ended the application in roxmltree.
-        let error = super::render(&deep(100_000)).err().expect("refused");
-        assert!(error.contains("verschachtelt"), "{error}");
+        assert!(matches!(
+            super::render(&deep(100_000)),
+            Err(super::SvgError::TooDeep)
+        ));
     }
 
     use super::*;
@@ -374,7 +398,7 @@ mod tests {
         let preview = render(include_str!("../examples/demo.svg")).unwrap();
         assert!((preview.width_mm - 100.0).abs() < 0.01);
         assert!((preview.height_mm - 60.0).abs() < 0.01);
-        assert!(preview.image.pixels.iter().any(|p| p.a() > 0));
+        assert!(preview.pixmap.pixels().iter().any(|p| p.alpha() > 0));
     }
     #[test]
     fn rejects_malformed_svg() {

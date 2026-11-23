@@ -4,7 +4,7 @@
 //! Fingerabdruck des Inhalts zeigt, ob das FabLab eine neue Fassung
 //! veröffentlicht hat.
 
-use crate::device::{self, LaserDevice};
+use crate::device::{self, DeviceError, LaserDevice};
 use crate::mapping::Predefined;
 use crate::materials::{Library, Material, MaterialProfile};
 use crate::project::{Operation, ParameterSet};
@@ -46,12 +46,12 @@ impl LabSettings {
 }
 
 /// Lädt die Einstellungen des FabLabs `name` von `url`.
-pub fn download(name: &str, url: &str) -> Result<LabSettings, String> {
+pub fn download(name: &str, url: &str) -> Result<LabSettings, DeviceError> {
     read(&crate::camera::fetch(url, 50 * 1024 * 1024)?, name)
 }
 
 /// Liest ein Einstellungsarchiv oder eine einzelne Gerätedatei.
-pub fn read(bytes: &[u8], name: &str) -> Result<LabSettings, String> {
+pub fn read(bytes: &[u8], name: &str) -> Result<LabSettings, DeviceError> {
     let devices = device::import_bytes(bytes)?;
     if !bytes.starts_with(b"PK") {
         return Ok(LabSettings {
@@ -78,16 +78,16 @@ pub fn read(bytes: &[u8], name: &str) -> Result<LabSettings, String> {
 
 /// Dateien der Einstellungsordner, Pfad ab dem Ordner (ohne den Ordner, den
 /// GitHub davorsetzt), sortiert.
-fn entries(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, String> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| e.to_string())?;
+fn entries(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, DeviceError> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
     let mut result = BTreeMap::new();
     let mut budget = crate::import::ZipBudget::new(MAX_ARCHIVE);
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let mut file = archive.by_index(i)?;
         if !file.is_file() || file.size() > MAX_ENTRY {
             continue;
         }
-        let name = file.name().map_err(|e| e.to_string())?.to_string();
+        let name = file.name()?.to_string();
         let parts: Vec<&str> = name.split('/').collect();
         let Some(start) = parts
             .iter()

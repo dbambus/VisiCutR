@@ -1,10 +1,10 @@
 //! Operand stack, dictionary stack, graphics state and operators of the
 //! built-in interpreter. Operators outside the supported subset fail with a
 //! German message that names them; the caller then hands the file to Ghostscript.
+use super::error::{EpsError, Operand};
 use super::graphics::{self, IDENTITY, Matrix, Path, arc_curves, multiply, num, point, vector};
 use super::parse::Obj;
 use crate::svg_import::MAX_SVG_BYTES;
-use crate::{i18n::tr, tr};
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::rc::Rc;
@@ -16,6 +16,9 @@ const MAX_OPERANDS: usize = 65_536;
 const MAX_DEPTH: usize = 128;
 /// The thinnest line ("hairline") is 0.1 mm, as in the PDF import.
 const HAIRLINE_PT: f64 = 0.1 * 72.0 / 25.4;
+
+/// Runs the operator `name` if it belongs to the family; `Ok(false)` if not.
+type OperatorFamily = fn(&mut Machine, &str) -> Result<bool, EpsError>;
 
 /// Part of the graphics state that `gsave` and `grestore` save and restore.
 #[derive(Clone)]
@@ -57,7 +60,7 @@ impl Machine {
         }
     }
 
-    pub(super) fn run(&mut self, program: &[Obj]) -> Result<(), String> {
+    pub(super) fn run(&mut self, program: &[Obj]) -> Result<(), EpsError> {
         for item in program {
             self.exec(item)?;
         }
@@ -69,21 +72,21 @@ impl Machine {
         self.out
     }
 
-    fn tick(&mut self) -> Result<(), String> {
+    fn tick(&mut self) -> Result<(), EpsError> {
         self.steps += 1;
         if self.steps > MAX_STEPS {
-            return Err(tr("Die EPS-Datei braucht zu viele Operationen").into());
+            return Err(EpsError::TooManyOperations);
         }
         if self.operands.len() > MAX_OPERANDS {
-            return Err(tr("Stapelüberlauf im eingebauten PostScript-Interpreter").into());
+            return Err(EpsError::StackOverflow);
         }
         if self.out.len() + self.path.bytes() > MAX_SVG_BYTES {
-            return Err(tr("EPS-Datei ist zu komplex (SVG größer als 20 MB)").into());
+            return Err(EpsError::TooComplex);
         }
         Ok(())
     }
 
-    fn exec(&mut self, obj: &Obj) -> Result<(), String> {
+    fn exec(&mut self, obj: &Obj) -> Result<(), EpsError> {
         self.tick()?;
         match obj {
             Obj::Name {
@@ -98,7 +101,7 @@ impl Machine {
     }
 
     /// Runs the value bound to `name` in the dictionaries, or else the operator.
-    fn exec_name(&mut self, name: &str) -> Result<(), String> {
+    fn exec_name(&mut self, name: &str) -> Result<(), EpsError> {
         if let Some(value) = self.lookup(name).cloned() {
             return match value {
                 Obj::Proc(body) => self.call_proc(&body),
@@ -111,10 +114,10 @@ impl Machine {
         self.operator(name)
     }
 
-    fn call_proc(&mut self, body: &[Obj]) -> Result<(), String> {
+    fn call_proc(&mut self, body: &[Obj]) -> Result<(), EpsError> {
         self.tick()?;
         if self.depth >= MAX_DEPTH {
-            return Err(tr("Prozeduren sind zu tief ineinander verschachtelt").into());
+            return Err(EpsError::CallsTooDeep);
         }
         self.depth += 1;
         for item in body {
@@ -128,25 +131,25 @@ impl Machine {
         self.dicts.iter().rev().find_map(|dict| dict.get(name))
     }
 
-    fn pop_any(&mut self, op: &str) -> Result<Obj, String> {
+    fn pop_any(&mut self, op: &str) -> Result<Obj, EpsError> {
         self.operands
             .pop()
-            .ok_or_else(|| tr!("Stapelunterlauf bei „{operator}“", operator = op))
+            .ok_or_else(|| EpsError::StackUnderflow(op.into()))
     }
 
-    fn pop_num(&mut self, op: &str) -> Result<f64, String> {
+    fn pop_num(&mut self, op: &str) -> Result<f64, EpsError> {
         match self.pop_any(op)? {
             Obj::Num(value) if value.is_finite() => Ok(value),
-            Obj::Num(_) => Err(tr!("Ungültiger Zahlenwert bei „{operator}“", operator = op)),
-            _ => Err(tr!(
-                "Falscher Operandtyp bei „{operator}“ (Zahl erwartet)",
-                operator = op
-            )),
+            Obj::Num(_) => Err(EpsError::InvalidNumber(op.into())),
+            _ => Err(EpsError::WrongOperand {
+                operator: op.into(),
+                expected: Operand::Number,
+            }),
         }
     }
 
     /// Pops `N` numbers and returns them in the order they were pushed.
-    fn pop_nums<const N: usize>(&mut self, op: &str) -> Result<[f64; N], String> {
+    fn pop_nums<const N: usize>(&mut self, op: &str) -> Result<[f64; N], EpsError> {
         let mut values = [0.0; N];
         for slot in values.iter_mut().rev() {
             *slot = self.pop_num(op)?;
@@ -155,83 +158,77 @@ impl Machine {
     }
 
     /// A count or index: a non-negative integer.
-    fn pop_index(&mut self, op: &str) -> Result<usize, String> {
+    fn pop_index(&mut self, op: &str) -> Result<usize, EpsError> {
         let value = self.pop_num(op)?;
         if value.fract() != 0.0 || value < 0.0 {
-            return Err(tr!(
-                "Bereichsfehler bei „{operator}“ (ganze Zahl ≥ 0 erwartet)",
-                operator = op
-            ));
+            return Err(EpsError::NegativeIndex(op.into()));
         }
         Ok(value as usize)
     }
 
-    fn pop_integer(&mut self, op: &str) -> Result<i64, String> {
+    fn pop_integer(&mut self, op: &str) -> Result<i64, EpsError> {
         let value = self.pop_num(op)?;
         if value.fract() != 0.0 {
-            return Err(tr!(
-                "Bereichsfehler bei „{operator}“ (ganze Zahl erwartet)",
-                operator = op
-            ));
+            return Err(EpsError::NotAnInteger(op.into()));
         }
         Ok(value as i64)
     }
 
-    fn pop_bool(&mut self, op: &str) -> Result<bool, String> {
+    fn pop_bool(&mut self, op: &str) -> Result<bool, EpsError> {
         match self.pop_any(op)? {
             Obj::Bool(value) => Ok(value),
-            _ => Err(tr!(
-                "Falscher Operandtyp bei „{operator}“ (Bool erwartet)",
-                operator = op
-            )),
+            _ => Err(EpsError::WrongOperand {
+                operator: op.into(),
+                expected: Operand::Bool,
+            }),
         }
     }
 
-    fn pop_proc(&mut self, op: &str) -> Result<Rc<[Obj]>, String> {
+    fn pop_proc(&mut self, op: &str) -> Result<Rc<[Obj]>, EpsError> {
         match self.pop_any(op)? {
             Obj::Proc(body) => Ok(body),
-            _ => Err(tr!(
-                "Falscher Operandtyp bei „{operator}“ (Prozedur erwartet)",
-                operator = op
-            )),
+            _ => Err(EpsError::WrongOperand {
+                operator: op.into(),
+                expected: Operand::Procedure,
+            }),
         }
     }
 
-    fn pop_matrix(&mut self, op: &str) -> Result<Matrix, String> {
+    fn pop_matrix(&mut self, op: &str) -> Result<Matrix, EpsError> {
         match self.pop_any(op)? {
             Obj::Matrix(matrix) => Ok(matrix),
-            _ => Err(tr!(
-                "Falscher Operandtyp bei „{operator}“ (Matrix erwartet)",
-                operator = op
-            )),
+            _ => Err(EpsError::WrongOperand {
+                operator: op.into(),
+                expected: Operand::Matrix,
+            }),
         }
     }
 
     /// The name of a key for `def` or `load`.
-    fn pop_key(&mut self, op: &str) -> Result<String, String> {
+    fn pop_key(&mut self, op: &str) -> Result<String, EpsError> {
         match self.pop_any(op)? {
             Obj::Name { name, .. } => Ok(name.to_string()),
-            _ => Err(tr!(
-                "Falscher Operandtyp bei „{operator}“ (Name erwartet)",
-                operator = op
-            )),
+            _ => Err(EpsError::WrongOperand {
+                operator: op.into(),
+                expected: Operand::Name,
+            }),
         }
     }
 
     /// A point in device space; rejects values that overflow to infinity.
-    fn device_point(&self, x: f64, y: f64, op: &str) -> Result<(f64, f64), String> {
+    fn device_point(&self, x: f64, y: f64, op: &str) -> Result<(f64, f64), EpsError> {
         let p = point(self.state.ctm, x, y);
         if p.0.is_finite() && p.1.is_finite() {
             Ok(p)
         } else {
-            Err(tr!("Ungültige Koordinate bei „{operator}“", operator = op))
+            Err(EpsError::InvalidCoordinate(op.into()))
         }
     }
 
-    fn current_point(&self, op: &str) -> Result<(f64, f64), String> {
+    fn current_point(&self, op: &str) -> Result<(f64, f64), EpsError> {
         self.path
             .current()
-            .ok_or_else(|| tr!("Kein aktueller Punkt bei „{operator}“", operator = op))
+            .ok_or_else(|| EpsError::NoCurrentPoint(op.into()))
     }
 
     /// `base` moved by a displacement given in user space.
@@ -241,18 +238,18 @@ impl Machine {
         dx: f64,
         dy: f64,
         op: &str,
-    ) -> Result<(f64, f64), String> {
+    ) -> Result<(f64, f64), EpsError> {
         let (vx, vy) = vector(self.state.ctm, dx, dy);
         let p = (base.0 + vx, base.1 + vy);
         if p.0.is_finite() && p.1.is_finite() {
             Ok(p)
         } else {
-            Err(tr!("Ungültige Koordinate bei „{operator}“", operator = op))
+            Err(EpsError::InvalidCoordinate(op.into()))
         }
     }
 
     /// The current point moved by a displacement in user space.
-    fn relative_point(&self, dx: f64, dy: f64, op: &str) -> Result<(f64, f64), String> {
+    fn relative_point(&self, dx: f64, dy: f64, op: &str) -> Result<(f64, f64), EpsError> {
         let base = self.current_point(op)?;
         self.displaced(base, dx, dy, op)
     }
@@ -294,13 +291,10 @@ impl Machine {
     }
 
     /// `x y r angle1 angle2 arc` (or `arcn`, clockwise).
-    fn arc(&mut self, op: &str) -> Result<(), String> {
+    fn arc(&mut self, op: &str) -> Result<(), EpsError> {
         let [x, y, r, start, end] = self.pop_nums::<5>(op)?;
         if r < 0.0 {
-            return Err(tr!(
-                "Bereichsfehler bei „{operator}“ (negativer Radius)",
-                operator = op
-            ));
+            return Err(EpsError::NegativeRadius(op.into()));
         }
         let (s, c) = start.to_radians().sin_cos();
         let first = self.device_point(x + r * c, y + r * s, op)?;
@@ -320,7 +314,27 @@ impl Machine {
     }
 
     /// Runs one operator. Anything not listed here is unsupported.
-    fn operator(&mut self, name: &str) -> Result<(), String> {
+    fn operator(&mut self, name: &str) -> Result<(), EpsError> {
+        let families: [OperatorFamily; 8] = [
+            Self::stack_op,
+            Self::dict_op,
+            Self::arithmetic_op,
+            Self::comparison_op,
+            Self::control_op,
+            Self::path_op,
+            Self::paint_op,
+            Self::state_op,
+        ];
+        for family in families {
+            if family(self, name)? {
+                return Ok(());
+            }
+        }
+        Err(EpsError::unsupported(name))
+    }
+
+    /// Operand stack operators. `Ok(false)` when `name` is not one of them.
+    fn stack_op(&mut self, name: &str) -> Result<bool, EpsError> {
         match name {
             // Operand stack
             "pop" => {
@@ -337,14 +351,14 @@ impl Machine {
                     .operands
                     .last()
                     .cloned()
-                    .ok_or_else(|| tr!("Stapelunterlauf bei „{operator}“", operator = name))?;
+                    .ok_or_else(|| EpsError::StackUnderflow(name.into()))?;
                 self.operands.push(top);
             }
             "copy" => {
                 let n = self.pop_index(name)?;
                 let len = self.operands.len();
                 if n > len {
-                    return Err(tr!("Stapelunterlauf bei „{operator}“", operator = name));
+                    return Err(EpsError::StackUnderflow(name.into()));
                 }
                 let copies: Vec<Obj> = self.operands[len - n..].to_vec();
                 self.operands.extend(copies);
@@ -353,7 +367,7 @@ impl Machine {
                 let n = self.pop_index(name)?;
                 let len = self.operands.len();
                 if n >= len {
-                    return Err(tr!("Stapelunterlauf bei „{operator}“", operator = name));
+                    return Err(EpsError::StackUnderflow(name.into()));
                 }
                 let copy = self.operands[len - 1 - n].clone();
                 self.operands.push(copy);
@@ -363,14 +377,21 @@ impl Machine {
                 let n = self.pop_index(name)?;
                 let len = self.operands.len();
                 if n > len {
-                    return Err(tr!("Stapelunterlauf bei „{operator}“", operator = name));
+                    return Err(EpsError::StackUnderflow(name.into()));
                 }
                 if n > 0 {
                     let k = shift.rem_euclid(n as i64) as usize;
                     self.operands[len - n..].rotate_right(k);
                 }
             }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
 
+    /// Dictionary operators. `Ok(false)` when `name` is not one of them.
+    fn dict_op(&mut self, name: &str) -> Result<bool, EpsError> {
+        match name {
             // Dictionaries
             "def" => {
                 let value = self.pop_any(name)?;
@@ -381,13 +402,17 @@ impl Machine {
             }
             "load" => {
                 let key = self.pop_key(name)?;
-                let value = self
-                    .lookup(&key)
-                    .cloned()
-                    .ok_or_else(|| tr!("„{key}“ ist nicht definiert (bei „load“)", key = key))?;
+                let value = self.lookup(&key).cloned().ok_or(EpsError::Undefined(key))?;
                 self.operands.push(value);
             }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
 
+    /// Arithmetic operators. `Ok(false)` when `name` is not one of them.
+    fn arithmetic_op(&mut self, name: &str) -> Result<bool, EpsError> {
+        match name {
             // Arithmetic
             "add" | "sub" | "mul" | "div" => {
                 let b = self.pop_num(name)?;
@@ -398,10 +423,7 @@ impl Machine {
                     "mul" => a * b,
                     _ => {
                         if b == 0.0 {
-                            return Err(tr(
-                                "Ergebnis nicht definiert bei „div“ (Division durch 0)",
-                            )
-                            .into());
+                            return Err(EpsError::DivisionByZero);
                         }
                         a / b
                     }
@@ -419,7 +441,7 @@ impl Machine {
             "sqrt" => {
                 let a = self.pop_num(name)?;
                 if a < 0.0 {
-                    return Err(tr("Bereichsfehler bei „sqrt“ (negativer Wert)").into());
+                    return Err(EpsError::NegativeSqrt);
                 }
                 self.push_num(a.sqrt(), name)?;
             }
@@ -431,7 +453,14 @@ impl Machine {
                 let degrees = self.pop_num(name)?;
                 self.push_num(degrees.to_radians().cos(), name)?;
             }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
 
+    /// Comparison and boolean operators. `Ok(false)` when `name` is not one of them.
+    fn comparison_op(&mut self, name: &str) -> Result<bool, EpsError> {
+        match name {
             // Comparison and booleans, for `if` and `ifelse`
             "eq" | "ne" => {
                 let b = self.pop_any(name)?;
@@ -456,7 +485,14 @@ impl Machine {
             }
             "true" => self.operands.push(Obj::Bool(true)),
             "false" => self.operands.push(Obj::Bool(false)),
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
 
+    /// Control operators. `Ok(false)` when `name` is not one of them.
+    fn control_op(&mut self, name: &str) -> Result<bool, EpsError> {
+        match name {
             // Control
             "if" => {
                 let body = self.pop_proc(name)?;
@@ -486,7 +522,7 @@ impl Machine {
                 let step = self.pop_num(name)?;
                 let start = self.pop_num(name)?;
                 if step == 0.0 {
-                    return Err(tr("Schrittweite 0 bei „for“").into());
+                    return Err(EpsError::ZeroStep);
                 }
                 let mut value = start;
                 while (step > 0.0 && value <= limit) || (step < 0.0 && value >= limit) {
@@ -507,7 +543,14 @@ impl Machine {
             "showpage" => {}
             // Procedures are not bound to their operators; nothing to do.
             "bind" => {}
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
 
+    /// Path construction operators. `Ok(false)` when `name` is not one of them.
+    fn path_op(&mut self, name: &str) -> Result<bool, EpsError> {
+        match name {
             // Path construction
             "newpath" => self.path.clear(),
             "moveto" => {
@@ -565,7 +608,14 @@ impl Machine {
                 }
                 self.path.close();
             }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
 
+    /// Painting (the path is consumed), colour and line width. `Ok(false)` when `name` is not one of them.
+    fn paint_op(&mut self, name: &str) -> Result<bool, EpsError> {
+        match name {
             // Painting: the path is consumed
             "fill" => self.fill(false),
             "eofill" => self.fill(true),
@@ -591,7 +641,14 @@ impl Machine {
             "setlinewidth" => {
                 self.state.line_width = self.pop_num(name)?.abs();
             }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
 
+    /// Graphics state and transformation operators. `Ok(false)` when `name` is not one of them.
+    fn state_op(&mut self, name: &str) -> Result<bool, EpsError> {
+        match name {
             // Graphics state and transformations
             "gsave" => self.saved.push(self.state.clone()),
             "grestore" => {
@@ -619,19 +676,18 @@ impl Machine {
             "setmatrix" => {
                 self.state.ctm = self.pop_matrix(name)?;
             }
-
-            _ => return Err(unsupported(name)),
+            _ => return Ok(false),
         }
-        Ok(())
+        Ok(true)
     }
 
     fn concat(&mut self, matrix: Matrix) {
         self.state.ctm = multiply(matrix, self.state.ctm);
     }
 
-    fn push_num(&mut self, value: f64, op: &str) -> Result<(), String> {
+    fn push_num(&mut self, value: f64, op: &str) -> Result<(), EpsError> {
         if !value.is_finite() {
-            return Err(tr!("Ungültiger Zahlenwert bei „{operator}“", operator = op));
+            return Err(EpsError::InvalidNumber(op.into()));
         }
         self.operands.push(Obj::Num(value));
         Ok(())
@@ -639,35 +695,6 @@ impl Machine {
 }
 
 /// The message for an operator that the built-in interpreter does not support.
-fn unsupported(name: &str) -> String {
-    match name {
-        "show" | "ashow" | "widthshow" | "awidthshow" | "xshow" | "yshow" | "xyshow" | "cshow"
-        | "kshow" | "stringwidth" | "charpath" | "glyphshow" => {
-            tr!(
-                "Text-Operator „{operator}“ wird nicht unterstützt",
-                operator = name
-            )
-        }
-        "findfont" | "setfont" | "scalefont" | "makefont" | "selectfont" | "currentfont"
-        | "definefont" | "findencoding" => {
-            tr!(
-                "Schrift-Operator „{operator}“ wird nicht unterstützt",
-                operator = name
-            )
-        }
-        "image" | "imagemask" | "colorimage" | "readimage" => {
-            tr!(
-                "Bild-Operator „{operator}“ wird nicht unterstützt",
-                operator = name
-            )
-        }
-        _ => tr!(
-            "Unbekannter oder nicht unterstützter Operator „{operator}“",
-            operator = name
-        ),
-    }
-}
-
 fn objects_equal(a: &Obj, b: &Obj) -> bool {
     match (a, b) {
         (Obj::Num(x), Obj::Num(y)) => x == y,

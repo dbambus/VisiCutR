@@ -22,6 +22,43 @@ use crate::vectorize::{simplify_closed, trace};
 use image::RgbaImage;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
+
+#[derive(Debug)]
+pub enum RemnantError {
+    NoPicture,
+    NoneFound,
+    Compose(crate::compose::ComposeError),
+    Io(std::io::Error),
+    Image(image::ImageError),
+}
+
+impl std::fmt::Display for RemnantError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoPicture => f.write_str(crate::i18n::tr("Kein Kamerabild für die Erkennung")),
+            Self::NoneFound => f.write_str(crate::i18n::tr(
+                "Kein Reststück gefunden; Einstellungen anpassen",
+            )),
+            Self::Compose(error) => write!(f, "{error}"),
+            Self::Io(error) => write!(f, "{error}"),
+            Self::Image(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for RemnantError {}
+
+impl From<crate::compose::ComposeError> for RemnantError {
+    fn from(error: crate::compose::ComposeError) -> Self {
+        Self::Compose(error)
+    }
+}
+
+impl From<RemnantError> for String {
+    fn from(error: RemnantError) -> Self {
+        error.to_string()
+    }
+}
 use std::path::{Path, PathBuf};
 
 /// Größte Auflösung des Arbeitsrasters (Pixel je mm).
@@ -121,10 +158,10 @@ pub fn detect(
     reference: Option<&RgbaImage>,
     bed_mm: [f64; 2],
     options: &Options,
-) -> Result<Detection, String> {
+) -> Result<Detection, RemnantError> {
     let [bed_w, bed_h] = bed_mm;
     if !(bed_w > 0.0 && bed_h > 0.0) || image.width() == 0 || image.height() == 0 {
-        return Err(crate::i18n::tr("Kein Kamerabild für die Erkennung").into());
+        return Err(RemnantError::NoPicture);
     }
     let scale = (image.width() as f64 / bed_w).min(PX_PER_MM);
     let grid = Grid {
@@ -532,9 +569,9 @@ fn svg_area(remnants: &[Remnant], origin: [f64; 2], size: [f64; 2]) -> String {
 
 /// Fügt die Umrisse als Schneid-Teil an ihrer Stelle auf dem Bett ein; das
 /// neue Teil wird aktiv.
-pub fn add_part(project: &Project, remnants: &[Remnant]) -> Result<Project, String> {
+pub fn add_part(project: &Project, remnants: &[Remnant]) -> Result<Project, RemnantError> {
     if remnants.is_empty() {
-        return Err(crate::i18n::tr("Kein Reststück gefunden; Einstellungen anpassen").into());
+        return Err(RemnantError::NoneFound);
     }
     // Nur das Rechteck um die Reststücke: ein bettgroßes Teil ließe für
     // später hinzugefügte Teile keinen freien Platz mehr.
@@ -565,11 +602,11 @@ pub fn reference_path(config_dir: &Path, device: &str) -> PathBuf {
         .join(format!("{name}.png"))
 }
 
-pub fn save_reference(path: &Path, image: &RgbaImage) -> Result<(), String> {
+pub fn save_reference(path: &Path, image: &RgbaImage) -> Result<(), RemnantError> {
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(dir).map_err(RemnantError::Io)?;
     }
-    image.save(path).map_err(|e| e.to_string())
+    image.save(path).map_err(RemnantError::Image)
 }
 
 /// Referenzbild, falls gespeichert.

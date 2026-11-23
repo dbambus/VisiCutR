@@ -358,6 +358,7 @@ enum Outcome {
 /// `single_job=true`: all operations in one job, as Java writes them.
 fn prepare(project: &Project, case: &HashMap<String, String>) -> Result<ltt::PreparedJob, String> {
     ltt::prepare_with(project, case.get("single_job").is_some_and(|s| s == "true"))
+        .map_err(String::from)
 }
 
 /// The case itself (suffix "") and each of its `variants`, a comma-separated

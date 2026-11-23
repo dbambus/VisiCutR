@@ -1,4 +1,5 @@
 //! DXF entities → paths and texts in world millimetres (Y up).
+use super::DxfError;
 use super::colors::aci;
 use super::geom::{self, Affine, P, PathBuilder, Seg, full_turn};
 use super::reader::{Document, Entity, Pair, number};
@@ -88,7 +89,7 @@ struct Converter<'a> {
     block_instances: usize,
 }
 
-pub fn convert(doc: &Document, unit_mm: f64) -> Result<Converted, String> {
+pub fn convert(doc: &Document, unit_mm: f64) -> Result<Converted, DxfError> {
     let mut converter = Converter {
         doc,
         ltscale: doc
@@ -357,6 +358,157 @@ fn dash_array(pattern: &[f64], scale: f64) -> Option<Vec<f64>> {
     (gaps > 0.0 && total >= 0.05 && total.is_finite()).then_some(out)
 }
 
+/// `wcs` followed by the entity's object coordinate system at elevation `z`.
+fn in_ocs(wcs: Affine, e: &Entity, z: f64) -> Affine {
+    wcs.then(ocs(e, z))
+}
+
+fn line_path(e: &Entity, wcs: Affine) -> PathBuilder {
+    let mut b = PathBuilder::new(wcs);
+    b.move_to(point(e, 10));
+    b.line_to(point(e, 11));
+    b
+}
+
+/// CIRCLE or ARC; `None` for a radius that is not positive.
+fn circle_path(e: &Entity, wcs: Affine) -> Option<PathBuilder> {
+    let r = e.fd(40, 0.0);
+    if r <= 0.0 {
+        return None;
+    }
+    let mut b = PathBuilder::new(in_ocs(wcs, e, e.fd(30, 0.0)));
+    let (start, span) = if e.kind == "ARC" {
+        sweep(e.fd(50, 0.0), e.fd(51, 360.0))
+    } else {
+        (0.0, TAU)
+    };
+    b.arc(point(e, 10), [r, 0.0], [0.0, r], start, span);
+    if full_turn(span) {
+        b.close();
+    }
+    Some(b)
+}
+
+/// `None` when the minor axis direction is undefined.
+fn ellipse_path(e: &Entity, wcs: Affine) -> Option<PathBuilder> {
+    let major3 = point3(e, 11, [1.0, 0.0, 0.0]);
+    let length = (major3[0].powi(2) + major3[1].powi(2) + major3[2].powi(2)).sqrt();
+    let ratio = e.fd(40, 1.0);
+    let minor_dir = normalize(cross(extrusion(e), major3))?;
+    let minor = [minor_dir[0] * length * ratio, minor_dir[1] * length * ratio];
+    let t0 = e.fd(41, 0.0);
+    let span = (e.fd(42, TAU) - t0).rem_euclid(TAU);
+    let span = if span < 1e-9 { TAU } else { span };
+    let mut b = PathBuilder::new(wcs);
+    b.arc(point(e, 10), [major3[0], major3[1]], minor, t0, span);
+    if full_turn(span) {
+        b.close();
+    }
+    Some(b)
+}
+
+fn lwpolyline_path(e: &Entity, wcs: Affine) -> PathBuilder {
+    let mut vertices: Vec<(P, f64)> = Vec::new();
+    for pair in &e.pairs {
+        let value = number(&pair.value).unwrap_or(0.0);
+        match pair.code {
+            10 => vertices.push(([value, 0.0], 0.0)),
+            20 => {
+                if let Some(v) = vertices.last_mut() {
+                    v.0[1] = value;
+                }
+            }
+            42 => {
+                if let Some(v) = vertices.last_mut() {
+                    v.1 = value;
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut b = PathBuilder::new(in_ocs(wcs, e, e.fd(38, 0.0)));
+    polyline(&mut b, &vertices, e.int(70).unwrap_or(0) & 1 != 0);
+    b
+}
+
+/// 2D or 3D POLYLINE; `None` for polygon and polyface meshes.
+fn polyline_path(e: &Entity, wcs: Affine) -> Option<PathBuilder> {
+    let flags = e.int(70).unwrap_or(0);
+    if flags & (16 | 64) != 0 {
+        return None;
+    }
+    let is_3d = flags & 8 != 0;
+    let vertices: Vec<(P, f64)> = e
+        .children
+        .iter()
+        .filter(|v| v.int(70).unwrap_or(0) & 16 == 0)
+        .map(|v| (point(v, 10), if is_3d { 0.0 } else { v.fd(42, 0.0) }))
+        .collect();
+    let m = if is_3d {
+        wcs
+    } else {
+        in_ocs(wcs, e, e.fd(30, 0.0))
+    };
+    let mut b = PathBuilder::new(m);
+    polyline(&mut b, &vertices, flags & 1 != 0);
+    Some(b)
+}
+
+fn spline_path(e: &Entity, wcs: Affine) -> PathBuilder {
+    let mut b = PathBuilder::new(wcs);
+    let ctrl = e.points(10);
+    if ctrl.len() >= 2 {
+        let knots: Vec<f64> = e.all(40).collect();
+        let weights: Vec<f64> = e.all(41).collect();
+        let degree = e.int(71).unwrap_or(3).clamp(1, 25) as usize;
+        nurbs(&mut b, degree, &ctrl, &knots, &weights);
+    } else {
+        let tangent = |code| e.f(code).map(|_| point(e, code));
+        through_points(&mut b, &e.points(11), tangent(12), tangent(13));
+    }
+    if e.int(70).unwrap_or(0) & 1 != 0 {
+        b.close();
+    }
+    b
+}
+
+/// Outline of a SOLID or TRACE (corners 1, 2, 4, 3).
+fn solid_path(e: &Entity, wcs: Affine) -> PathBuilder {
+    let mut b = PathBuilder::new(in_ocs(wcs, e, e.fd(30, 0.0)));
+    let mut corners = vec![point(e, 10), point(e, 11)];
+    if e.f(13).is_some() {
+        corners.push(point(e, 13));
+    }
+    corners.push(point(e, 12));
+    corners.dedup();
+    let vertices: Vec<(P, f64)> = corners.into_iter().map(|p| (p, 0.0)).collect();
+    polyline(&mut b, &vertices, true);
+    b
+}
+
+/// Visible edges of a 3DFACE.
+fn face_path(e: &Entity, wcs: Affine) -> PathBuilder {
+    let mut corners = vec![point(e, 10), point(e, 11), point(e, 12)];
+    if e.f(13).is_some() {
+        corners.push(point(e, 13));
+    }
+    let hidden_edges = e.int(70).unwrap_or(0) & 15;
+    let mut b = PathBuilder::new(wcs);
+    if hidden_edges == 0 {
+        corners.dedup();
+        let vertices: Vec<(P, f64)> = corners.into_iter().map(|p| (p, 0.0)).collect();
+        polyline(&mut b, &vertices, true);
+    } else {
+        for i in 0..corners.len() {
+            if hidden_edges & (1 << i) == 0 {
+                b.move_to(corners[i]);
+                b.line_to(corners[(i + 1) % corners.len()]);
+            }
+        }
+    }
+    b
+}
+
 /// Sequential reader for the HATCH boundary group codes.
 struct Cursor<'a> {
     pairs: &'a [Pair],
@@ -450,21 +602,21 @@ impl Converter<'_> {
         }
     }
 
-    fn push(&mut self, prim: Prim) -> Result<(), String> {
+    fn push(&mut self, prim: Prim) -> Result<(), DxfError> {
         if let Prim::Path { segs, .. } = &prim {
             self.segments += segs.len();
             if segs.len() >= geom::MAX_PATH_SEGMENTS || self.segments > MAX_SEGMENTS {
-                return Err(tr("DXF-Datei enthält zu viele Objekte").into());
+                return Err(DxfError::TooManyObjects);
             }
         }
         if self.prims.len() >= MAX_PRIMITIVES {
-            return Err(tr("DXF-Datei enthält zu viele Objekte").into());
+            return Err(DxfError::TooManyObjects);
         }
         self.prims.push(prim);
         Ok(())
     }
 
-    fn stroke(&mut self, layer: &str, style: &Style, path: PathBuilder) -> Result<(), String> {
+    fn stroke(&mut self, layer: &str, style: &Style, path: PathBuilder) -> Result<(), DxfError> {
         if !path.has_drawing() {
             return Ok(());
         }
@@ -493,7 +645,7 @@ impl Converter<'_> {
         *self.unsupported.entry(kind.to_owned()).or_default() += 1;
     }
 
-    fn entity(&mut self, e: &Entity, ctx: &Ctx) -> Result<(), String> {
+    fn entity(&mut self, e: &Entity, ctx: &Ctx) -> Result<(), DxfError> {
         if e.int(60) == Some(1) {
             return Ok(());
         }
@@ -504,156 +656,32 @@ impl Converter<'_> {
         }
         let style = self.style(e, &layer, ctx);
         let wcs = ctx.m;
-        let in_ocs = |z: f64| ctx.m.then(ocs(e, z));
         match e.kind.as_str() {
-            "LINE" => {
-                let mut b = PathBuilder::new(wcs);
-                b.move_to(point(e, 10));
-                b.line_to(point(e, 11));
-                self.stroke(&layer, &style, b)?;
-            }
+            "LINE" => self.stroke(&layer, &style, line_path(e, wcs))?,
             "CIRCLE" | "ARC" => {
-                let r = e.fd(40, 0.0);
-                if r <= 0.0 {
-                    return Ok(());
+                if let Some(b) = circle_path(e, wcs) {
+                    self.stroke(&layer, &style, b)?;
                 }
-                let mut b = PathBuilder::new(in_ocs(e.fd(30, 0.0)));
-                let (start, span) = if e.kind == "ARC" {
-                    sweep(e.fd(50, 0.0), e.fd(51, 360.0))
-                } else {
-                    (0.0, TAU)
-                };
-                b.arc(point(e, 10), [r, 0.0], [0.0, r], start, span);
-                if full_turn(span) {
-                    b.close();
-                }
-                self.stroke(&layer, &style, b)?;
             }
             "ELLIPSE" => {
-                let major3 = point3(e, 11, [1.0, 0.0, 0.0]);
-                let length = (major3[0].powi(2) + major3[1].powi(2) + major3[2].powi(2)).sqrt();
-                let ratio = e.fd(40, 1.0);
-                let Some(minor_dir) = normalize(cross(extrusion(e), major3)) else {
-                    return Ok(());
-                };
-                let minor = [minor_dir[0] * length * ratio, minor_dir[1] * length * ratio];
-                let t0 = e.fd(41, 0.0);
-                let span = (e.fd(42, TAU) - t0).rem_euclid(TAU);
-                let span = if span < 1e-9 { TAU } else { span };
-                let mut b = PathBuilder::new(wcs);
-                b.arc(point(e, 10), [major3[0], major3[1]], minor, t0, span);
-                if full_turn(span) {
-                    b.close();
+                if let Some(b) = ellipse_path(e, wcs) {
+                    self.stroke(&layer, &style, b)?;
                 }
-                self.stroke(&layer, &style, b)?;
             }
-            "LWPOLYLINE" => {
-                let mut vertices: Vec<(P, f64)> = Vec::new();
-                for pair in &e.pairs {
-                    let value = number(&pair.value).unwrap_or(0.0);
-                    match pair.code {
-                        10 => vertices.push(([value, 0.0], 0.0)),
-                        20 => {
-                            if let Some(v) = vertices.last_mut() {
-                                v.0[1] = value;
-                            }
-                        }
-                        42 => {
-                            if let Some(v) = vertices.last_mut() {
-                                v.1 = value;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                let mut b = PathBuilder::new(in_ocs(e.fd(38, 0.0)));
-                polyline(&mut b, &vertices, e.int(70).unwrap_or(0) & 1 != 0);
-                self.stroke(&layer, &style, b)?;
-            }
-            "POLYLINE" => {
-                let flags = e.int(70).unwrap_or(0);
-                if flags & (16 | 64) != 0 {
-                    self.unsupported(tr("POLYLINE (Netz)"));
-                    return Ok(());
-                }
-                let is_3d = flags & 8 != 0;
-                let vertices: Vec<(P, f64)> = e
-                    .children
-                    .iter()
-                    .filter(|v| v.int(70).unwrap_or(0) & 16 == 0)
-                    .map(|v| (point(v, 10), if is_3d { 0.0 } else { v.fd(42, 0.0) }))
-                    .collect();
-                let m = if is_3d { wcs } else { in_ocs(e.fd(30, 0.0)) };
-                let mut b = PathBuilder::new(m);
-                polyline(&mut b, &vertices, flags & 1 != 0);
-                self.stroke(&layer, &style, b)?;
-            }
-            "SPLINE" => {
-                let mut b = PathBuilder::new(wcs);
-                let ctrl = e.points(10);
-                if ctrl.len() >= 2 {
-                    let knots: Vec<f64> = e.all(40).collect();
-                    let weights: Vec<f64> = e.all(41).collect();
-                    let degree = e.int(71).unwrap_or(3).clamp(1, 25) as usize;
-                    nurbs(&mut b, degree, &ctrl, &knots, &weights);
-                } else {
-                    let tangent = |code| e.f(code).map(|_| point(e, code));
-                    through_points(&mut b, &e.points(11), tangent(12), tangent(13));
-                }
-                if e.int(70).unwrap_or(0) & 1 != 0 {
-                    b.close();
-                }
-                self.stroke(&layer, &style, b)?;
-            }
+            "LWPOLYLINE" => self.stroke(&layer, &style, lwpolyline_path(e, wcs))?,
+            "POLYLINE" => match polyline_path(e, wcs) {
+                Some(b) => self.stroke(&layer, &style, b)?,
+                None => self.unsupported(tr("POLYLINE (Netz)")),
+            },
+            "SPLINE" => self.stroke(&layer, &style, spline_path(e, wcs))?,
             "LEADER" => {
                 let mut b = PathBuilder::new(wcs);
                 let vertices: Vec<(P, f64)> = e.points(10).into_iter().map(|p| (p, 0.0)).collect();
                 polyline(&mut b, &vertices, false);
                 self.stroke(&layer, &style, b)?;
             }
-            "SOLID" | "TRACE" => {
-                let mut b = PathBuilder::new(in_ocs(e.fd(30, 0.0)));
-                let mut corners = vec![point(e, 10), point(e, 11)];
-                if e.f(13).is_some() {
-                    corners.push(point(e, 13));
-                }
-                corners.push(point(e, 12));
-                corners.dedup();
-                let vertices: Vec<(P, f64)> = corners.into_iter().map(|p| (p, 0.0)).collect();
-                polyline(&mut b, &vertices, true);
-                if b.has_drawing() {
-                    self.push(Prim::Path {
-                        layer,
-                        stroke: Some(style.color),
-                        fill: Some(style.color),
-                        width: style.lineweight.max(0.05),
-                        dash: None,
-                        evenodd: false,
-                        segs: b.segs,
-                    })?;
-                }
-            }
-            "3DFACE" => {
-                let mut corners = vec![point(e, 10), point(e, 11), point(e, 12)];
-                if e.f(13).is_some() {
-                    corners.push(point(e, 13));
-                }
-                let hidden_edges = e.int(70).unwrap_or(0) & 15;
-                let mut b = PathBuilder::new(wcs);
-                if hidden_edges == 0 {
-                    corners.dedup();
-                    let vertices: Vec<(P, f64)> = corners.into_iter().map(|p| (p, 0.0)).collect();
-                    polyline(&mut b, &vertices, true);
-                } else {
-                    for i in 0..corners.len() {
-                        if hidden_edges & (1 << i) == 0 {
-                            b.move_to(corners[i]);
-                            b.line_to(corners[(i + 1) % corners.len()]);
-                        }
-                    }
-                }
-                self.stroke(&layer, &style, b)?;
-            }
+            "SOLID" | "TRACE" => self.fill(layer, &style, solid_path(e, wcs))?,
+            "3DFACE" => self.stroke(&layer, &style, face_path(e, wcs))?,
             "TEXT" => self.text(e, layer, &style, ctx, 73)?,
             "ATTRIB" => {
                 if e.int(70).unwrap_or(0) & 1 == 0 {
@@ -669,14 +697,30 @@ impl Converter<'_> {
                     return Ok(());
                 }
                 let at = point(e, 12);
-                let m = in_ocs(0.0).then(Affine::translate(at[0], at[1]));
+                let m = in_ocs(wcs, e, 0.0).then(Affine::translate(at[0], at[1]));
                 self.block(block, m, layer, &style, ctx)?;
             }
-            "HATCH" => self.hatch(e, layer, &style, in_ocs(e.fd(30, 0.0)))?,
+            "HATCH" => self.hatch(e, layer, &style, in_ocs(wcs, e, e.fd(30, 0.0)))?,
             "POINT" | "ATTDEF" | "VIEWPORT" | "SEQEND" | "VERTEX" => {}
             other => self.unsupported(other),
         }
         Ok(())
+    }
+
+    /// Filled and stroked outline (SOLID, TRACE).
+    fn fill(&mut self, layer: String, style: &Style, b: PathBuilder) -> Result<(), DxfError> {
+        if !b.has_drawing() {
+            return Ok(());
+        }
+        self.push(Prim::Path {
+            layer,
+            stroke: Some(style.color),
+            fill: Some(style.color),
+            width: style.lineweight.max(0.05),
+            dash: None,
+            evenodd: false,
+            segs: b.segs,
+        })
     }
 
     fn block(
@@ -686,10 +730,10 @@ impl Converter<'_> {
         layer: String,
         style: &Style,
         ctx: &Ctx,
-    ) -> Result<(), String> {
+    ) -> Result<(), DxfError> {
         self.block_instances += 1;
         if self.block_instances > MAX_BLOCK_INSTANCES {
-            return Err(tr("DXF-Datei enthält zu viele Blockreferenzen").into());
+            return Err(DxfError::TooManyBlockReferences);
         }
         let Some(block) = self.doc.block(name) else {
             self.missing_blocks.insert(name.to_owned());
@@ -725,7 +769,7 @@ impl Converter<'_> {
         layer: String,
         style: &Style,
         ctx: &Ctx,
-    ) -> Result<(), String> {
+    ) -> Result<(), DxfError> {
         let name = e.str(2).unwrap_or_default();
         let at = point(e, 10);
         let rotation = Affine::rotate(e.fd(50, 0.0).to_radians());
@@ -733,7 +777,7 @@ impl Converter<'_> {
         let columns = e.int(70).unwrap_or(1).max(1);
         let rows = e.int(71).unwrap_or(1).max(1);
         if columns.saturating_mul(rows) > 100_000 {
-            return Err(tr("DXF-Datei enthält zu viele Blockreferenzen").into());
+            return Err(DxfError::TooManyBlockReferences);
         }
         let (dx, dy) = (e.fd(44, 0.0), e.fd(45, 0.0));
         let placement = ocs(e, e.fd(30, 0.0)).then(Affine::translate(at[0], at[1]));
@@ -759,7 +803,7 @@ impl Converter<'_> {
         style: &Style,
         ctx: &Ctx,
         vertical_code: i32,
-    ) -> Result<(), String> {
+    ) -> Result<(), DxfError> {
         let content = text::single_line(e.str(1).unwrap_or_default());
         if content.trim().is_empty() {
             return Ok(());
@@ -816,7 +860,13 @@ impl Converter<'_> {
         })
     }
 
-    fn mtext(&mut self, e: &Entity, layer: String, style: &Style, ctx: &Ctx) -> Result<(), String> {
+    fn mtext(
+        &mut self,
+        e: &Entity,
+        layer: String,
+        style: &Style,
+        ctx: &Ctx,
+    ) -> Result<(), DxfError> {
         let mut raw: String = e
             .pairs
             .iter()
@@ -875,7 +925,13 @@ impl Converter<'_> {
         })
     }
 
-    fn hatch(&mut self, e: &Entity, layer: String, style: &Style, m: Affine) -> Result<(), String> {
+    fn hatch(
+        &mut self,
+        e: &Entity,
+        layer: String,
+        style: &Style,
+        m: Affine,
+    ) -> Result<(), DxfError> {
         let Some(start) = e.pairs.iter().position(|p| p.code == 91) else {
             return Ok(());
         };

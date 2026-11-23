@@ -1,5 +1,134 @@
 use crate::{i18n::tr, mapping::Filter, raster::RasterSettings, tr};
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+/// Why a project or its settings are not valid.
+#[derive(Debug)]
+pub enum ProjectError {
+    EngraveShift,
+    CurveAcceleration,
+    PierceDelay,
+    InvalidParameters,
+    SpeedUnitMismatch,
+    UnknownVersion,
+    OutsideBed,
+    NoDrawing,
+    /// A further part without drawing or size.
+    EmptyPart(String),
+    PartOutsideBed(String),
+    BedWidth,
+    BedHeight,
+    MotifWidth,
+    MotifHeight,
+    Thickness,
+    Power,
+    Speed,
+    Passes,
+    RotaryDiameter,
+    Position,
+    TooManySteps,
+    TooManyParameterSets,
+    ExtraShift,
+    RuleWithObjects,
+    RestWithFilters,
+    ObjectMissing,
+    Svg(crate::svg::SvgError),
+    Raster(crate::raster::RasterError),
+    Mapping(crate::mapping::MappingError),
+    Selection(crate::selection::SelectionError),
+}
+
+impl fmt::Display for ProjectError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = match self {
+            Self::EngraveShift => {
+                tr("Zeilenversatz muss zwischen −400 und 400 (1/4000 Zoll) liegen")
+            }
+            Self::CurveAcceleration => {
+                tr("Kurvenbeschleunigung muss zwischen 500 und 5000 mm/s² liegen")
+            }
+            Self::PierceDelay => {
+                tr("Verweilzeit am Konturstart muss zwischen 0 und 1000 ms liegen")
+            }
+            Self::InvalidParameters => tr("Ungültige Parameter in einem Bearbeitungsschritt"),
+            Self::SpeedUnitMismatch => tr("Geschwindigkeitseinheit passt nicht zur Projektversion"),
+            Self::UnknownVersion => tr("Unbekannte Projektversion"),
+            Self::OutsideBed => tr("Das Motiv liegt außerhalb des Arbeitsbetts"),
+            Self::NoDrawing => tr("Zuerst eine SVG-Datei importieren"),
+            Self::EmptyPart(name) => {
+                return f.write_str(&tr!(
+                    "Teil „{name}“ ist leer oder hat keine Größe",
+                    name = name
+                ));
+            }
+            Self::PartOutsideBed(name) => {
+                return f.write_str(&tr!(
+                    "Teil „{name}“ liegt außerhalb des Arbeitsbetts",
+                    name = name
+                ));
+            }
+            Self::BedWidth => tr("Bettbreite muss positiv und höchstens 100000 sein"),
+            Self::BedHeight => tr("Betthöhe muss positiv und höchstens 100000 sein"),
+            Self::MotifWidth => tr("Motivbreite muss positiv und höchstens 100000 sein"),
+            Self::MotifHeight => tr("Motivhöhe muss positiv und höchstens 100000 sein"),
+            Self::Thickness => tr("Materialstärke muss nichtnegativ und endlich sein"),
+            Self::Power => tr("Leistung muss zwischen 0 und 100 % liegen"),
+            Self::Speed => tr("Geschwindigkeit muss zwischen 0,1 und 100 % liegen"),
+            Self::Passes => tr("Durchgänge müssen zwischen 1 und 100 liegen"),
+            Self::RotaryDiameter => {
+                tr("Durchmesser für die Rotationseinheit muss zwischen 5 und 1000 mm liegen")
+            }
+            Self::Position => tr("Position muss endlich sein"),
+            Self::TooManySteps => tr("Höchstens 64 Bearbeitungsschritte sind zulässig"),
+            Self::TooManyParameterSets => tr("Höchstens 16 Parametersätze je Schritt"),
+            Self::ExtraShift => {
+                tr("Zusätzlicher Zeilenversatz muss zwischen −50 und 50 Pixeln liegen")
+            }
+            Self::RuleWithObjects => {
+                tr("Regelschritte dürfen keine einzeln gewählten Objekte enthalten")
+            }
+            Self::RestWithFilters => tr("Ein Restschritt hat keine Filter"),
+            Self::ObjectMissing => tr("Zuordnung verweist auf ein nicht vorhandenes SVG-Objekt"),
+            Self::Svg(error) => return error.fmt(f),
+            Self::Raster(error) => return error.fmt(f),
+            Self::Mapping(error) => return error.fmt(f),
+            Self::Selection(error) => return error.fmt(f),
+        };
+        f.write_str(text)
+    }
+}
+
+impl std::error::Error for ProjectError {}
+
+impl From<crate::svg::SvgError> for ProjectError {
+    fn from(error: crate::svg::SvgError) -> Self {
+        Self::Svg(error)
+    }
+}
+
+impl From<crate::raster::RasterError> for ProjectError {
+    fn from(error: crate::raster::RasterError) -> Self {
+        Self::Raster(error)
+    }
+}
+
+impl From<crate::mapping::MappingError> for ProjectError {
+    fn from(error: crate::mapping::MappingError) -> Self {
+        Self::Mapping(error)
+    }
+}
+
+impl From<crate::selection::SelectionError> for ProjectError {
+    fn from(error: crate::selection::SelectionError) -> Self {
+        Self::Selection(error)
+    }
+}
+
+impl From<ProjectError> for String {
+    fn from(error: ProjectError) -> Self {
+        error.to_string()
+    }
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(try_from = "ProjectFile")]
@@ -169,21 +298,21 @@ impl Default for MachineSettings {
 }
 
 impl MachineSettings {
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), ProjectError> {
         if self
             .engrave_shift
             .iter()
             .any(|v| !v.is_finite() || !(-400.0..=400.0).contains(v))
         {
-            return Err(tr("Zeilenversatz muss zwischen −400 und 400 (1/4000 Zoll) liegen").into());
+            return Err(ProjectError::EngraveShift);
         }
         if !self.curve_acceleration_mm_s2.is_finite()
             || !(500.0..=5000.0).contains(&self.curve_acceleration_mm_s2)
         {
-            return Err(tr("Kurvenbeschleunigung muss zwischen 500 und 5000 mm/s² liegen").into());
+            return Err(ProjectError::CurveAcceleration);
         }
         if !self.pierce_delay_ms.is_finite() || !(0.0..=1000.0).contains(&self.pierce_delay_ms) {
-            return Err(tr("Verweilzeit am Konturstart muss zwischen 0 und 1000 ms liegen").into());
+            return Err(ProjectError::PierceDelay);
         }
         Ok(())
     }
@@ -322,14 +451,14 @@ impl JobStep {
 }
 
 impl ParameterSet {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), ProjectError> {
         if !self.power_percent.is_finite()
             || !(0.0..=100.0).contains(&self.power_percent)
             || !self.speed_percent.is_finite()
             || !(0.1..=100.0).contains(&self.speed_percent)
             || !(1..=100).contains(&self.passes)
         {
-            return Err(tr("Ungültige Parameter in einem Bearbeitungsschritt").into());
+            return Err(ProjectError::InvalidParameters);
         }
         Ok(())
     }
@@ -393,7 +522,7 @@ struct ProjectFile {
 }
 
 impl TryFrom<ProjectFile> for Project {
-    type Error = String;
+    type Error = ProjectError;
 
     fn try_from(file: ProjectFile) -> Result<Self, Self::Error> {
         let speed_percent = match (file.format_version, file.speed_percent, file.speed_mm_s) {
@@ -407,9 +536,9 @@ impl TryFrom<ProjectFile> for Project {
                 mm_s / (338.677 * factor) * 100.0
             }
             (1 | 2, _, _) => {
-                return Err(tr("Geschwindigkeitseinheit passt nicht zur Projektversion").into());
+                return Err(ProjectError::SpeedUnitMismatch);
             }
-            _ => return Err(tr("Unbekannte Projektversion").into()),
+            _ => return Err(ProjectError::UnknownVersion),
         };
         Ok(Self {
             format_version: 2,
@@ -534,7 +663,7 @@ impl Default for Project {
 }
 
 impl Project {
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), ProjectError> {
         self.validate_document()?;
         if !self.fits_bed(
             &self.svg,
@@ -543,10 +672,10 @@ impl Project {
             self.width_mm,
             self.height_mm,
         ) {
-            return Err(tr("Das Motiv liegt außerhalb des Arbeitsbetts").into());
+            return Err(ProjectError::OutsideBed);
         }
         if self.svg.is_empty() {
-            return Err(tr("Zuerst eine SVG-Datei importieren").into());
+            return Err(ProjectError::NoDrawing);
         }
         // Other parts: placement only; their documents are checked in full
         // when the job is prepared (see `part_view`).
@@ -557,10 +686,7 @@ impl Project {
                 || part.width_mm <= 0.0
                 || part.height_mm <= 0.0
             {
-                return Err(tr!(
-                    "Teil „{name}“ ist leer oder hat keine Größe",
-                    name = part.name
-                ));
+                return Err(ProjectError::EmptyPart(part.name.clone()));
             }
             if !self.fits_bed(
                 &part.svg,
@@ -569,10 +695,7 @@ impl Project {
                 part.width_mm,
                 part.height_mm,
             ) {
-                return Err(tr!(
-                    "Teil „{name}“ liegt außerhalb des Arbeitsbetts",
-                    name = part.name
-                ));
+                return Err(ProjectError::PartOutsideBed(part.name.clone()));
             }
         }
         Ok(())
@@ -774,9 +897,9 @@ impl Project {
 
     /// Documents may contain unfinished placement or no artwork. Sending has
     /// stricter requirements; drafts still need to survive a save/open cycle.
-    pub fn validate_document(&self) -> Result<(), String> {
+    pub fn validate_document(&self) -> Result<(), ProjectError> {
         if self.format_version != 2 {
-            return Err(tr("Unbekannte Projektversion").into());
+            return Err(ProjectError::UnknownVersion);
         }
         // Before anything parses the drawings (see `svg::MAX_NESTING`).
         let parametric = self.parts.iter().filter_map(|p| p.parametric.as_ref());
@@ -791,56 +914,41 @@ impl Project {
         {
             crate::svg::check_nesting(svg)?;
         }
-        for (message, value) in [
-            (
-                tr("Bettbreite muss positiv und höchstens 100000 sein"),
-                self.bed_width_mm,
-            ),
-            (
-                tr("Betthöhe muss positiv und höchstens 100000 sein"),
-                self.bed_height_mm,
-            ),
-            (
-                tr("Motivbreite muss positiv und höchstens 100000 sein"),
-                self.width_mm,
-            ),
-            (
-                tr("Motivhöhe muss positiv und höchstens 100000 sein"),
-                self.height_mm,
-            ),
+        for (error, value) in [
+            (ProjectError::BedWidth, self.bed_width_mm),
+            (ProjectError::BedHeight, self.bed_height_mm),
+            (ProjectError::MotifWidth, self.width_mm),
+            (ProjectError::MotifHeight, self.height_mm),
         ] {
             if !value.is_finite() || value <= 0.0 || value > 100_000.0 {
-                return Err(message.into());
+                return Err(error);
             }
         }
         if !self.thickness_mm.is_finite() || !(0.0..=100_000.0).contains(&self.thickness_mm) {
-            return Err(tr("Materialstärke muss nichtnegativ und endlich sein").into());
+            return Err(ProjectError::Thickness);
         }
         if !self.power_percent.is_finite() || !(0.0..=100.0).contains(&self.power_percent) {
-            return Err(tr("Leistung muss zwischen 0 und 100 % liegen").into());
+            return Err(ProjectError::Power);
         }
         if !self.speed_percent.is_finite() || !(0.1..=100.0).contains(&self.speed_percent) {
-            return Err(tr("Geschwindigkeit muss zwischen 0,1 und 100 % liegen").into());
+            return Err(ProjectError::Speed);
         }
         if !(1..=100).contains(&self.passes) {
-            return Err(tr("Durchgänge müssen zwischen 1 und 100 liegen").into());
+            return Err(ProjectError::Passes);
         }
         // The LTT driver requires at least 5 mm and stores the radius in 0.01 mm.
         if !self.rotary_diameter_mm.is_finite()
             || !(5.0..=1000.0).contains(&self.rotary_diameter_mm)
         {
-            return Err(tr(
-                "Durchmesser für die Rotationseinheit muss zwischen 5 und 1000 mm liegen",
-            )
-            .into());
+            return Err(ProjectError::RotaryDiameter);
         }
         if !self.x_mm.is_finite() || !self.y_mm.is_finite() {
-            return Err(tr("Position muss endlich sein").into());
+            return Err(ProjectError::Position);
         }
         self.raster.validate()?;
         self.machine.validate()?;
         if self.steps.len() > 64 {
-            return Err(tr("Höchstens 64 Bearbeitungsschritte sind zulässig").into());
+            return Err(ProjectError::TooManySteps);
         }
         let count = if self.steps.iter().any(|s| s.filters.is_none() && !s.rest) {
             crate::selection::objects(&self.svg)?.len()
@@ -849,25 +957,20 @@ impl Project {
         };
         for step in &self.steps {
             if step.additional.len() > 15 {
-                return Err(tr("Höchstens 16 Parametersätze je Schritt").into());
+                return Err(ProjectError::TooManyParameterSets);
             }
             for set in step.parameters() {
                 set.validate()?;
             }
             step.raster.validate()?;
             if !(-50..=50).contains(&step.engrave_shift_px) {
-                return Err(tr(
-                    "Zusätzlicher Zeilenversatz muss zwischen −50 und 50 Pixeln liegen",
-                )
-                .into());
+                return Err(ProjectError::ExtraShift);
             }
             if (step.rest || step.filters.is_some()) && !step.objects.is_empty() {
-                return Err(
-                    tr("Regelschritte dürfen keine einzeln gewählten Objekte enthalten").into(),
-                );
+                return Err(ProjectError::RuleWithObjects);
             }
             if step.rest && step.filters.is_some() {
-                return Err(tr("Ein Restschritt hat keine Filter").into());
+                return Err(ProjectError::RestWithFilters);
             }
             for filter in step
                 .filters
@@ -878,7 +981,7 @@ impl Project {
                 filter.validate()?;
             }
             if step.objects.iter().any(|id| *id >= count) {
-                return Err(tr("Zuordnung verweist auf ein nicht vorhandenes SVG-Objekt").into());
+                return Err(ProjectError::ObjectMissing);
             }
         }
         Ok(())

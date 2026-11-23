@@ -59,7 +59,7 @@ struct ShapeForm {
 }
 
 /// Ergebnis eines Werkzeugs: neues Projekt und Hinweise.
-pub type Composed = Result<(Project, Vec<String>), String>;
+pub type Composed = Result<(Project, Vec<String>), compose::ComposeError>;
 
 pub struct ComposeUi {
     open: Option<Tool>,
@@ -175,7 +175,7 @@ impl FontSamples {
             compose::font_sample(text, font, bold, italic, (28.0 * ppp) as f64).map(|image| {
                 ui.ctx().load_texture(
                     format!("font-sample-{font}"),
-                    image,
+                    crate::color_image(image),
                     egui::TextureOptions::LINEAR,
                 )
             })

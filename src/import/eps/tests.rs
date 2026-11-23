@@ -1,3 +1,4 @@
+use super::error::{EpsError, Unsupported};
 use super::interpret;
 use crate::project::Project;
 
@@ -20,7 +21,7 @@ fn project(svg: &str) -> Project {
     }
 }
 
-fn error(data: &[u8]) -> String {
+fn error(data: &[u8]) -> EpsError {
     interpret(data).err().expect("Fehler erwartet")
 }
 
@@ -163,34 +164,43 @@ fn missing_bounding_box_uses_default_size_with_warning() {
 #[test]
 fn unknown_operator_is_named_in_the_error() {
     let message = error(b"%%BoundingBox: 0 0 10 10\n0 0 moveto frobnicate\n");
-    assert!(message.contains("frobnicate"), "{message}");
+    assert!(
+        matches!(&message, EpsError::Unsupported { operator, kind: Unsupported::Other } if operator == "frobnicate"),
+        "{message}"
+    );
 }
 
 #[test]
 fn text_operator_is_reported_as_unsupported() {
     let message = error(b"%%BoundingBox: 0 0 100 100\n10 10 moveto (Hi) show\n");
-    assert!(message.contains("„show“"), "{message}");
-    assert!(message.contains("Text"), "{message}");
+    assert!(
+        matches!(&message, EpsError::Unsupported { operator, kind: Unsupported::Text } if operator == "show"),
+        "{message}"
+    );
 }
 
 #[test]
 fn fonts_and_images_are_reported_as_unsupported() {
     let font = error(b"%%BoundingBox: 0 0 100 100\n/Helvetica findfont 12 scalefont setfont\n");
-    assert!(font.contains("findfont"), "{font}");
-    assert!(font.contains("Schrift"), "{font}");
+    assert!(
+        matches!(&font, EpsError::Unsupported { operator, kind: Unsupported::Font } if operator == "findfont"),
+        "{font}"
+    );
     let image = error(b"%%BoundingBox: 0 0 100 100\n0 0 10 10 image\n");
-    assert!(image.contains("„image“"), "{image}");
-    assert!(image.contains("Bild"), "{image}");
+    assert!(
+        matches!(&image, EpsError::Unsupported { operator, kind: Unsupported::Image } if operator == "image"),
+        "{image}"
+    );
 }
 
 #[test]
 fn endless_loops_stop_with_a_message() {
     let message = error(b"%%BoundingBox: 0 0 10 10\n100000000 { } repeat\n");
-    assert!(message.contains("zu viele Operationen"), "{message}");
+    assert!(matches!(message, EpsError::TooManyOperations), "{message}");
 }
 
 #[test]
 fn unclosed_procedure_is_an_error() {
     let message = error(b"%%BoundingBox: 0 0 10 10\n1 { 0 0 moveto\n");
-    assert!(message.contains("„{“"), "{message}");
+    assert!(matches!(message, EpsError::UnclosedProcedure), "{message}");
 }

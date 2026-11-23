@@ -191,201 +191,288 @@ pub fn list_button(ui: &mut egui::Ui, icon: Icon, enabled: bool, hover: &str) ->
 
 /// Zeichnet ein Symbol in einem Raster von −10 … 10 um die Mitte von `rect`.
 pub fn paint(painter: &egui::Painter, icon: Icon, rect: Rect, color: Color32) {
-    let c = rect.center();
-    let s = rect.width() / 30.0;
-    let p = |x: f32, y: f32| -> Pos2 { c + vec2(x, y) * s };
-    let line = Stroke::new(1.4, color);
-    let bold = Stroke::new(2.0, color);
-    let r = |x0: f32, y0: f32, x1: f32, y1: f32| Rect::from_min_max(p(x0, y0), p(x1, y1));
-    let outline = |rect: Rect, radius: f32| {
-        painter.rect_stroke(rect, radius, line, egui::StrokeKind::Middle);
-    };
-    let path = |points: &[(f32, f32)], closed: bool| {
-        let points: Vec<Pos2> = points.iter().map(|&(x, y)| p(x, y)).collect();
-        if closed {
-            painter.add(egui::Shape::closed_line(points, line));
-        } else {
-            painter.add(egui::Shape::line(points, line));
-        }
-    };
-    let filled = |points: &[(f32, f32)]| {
-        let points: Vec<Pos2> = points.iter().map(|&(x, y)| p(x, y)).collect();
-        painter.add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
-    };
-    let dashed = |a: (f32, f32), b: (f32, f32)| {
-        painter.add(egui::Shape::dashed_line(
-            &[p(a.0, a.1), p(b.0, b.1)],
-            Stroke::new(1.0, color),
-            2.0 * s,
-            2.0 * s,
-        ));
+    let pen = Pen {
+        painter,
+        center: rect.center(),
+        scale: rect.width() / 30.0,
+        color,
     };
     match icon {
-        Icon::AddPart => {
-            outline(r(-9.0, -9.0, 4.0, 4.0), 1.5 * s);
-            painter.circle(p(4.5, 4.5), 5.0 * s, Color32::WHITE, line);
-            path(&[(4.5, 1.5), (4.5, 7.5)], false);
-            path(&[(1.5, 4.5), (7.5, 4.5)], false);
-        }
-        Icon::Text => {
-            painter.line_segment([p(-7.0, -8.0), p(7.0, -8.0)], bold);
-            painter.line_segment([p(0.0, -8.0), p(0.0, 8.5)], bold);
-            painter.line_segment([p(-3.0, 8.5), p(3.0, 8.5)], line);
-        }
-        Icon::Shape => {
-            painter.circle_stroke(p(-3.0, -3.0), 6.0 * s, line);
-            outline(r(-1.0, -1.0, 9.0, 9.0), 0.0);
-        }
-        Icon::Sign => {
-            outline(r(-10.0, -6.5, 10.0, 6.5), 2.5 * s);
-            path(&[(-5.5, -1.5), (5.5, -1.5)], false);
-            path(&[(-5.5, 2.5), (2.0, 2.5)], false);
-            painter.circle_filled(p(-7.5, -4.0), 0.9 * s, color);
-            painter.circle_filled(p(7.5, -4.0), 0.9 * s, color);
-        }
-        Icon::Transform => {
-            let frame = [(-7.0, -7.0), (7.0, -7.0), (7.0, 7.0), (-7.0, 7.0)];
-            for i in 0..4 {
-                dashed(frame[i], frame[(i + 1) % 4]);
-            }
-            for (x, y) in frame {
-                painter.rect_filled(r(x - 2.0, y - 2.0, x + 2.0, y + 2.0), 0.0, color);
-            }
-        }
-        Icon::Scale => {
-            outline(r(-9.0, 1.0, -1.0, 9.0), 0.0);
-            for (a, b) in [
-                ((-9.0, -9.0), (9.0, -9.0)),
-                ((9.0, -9.0), (9.0, 9.0)),
-                ((-1.0, 9.0), (9.0, 9.0)),
-                ((-9.0, -9.0), (-9.0, 1.0)),
-            ] {
-                dashed(a, b);
-            }
-            path(&[(1.0, -1.0), (5.0, -5.0)], false);
-            filled(&[(6.5, -6.5), (1.5, -5.5), (5.5, -1.5)]);
-        }
-        Icon::Link | Icon::Unlink => {
-            // Wie das übliche Kettensymbol: zwei zur Mitte offene Glieder,
-            // verbunden durch einen Steg; schräg nach rechts oben gedreht.
-            let linked = icon == Icon::Link;
-            let (sin, cos) = (-45.0_f32).to_radians().sin_cos();
-            let turn = |(x, y): (f32, f32)| (x * cos - y * sin, x * sin + y * cos);
-            let (r, center, open) = if linked {
-                (3.4, 4.6, 1.6)
-            } else {
-                (3.4, 5.6, 2.8)
-            };
-            for side in [-1.0_f32, 1.0] {
-                let mut points = vec![(side * open, -r)];
-                for i in 0..=16 {
-                    // Von oben über die Außenseite nach unten.
-                    let a = (-90.0 + side * 180.0 * i as f32 / 16.0).to_radians();
-                    points.push((side * center + r * a.cos(), r * a.sin()));
-                }
-                points.push((side * open, r));
-                let points: Vec<(f32, f32)> = points.into_iter().map(turn).collect();
-                path(&points, false);
-            }
-            if linked {
-                path(&[turn((-2.8, 0.0)), turn((2.8, 0.0))], false);
-            } else {
-                // Bruchstriche quer im Spalt.
-                path(&[turn((-0.9, -4.0)), turn((-0.9, -6.0))], false);
-                path(&[turn((0.9, 4.0)), turn((0.9, 6.0))], false);
-            }
-        }
-        Icon::Rotate => {
-            let arc: Vec<(f32, f32)> = (0..=24)
-                .map(|i| {
-                    let a = (-60.0 + 270.0 * i as f32 / 24.0).to_radians();
-                    (7.5 * a.cos(), 7.5 * a.sin())
-                })
-                .collect();
-            path(&arc, false);
-            // Pfeilspitze am Anfang des Bogens, im Uhrzeigersinn.
-            let (ex, ey) = arc[0];
-            filled(&[
-                (ex - 3.5, ey - 1.0),
-                (ex + 2.8, ey - 2.2),
-                (ex + 0.8, ey + 3.8),
-            ]);
-        }
+        Icon::AddPart => add_part(pen),
+        Icon::Text => text(pen),
+        Icon::Shape => shape(pen),
+        Icon::Sign => sign(pen),
+        Icon::Transform => transform(pen),
+        Icon::Scale => scale(pen),
+        Icon::Link => chain(pen, Chain::Linked),
+        Icon::Unlink => chain(pen, Chain::Broken),
+        Icon::Rotate => rotate(pen),
         Icon::FlipHorizontal => {
-            dashed((0.0, -10.0), (0.0, 10.0));
-            filled(&[(-2.5, -7.0), (-2.5, 7.0), (-10.0, 7.0)]);
-            path(&[(2.5, -7.0), (2.5, 7.0), (10.0, 7.0)], true);
+            pen.dashed((0.0, -10.0), (0.0, 10.0));
+            pen.filled(&[(-2.5, -7.0), (-2.5, 7.0), (-10.0, 7.0)]);
+            pen.closed_path(&[(2.5, -7.0), (2.5, 7.0), (10.0, 7.0)]);
         }
         Icon::FlipVertical => {
-            dashed((-10.0, 0.0), (10.0, 0.0));
-            filled(&[(-7.0, -2.5), (7.0, -2.5), (7.0, -10.0)]);
-            path(&[(-7.0, 2.5), (7.0, 2.5), (7.0, 10.0)], true);
+            pen.dashed((-10.0, 0.0), (10.0, 0.0));
+            pen.filled(&[(-7.0, -2.5), (7.0, -2.5), (7.0, -10.0)]);
+            pen.closed_path(&[(-7.0, 2.5), (7.0, 2.5), (7.0, 10.0)]);
         }
-        Icon::Array => {
-            for row in 0..2 {
-                for col in 0..3 {
-                    let x = -9.5 + col as f32 * 7.0;
-                    let y = -6.5 + row as f32 * 7.0;
-                    outline(r(x, y, x + 5.0, y + 5.0), 0.8 * s);
-                }
-            }
-        }
-        Icon::Nest => {
-            outline(r(-10.0, -9.0, 10.0, 9.0), 1.5 * s);
-            path(&[(-7.0, 6.0), (-1.0, 6.0), (-7.0, -6.0)], true);
-            painter.circle_stroke(p(4.0, -2.5), 3.5 * s, line);
-            outline(r(1.0, 3.0, 7.0, 6.5), 0.0);
-        }
-        Icon::Duplicate => {
-            outline(r(-9.0, -9.0, 3.0, 3.0), 1.5 * s);
-            painter.rect(
-                r(-3.0, -3.0, 9.0, 9.0),
-                1.5 * s,
-                Color32::WHITE,
-                line,
-                egui::StrokeKind::Middle,
-            );
-        }
-        Icon::Undo | Icon::Redo => {
-            // Bogen von oben über rechts nach unten, Pfeil links oben;
-            // Wiederholen gespiegelt.
-            let m = if icon == Icon::Redo { -1.0 } else { 1.0 };
-            let arc = (0..=20).map(|i| {
-                let a = (-90.0 + 180.0 * i as f32 / 20.0).to_radians();
-                (m * (1.0 + 6.5 * a.cos()), 0.5 + 6.5 * a.sin())
-            });
-            let points: Vec<(f32, f32)> = std::iter::once((m * -6.0, -6.0))
-                .chain(arc)
-                .chain(std::iter::once((m * -5.0, 7.0)))
-                .collect();
-            path(&points, false);
-            filled(&[(m * -9.5, -6.0), (m * -4.5, -9.5), (m * -4.5, -2.5)]);
-        }
-        Icon::Home => {
-            let line = Stroke::new(1.7, color);
-            let roof = [p(-10.0, -0.5), p(0.0, -9.5), p(10.0, -0.5)];
-            painter.add(egui::Shape::line(roof.to_vec(), line));
-            let body = [p(-7.0, -3.0), p(-7.0, 9.0), p(7.0, 9.0), p(7.0, -3.0)];
-            painter.add(egui::Shape::line(body.to_vec(), line));
-            painter.add(egui::Shape::line(
-                vec![p(-2.5, 9.0), p(-2.5, 3.0), p(2.5, 3.0), p(2.5, 9.0)],
-                line,
-            ));
-        }
+        Icon::Array => array(pen),
+        Icon::Nest => nest(pen),
+        Icon::Duplicate => duplicate(pen),
+        Icon::Undo => undo(pen, 1.0),
+        Icon::Redo => undo(pen, -1.0),
+        Icon::Home => home(pen),
         Icon::Plus => {
-            path(&[(0.0, -7.0), (0.0, 7.0)], false);
-            path(&[(-7.0, 0.0), (7.0, 0.0)], false);
+            pen.path(&[(0.0, -7.0), (0.0, 7.0)]);
+            pen.path(&[(-7.0, 0.0), (7.0, 0.0)]);
         }
-        Icon::Minus => path(&[(-7.0, 0.0), (7.0, 0.0)], false),
-        Icon::Delete => {
-            path(&[(-8.0, -6.0), (8.0, -6.0)], false);
-            path(
-                &[(-3.0, -6.0), (-2.0, -9.0), (2.0, -9.0), (3.0, -6.0)],
-                false,
-            );
-            path(&[(-6.0, -6.0), (-5.0, 9.0), (5.0, 9.0), (6.0, -6.0)], false);
-            path(&[(-2.0, -2.5), (-1.7, 5.5)], false);
-            path(&[(2.0, -2.5), (1.7, 5.5)], false);
+        Icon::Minus => pen.path(&[(-7.0, 0.0), (7.0, 0.0)]),
+        Icon::Delete => delete(pen),
+    }
+}
+
+/// Zeichenstift eines Symbols: Rasterpunkte (−10 … 10) um `center`, je
+/// Einheit `scale` Bildpunkte, Linien in `color`.
+#[derive(Clone, Copy)]
+struct Pen<'a> {
+    painter: &'a egui::Painter,
+    center: Pos2,
+    scale: f32,
+    color: Color32,
+}
+
+impl Pen<'_> {
+    fn p(self, x: f32, y: f32) -> Pos2 {
+        self.center + vec2(x, y) * self.scale
+    }
+
+    fn r(self, x0: f32, y0: f32, x1: f32, y1: f32) -> Rect {
+        Rect::from_min_max(self.p(x0, y0), self.p(x1, y1))
+    }
+
+    /// Normale Linie.
+    fn line(self) -> Stroke {
+        Stroke::new(1.4, self.color)
+    }
+
+    fn bold(self) -> Stroke {
+        Stroke::new(2.0, self.color)
+    }
+
+    fn points(self, points: &[(f32, f32)]) -> Vec<Pos2> {
+        points.iter().map(|&(x, y)| self.p(x, y)).collect()
+    }
+
+    fn outline(self, rect: Rect, radius: f32) {
+        self.painter
+            .rect_stroke(rect, radius, self.line(), egui::StrokeKind::Middle);
+    }
+
+    fn path(self, points: &[(f32, f32)]) {
+        self.painter
+            .add(egui::Shape::line(self.points(points), self.line()));
+    }
+
+    fn closed_path(self, points: &[(f32, f32)]) {
+        self.painter
+            .add(egui::Shape::closed_line(self.points(points), self.line()));
+    }
+
+    fn filled(self, points: &[(f32, f32)]) {
+        self.painter.add(egui::Shape::convex_polygon(
+            self.points(points),
+            self.color,
+            Stroke::NONE,
+        ));
+    }
+
+    fn dashed(self, a: (f32, f32), b: (f32, f32)) {
+        self.painter.add(egui::Shape::dashed_line(
+            &[self.p(a.0, a.1), self.p(b.0, b.1)],
+            Stroke::new(1.0, self.color),
+            2.0 * self.scale,
+            2.0 * self.scale,
+        ));
+    }
+}
+
+fn add_part(pen: Pen) {
+    let s = pen.scale;
+    pen.outline(pen.r(-9.0, -9.0, 4.0, 4.0), 1.5 * s);
+    pen.painter
+        .circle(pen.p(4.5, 4.5), 5.0 * s, Color32::WHITE, pen.line());
+    pen.path(&[(4.5, 1.5), (4.5, 7.5)]);
+    pen.path(&[(1.5, 4.5), (7.5, 4.5)]);
+}
+
+fn text(pen: Pen) {
+    let painter = pen.painter;
+    painter.line_segment([pen.p(-7.0, -8.0), pen.p(7.0, -8.0)], pen.bold());
+    painter.line_segment([pen.p(0.0, -8.0), pen.p(0.0, 8.5)], pen.bold());
+    painter.line_segment([pen.p(-3.0, 8.5), pen.p(3.0, 8.5)], pen.line());
+}
+
+fn shape(pen: Pen) {
+    pen.painter
+        .circle_stroke(pen.p(-3.0, -3.0), 6.0 * pen.scale, pen.line());
+    pen.outline(pen.r(-1.0, -1.0, 9.0, 9.0), 0.0);
+}
+
+fn sign(pen: Pen) {
+    let s = pen.scale;
+    pen.outline(pen.r(-10.0, -6.5, 10.0, 6.5), 2.5 * s);
+    pen.path(&[(-5.5, -1.5), (5.5, -1.5)]);
+    pen.path(&[(-5.5, 2.5), (2.0, 2.5)]);
+    pen.painter
+        .circle_filled(pen.p(-7.5, -4.0), 0.9 * s, pen.color);
+    pen.painter
+        .circle_filled(pen.p(7.5, -4.0), 0.9 * s, pen.color);
+}
+
+fn transform(pen: Pen) {
+    let frame = [(-7.0, -7.0), (7.0, -7.0), (7.0, 7.0), (-7.0, 7.0)];
+    for i in 0..4 {
+        pen.dashed(frame[i], frame[(i + 1) % 4]);
+    }
+    for (x, y) in frame {
+        pen.painter
+            .rect_filled(pen.r(x - 2.0, y - 2.0, x + 2.0, y + 2.0), 0.0, pen.color);
+    }
+}
+
+fn scale(pen: Pen) {
+    pen.outline(pen.r(-9.0, 1.0, -1.0, 9.0), 0.0);
+    for (a, b) in [
+        ((-9.0, -9.0), (9.0, -9.0)),
+        ((9.0, -9.0), (9.0, 9.0)),
+        ((-1.0, 9.0), (9.0, 9.0)),
+        ((-9.0, -9.0), (-9.0, 1.0)),
+    ] {
+        pen.dashed(a, b);
+    }
+    pen.path(&[(1.0, -1.0), (5.0, -5.0)]);
+    pen.filled(&[(6.5, -6.5), (1.5, -5.5), (5.5, -1.5)]);
+}
+
+/// Kettensymbol verbunden (Seitenverhältnis beibehalten) oder getrennt.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Chain {
+    Linked,
+    Broken,
+}
+
+fn chain(pen: Pen, state: Chain) {
+    // Wie das übliche Kettensymbol: zwei zur Mitte offene Glieder,
+    // verbunden durch einen Steg; schräg nach rechts oben gedreht.
+    let linked = state == Chain::Linked;
+    let (sin, cos) = (-45.0_f32).to_radians().sin_cos();
+    let turn = |(x, y): (f32, f32)| (x * cos - y * sin, x * sin + y * cos);
+    let (r, center, open) = if linked {
+        (3.4, 4.6, 1.6)
+    } else {
+        (3.4, 5.6, 2.8)
+    };
+    for side in [-1.0_f32, 1.0] {
+        let mut points = vec![(side * open, -r)];
+        for i in 0..=16 {
+            // Von oben über die Außenseite nach unten.
+            let a = (-90.0 + side * 180.0 * i as f32 / 16.0).to_radians();
+            points.push((side * center + r * a.cos(), r * a.sin()));
+        }
+        points.push((side * open, r));
+        let points: Vec<(f32, f32)> = points.into_iter().map(turn).collect();
+        pen.path(&points);
+    }
+    if linked {
+        pen.path(&[turn((-2.8, 0.0)), turn((2.8, 0.0))]);
+    } else {
+        // Bruchstriche quer im Spalt.
+        pen.path(&[turn((-0.9, -4.0)), turn((-0.9, -6.0))]);
+        pen.path(&[turn((0.9, 4.0)), turn((0.9, 6.0))]);
+    }
+}
+
+fn rotate(pen: Pen) {
+    let arc: Vec<(f32, f32)> = (0..=24)
+        .map(|i| {
+            let a = (-60.0 + 270.0 * i as f32 / 24.0).to_radians();
+            (7.5 * a.cos(), 7.5 * a.sin())
+        })
+        .collect();
+    pen.path(&arc);
+    // Pfeilspitze am Anfang des Bogens, im Uhrzeigersinn.
+    let (ex, ey) = arc[0];
+    pen.filled(&[
+        (ex - 3.5, ey - 1.0),
+        (ex + 2.8, ey - 2.2),
+        (ex + 0.8, ey + 3.8),
+    ]);
+}
+
+fn array(pen: Pen) {
+    for row in 0..2 {
+        for col in 0..3 {
+            let x = -9.5 + col as f32 * 7.0;
+            let y = -6.5 + row as f32 * 7.0;
+            pen.outline(pen.r(x, y, x + 5.0, y + 5.0), 0.8 * pen.scale);
         }
     }
+}
+
+fn nest(pen: Pen) {
+    pen.outline(pen.r(-10.0, -9.0, 10.0, 9.0), 1.5 * pen.scale);
+    pen.closed_path(&[(-7.0, 6.0), (-1.0, 6.0), (-7.0, -6.0)]);
+    pen.painter
+        .circle_stroke(pen.p(4.0, -2.5), 3.5 * pen.scale, pen.line());
+    pen.outline(pen.r(1.0, 3.0, 7.0, 6.5), 0.0);
+}
+
+fn duplicate(pen: Pen) {
+    let s = pen.scale;
+    pen.outline(pen.r(-9.0, -9.0, 3.0, 3.0), 1.5 * s);
+    pen.painter.rect(
+        pen.r(-3.0, -3.0, 9.0, 9.0),
+        1.5 * s,
+        Color32::WHITE,
+        pen.line(),
+        egui::StrokeKind::Middle,
+    );
+}
+
+/// Widerrufen (`m` = 1) oder Wiederholen (`m` = −1).
+fn undo(pen: Pen, m: f32) {
+    // Bogen von oben über rechts nach unten, Pfeil links oben;
+    // Wiederholen gespiegelt.
+    let arc = (0..=20).map(|i| {
+        let a = (-90.0 + 180.0 * i as f32 / 20.0).to_radians();
+        (m * (1.0 + 6.5 * a.cos()), 0.5 + 6.5 * a.sin())
+    });
+    let points: Vec<(f32, f32)> = std::iter::once((m * -6.0, -6.0))
+        .chain(arc)
+        .chain(std::iter::once((m * -5.0, 7.0)))
+        .collect();
+    pen.path(&points);
+    pen.filled(&[(m * -9.5, -6.0), (m * -4.5, -9.5), (m * -4.5, -2.5)]);
+}
+
+fn home(pen: Pen) {
+    let p = |x, y| pen.p(x, y);
+    let line = Stroke::new(1.7, pen.color);
+    let roof = [p(-10.0, -0.5), p(0.0, -9.5), p(10.0, -0.5)];
+    pen.painter.add(egui::Shape::line(roof.to_vec(), line));
+    let body = [p(-7.0, -3.0), p(-7.0, 9.0), p(7.0, 9.0), p(7.0, -3.0)];
+    pen.painter.add(egui::Shape::line(body.to_vec(), line));
+    pen.painter.add(egui::Shape::line(
+        vec![p(-2.5, 9.0), p(-2.5, 3.0), p(2.5, 3.0), p(2.5, 9.0)],
+        line,
+    ));
+}
+
+fn delete(pen: Pen) {
+    pen.path(&[(-8.0, -6.0), (8.0, -6.0)]);
+    pen.path(&[(-3.0, -6.0), (-2.0, -9.0), (2.0, -9.0), (3.0, -6.0)]);
+    pen.path(&[(-6.0, -6.0), (-5.0, 9.0), (5.0, 9.0), (6.0, -6.0)]);
+    pen.path(&[(-2.0, -2.5), (-1.7, 5.5)]);
+    pen.path(&[(2.0, -2.5), (1.7, 5.5)]);
 }

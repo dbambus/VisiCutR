@@ -10,9 +10,9 @@
 //! `R`, `I`/`J` relative to the arc start (standard; `G90.1` makes them
 //! absolute as in Java), single-digit `G0`–`G3`, lower-case words and
 //! comments in `(…)` and after `;`.
-use super::Imported;
+use super::{ImportError, Imported};
 use crate::svg_import::MAX_SVG_BYTES;
-use crate::{i18n::tr, tr};
+use crate::tr;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use std::fmt::Write;
 use std::path::Path;
@@ -24,8 +24,8 @@ const RADIUS_TOLERANCE_MM: f64 = 0.1;
 const MAX_WARNINGS: usize = 10;
 const EPSILON: f64 = 1e-9;
 
-pub fn read(path: &Path) -> Result<Imported, String> {
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+pub fn read(path: &Path) -> Result<Imported, ImportError> {
+    let bytes = std::fs::read(path)?;
     convert(&String::from_utf8_lossy(&bytes))
 }
 
@@ -47,7 +47,7 @@ struct Converter {
     warnings: Vec<String>,
 }
 
-fn convert(text: &str) -> Result<Imported, String> {
+fn convert(text: &str) -> Result<Imported, ImportError> {
     let mut converter = Converter {
         mode: 0,
         absolute: true,
@@ -64,7 +64,7 @@ fn convert(text: &str) -> Result<Imported, String> {
     for (index, line) in text.lines().enumerate() {
         converter.line(index + 1, line);
         if converter.data.len() > MAX_SVG_BYTES {
-            return Err(tr("G-Code ergibt eine SVG über 20 MB").into());
+            return Err(ImportError::GcodeTooLarge);
         }
     }
     converter.finish()
@@ -307,9 +307,9 @@ impl Converter {
         }
     }
 
-    fn finish(self) -> Result<Imported, String> {
+    fn finish(self) -> Result<Imported, ImportError> {
         if !self.drawn {
-            return Err(tr("G-Code enthält keine Bahnen (G1, G2 oder G3 mit Koordinaten)").into());
+            return Err(ImportError::GcodeEmpty);
         }
         let width = (self.max.0 - self.min.0).max(STROKE_MM);
         let height = (self.max.1 - self.min.1).max(STROKE_MM);
@@ -322,7 +322,7 @@ impl Converter {
             d = self.data,
         );
         if svg.len() > MAX_SVG_BYTES {
-            return Err(tr("G-Code ergibt eine SVG über 20 MB").into());
+            return Err(ImportError::GcodeTooLarge);
         }
         Ok(Imported {
             svg,

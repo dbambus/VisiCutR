@@ -8,27 +8,28 @@
 //! from its own profiles `cut`, `mark`, `engrave` and `engrave 3d` for the
 //! chosen material and thickness.
 use super::xml;
+use crate::i18n::tr;
+use crate::import::ImportError;
 use crate::mapping::{Attribute, Filter};
 use crate::project::{CutOrder, Operation, Part, Project};
 use crate::raster::{Dithering, RasterSettings};
-use crate::{i18n::tr, tr};
 use resvg::usvg;
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::Path;
 
 /// Writes `project` to `path`; returns notes on what VisiCut does not keep.
-pub fn write_plf(project: &Project, path: &Path) -> Result<Vec<String>, String> {
+pub fn write_plf(project: &Project, path: &Path) -> Result<Vec<String>, ImportError> {
     let (bytes, warnings) = plf_bytes(project)?;
-    std::fs::write(path, bytes).map_err(|e| e.to_string())?;
+    std::fs::write(path, bytes)?;
     Ok(warnings)
 }
 
 /// The PLF archive and notes on what VisiCut does not keep.
-pub fn plf_bytes(project: &Project) -> Result<(Vec<u8>, Vec<String>), String> {
+pub fn plf_bytes(project: &Project) -> Result<(Vec<u8>, Vec<String>), ImportError> {
     let parts = project.all_parts();
     if parts.is_empty() {
-        return Err(tr("Kein Motiv zum Speichern").into());
+        return Err(ImportError::NothingToSave);
     }
     let mut warnings = vec![
         tr(
@@ -75,11 +76,11 @@ pub fn plf_bytes(project: &Project) -> Result<(Vec<u8>, Vec<String>), String> {
             ),
             (format!("{prefix}mappings.xml"), mapping.into_bytes()),
         ] {
-            zip.start_file(name, options).map_err(|e| e.to_string())?;
-            zip.write_all(&bytes).map_err(|e| e.to_string())?;
+            zip.start_file(name, options).map_err(ImportError::Zip)?;
+            zip.write_all(&bytes)?;
         }
     }
-    let bytes = zip.finish().map_err(|e| e.to_string())?.into_inner();
+    let bytes = zip.finish().map_err(ImportError::Zip)?.into_inner();
     Ok((bytes, warnings))
 }
 
@@ -130,10 +131,9 @@ fn part_files(
     project: &str,
     order: &str,
     warnings: &mut Vec<String>,
-) -> Result<(String, String), String> {
+) -> Result<(String, String), ImportError> {
     let source = xml::strip_doctype(&part.svg);
-    let doc = roxmltree::Document::parse(&source)
-        .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
+    let doc = roxmltree::Document::parse(&source).map_err(ImportError::SvgXml)?;
     let root = doc.root_element();
     let nodes = crate::selection::selectable_nodes(&doc);
     let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
@@ -207,13 +207,32 @@ fn part_files(
         mappings.push(mapping(Some(filters), None));
     }
 
-    // Root in millimetres: the content keeps its user units inside a group
-    // that maps them to the part's size, as VisiCutR draws it.
-    let matrix = user_to_mm(part, &source, root)?;
+    wrap_root_in_mm(part, &source, root, &mut edits)?;
+    let svg = xml::apply_edits(&source, 0, edits);
+
+    let entries: String = mappings.concat();
+    let mapping_xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<com.t_oster.visicut.model.mapping.MappingSet serialization=\"custom\">\n  <unserializable-parents/>\n  <linked-list>\n    <default/>\n    <int>{}</int>\n{entries}  </linked-list>\n  <name>{}</name>\n</com.t_oster.visicut.model.mapping.MappingSet>\n",
+        mappings.len(),
+        xml::escape_text(project)
+    );
+    Ok((svg, mapping_xml))
+}
+
+/// Root in millimetres: the content keeps its user units inside a group
+/// that maps them to the part's size, as VisiCutR draws it. Adds the edits
+/// of the root's start and end tag.
+fn wrap_root_in_mm(
+    part: &Part,
+    source: &str,
+    root: roxmltree::Node,
+    edits: &mut Vec<(std::ops::Range<usize>, String)>,
+) -> Result<(), ImportError> {
+    let matrix = user_to_mm(part, source, root)?;
     let start = root.range().start;
-    let tag_end = xml::start_tag_end(&source, start);
-    if xml::is_self_closing(&source, tag_end) {
-        return Err(tr("SVG enthält keine Objekte").into());
+    let tag_end = xml::start_tag_end(source, start);
+    if xml::is_self_closing(source, tag_end) {
+        return Err(ImportError::NoObjects);
     }
     let replaced = [
         "x",
@@ -234,7 +253,7 @@ fn part_files(
         ("height".to_string(), format!("{h}mm")),
         ("viewBox".to_string(), format!("0 0 {w} {h}")),
     ];
-    let tag = xml::rewrite_start_tag(&source, start, tag_end, &removed, &added);
+    let tag = xml::rewrite_start_tag(source, start, tag_end, &removed, &added);
     let matrix = matrix.map(|v| v.to_string()).join(" ");
     edits.push((
         start..tag_end,
@@ -242,25 +261,17 @@ fn part_files(
     ));
     let close = source[..root.range().end]
         .rfind("</")
-        .ok_or(tr("SVG konnte nicht gelesen werden"))?;
+        .ok_or(ImportError::SvgStructure)?;
     edits.push((close..close, "</g>".into()));
-    let svg = xml::apply_edits(&source, 0, edits);
-
-    let entries: String = mappings.concat();
-    let mapping_xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<com.t_oster.visicut.model.mapping.MappingSet serialization=\"custom\">\n  <unserializable-parents/>\n  <linked-list>\n    <default/>\n    <int>{}</int>\n{entries}  </linked-list>\n  <name>{}</name>\n</com.t_oster.visicut.model.mapping.MappingSet>\n",
-        mappings.len(),
-        xml::escape_text(project)
-    );
-    Ok((svg, mapping_xml))
+    Ok(())
 }
 
 /// Matrix from the SVG's user units to millimetres of the part: the root
 /// viewBox (with preserveAspectRatio) to the document size, which is then
 /// stretched to the part's width and height.
-fn user_to_mm(part: &Part, source: &str, root: roxmltree::Node) -> Result<[f64; 6], String> {
+fn user_to_mm(part: &Part, source: &str, root: roxmltree::Node) -> Result<[f64; 6], ImportError> {
     let tree = usvg::Tree::from_str(source, &crate::svg::options())
-        .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
+        .map_err(crate::svg::SvgError::Unreadable)?;
     let (doc_w, doc_h) = (
         f64::from(tree.size().width()),
         f64::from(tree.size().height()),

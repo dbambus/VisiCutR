@@ -30,7 +30,7 @@ pub use parametric::{Kind as ParameterKind, Parameter, Value as ParameterValue};
 pub(super) use parametric::{Rendered, render_here as parametric_here};
 pub use write::{plf_bytes, write_plf};
 
-use super::{Imported, MAX_FILE_BYTES};
+use super::{ImportError, Imported, MAX_FILE_BYTES};
 use crate::mapping::attributes;
 use crate::{i18n::tr, tr};
 use resvg::usvg;
@@ -46,70 +46,14 @@ const PX_PER_MM: f64 = 96.0 / 25.4;
 /// `AffineTransform(double[6])`.
 type Matrix = [f64; 6];
 
-pub fn read_plf(path: &Path) -> Result<Imported, String> {
-    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| tr!("PLF-Datei ist kein gültiges ZIP-Archiv: {error}", error = e))?;
+pub fn read_plf(path: &Path) -> Result<Imported, ImportError> {
+    let file = std::fs::File::open(path)?;
+    let mut archive = zip::ZipArchive::new(file).map_err(ImportError::PlfNotZip)?;
     if archive.len() > MAX_ENTRIES {
-        return Err(tr!(
-            "PLF-Datei enthält mehr als {count} Einträge",
-            count = MAX_ENTRIES
-        ));
+        return Err(ImportError::PlfTooManyEntries(MAX_ENTRIES));
     }
     let temp = TempDir::new()?;
-    let mut parts: BTreeMap<u32, PartFiles> = BTreeMap::new();
-    let mut total = 0u64;
-    for i in 0..archive.len() {
-        let mut entry = archive
-            .by_index(i)
-            .map_err(|e| tr!("PLF-Datei ist beschädigt: {error}", error = e))?;
-        if entry.is_dir() {
-            continue;
-        }
-        // VisiCut writes UTF-8 names without setting the ZIP's UTF-8 flag.
-        let name = std::str::from_utf8(entry.name_raw())
-            .map(str::to_string)
-            .unwrap_or_else(|_| String::from_utf8_lossy(entry.name_raw()).into_owned());
-        let mut bytes = Vec::new();
-        (&mut entry)
-            .take(MAX_FILE_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|e| {
-                tr!(
-                    "„{name}“ in der PLF-Datei ist nicht lesbar: {error}",
-                    name = name,
-                    error = e
-                )
-            })?;
-        if bytes.len() as u64 > MAX_FILE_BYTES {
-            return Err(tr!(
-                "„{name}“ in der PLF-Datei ist größer als 25 MB",
-                name = name
-            ));
-        }
-        total += bytes.len() as u64;
-        if total > MAX_TOTAL_BYTES {
-            return Err(tr("PLF-Datei ist entpackt größer als 100 MB").into());
-        }
-        let (index, local) = split_index(&name);
-        let part = parts.entry(index).or_default();
-        if local == "transform.xml" {
-            part.transform = Some(parse_transform(&bytes));
-        } else if local == "mappings.xml" {
-            part.mapping = Some(bytes);
-        } else {
-            let directory = temp.0.join(index.to_string());
-            std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
-            let file_name = sanitize(local);
-            let target = directory.join(&file_name);
-            std::fs::write(&target, &bytes).map_err(|e| e.to_string())?;
-            // Parameter files only accompany a parametric SVG.
-            if !file_name.to_ascii_lowercase().ends_with(".parameters") {
-                let shown = local.rsplit(['/', '\\']).next().unwrap_or(local);
-                part.source = Some((shown.to_string(), target));
-            }
-        }
-    }
+    let parts = extract_parts(&mut archive, &temp)?;
 
     let mut composer = Composer::default();
     let mut warnings = Vec::new();
@@ -118,53 +62,11 @@ pub fn read_plf(path: &Path) -> Result<Imported, String> {
     let mut separate: Vec<crate::svg_import::ExtraPart> = Vec::new();
     for (index, part) in parts {
         let mapping = part.mapping.map(|bytes| mappings::parse(&bytes));
-        let Some((name, file)) = part.source else {
-            warnings.push(tr!(
-                "Teil {number}: Grafikdatei fehlt in der PLF-Datei",
-                number = index + 1
-            ));
+        let Some((name, file, imported)) = import_part(index, part.source, &mut warnings) else {
             continue;
-        };
-        if file
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("plf"))
-        {
-            warnings.push(tr!(
-                "Teil „{name}“ übersprungen: PLF-Dateien in PLF-Dateien werden nicht geöffnet",
-                name = name
-            ));
-            continue;
-        }
-        let imported = match super::read_file(&file) {
-            Ok(imported) => imported,
-            Err(error) => {
-                warnings.push(tr!(
-                    "Teil „{name}“ übersprungen: {error}",
-                    name = name,
-                    error = error
-                ));
-                continue;
-            }
         };
         warnings.extend(imported.warnings.iter().map(|w| format!("{name}: {w}")));
-        let transform = match part.transform {
-            Some(Ok(transform)) => Some(transform),
-            Some(Err(error)) => {
-                warnings.push(tr!(
-                    "Teil „{name}“: Position nicht lesbar ({error}); die Grafik liegt am Nullpunkt",
-                    name = name,
-                    error = error
-                ));
-                None
-            }
-            None => {
-                warnings.push(tr!(
-                    "Teil „{name}“: keine Position gespeichert; die Grafik liegt am Nullpunkt",
-                    name = name
-                ));
-                None
-            }
-        };
+        let transform = placement(&name, part.transform, &mut warnings);
         // Parametrische Teile bleiben eigene Teile, damit sich ihre
         // Parameter ändern lassen.
         if let Some(parametric) = imported.parametric {
@@ -202,28 +104,13 @@ pub fn read_plf(path: &Path) -> Result<Imported, String> {
     }
     if composer.parts.is_empty() && !separate.is_empty() {
         // Nur parametrische Teile: das erste wird die Hauptgrafik.
-        let first = separate.remove(0);
-        for part in &mut separate {
-            part.offset_mm[0] -= first.offset_mm[0];
-            part.offset_mm[1] -= first.offset_mm[1];
-        }
-        return Ok(Imported {
-            svg: first.svg,
-            warnings,
-            steps: first.steps,
-            parametric: first.parametric,
-            extra_parts: separate,
-            offset_mm: first.offset_mm,
-        });
+        return Ok(first_part_as_main(separate, warnings));
     }
     if composer.parts.is_empty() {
         return Err(if warnings.is_empty() {
-            tr("PLF-Datei enthält keine Grafik").into()
+            ImportError::PlfEmpty
         } else {
-            tr!(
-                "PLF-Datei enthält keine importierbare Grafik ({warnings})",
-                warnings = warnings.join("; ")
-            )
+            ImportError::PlfNothingImportable(warnings)
         });
     }
     let (svg, more, shift) = composer.finish()?;
@@ -250,6 +137,146 @@ pub fn read_plf(path: &Path) -> Result<Imported, String> {
     })
 }
 
+/// Imports the graphic file of part `index`; `None` with a warning when it is
+/// missing, a nested PLF file or not importable.
+fn import_part(
+    index: u32,
+    source: Option<(String, PathBuf)>,
+    warnings: &mut Vec<String>,
+) -> Option<(String, PathBuf, Imported)> {
+    let Some((name, file)) = source else {
+        warnings.push(tr!(
+            "Teil {number}: Grafikdatei fehlt in der PLF-Datei",
+            number = index + 1
+        ));
+        return None;
+    };
+    if file
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("plf"))
+    {
+        warnings.push(tr!(
+            "Teil „{name}“ übersprungen: PLF-Dateien in PLF-Dateien werden nicht geöffnet",
+            name = name
+        ));
+        return None;
+    }
+    let imported = match super::read_file(&file) {
+        Ok(imported) => imported,
+        Err(error) => {
+            warnings.push(tr!(
+                "Teil „{name}“ übersprungen: {error}",
+                name = name,
+                error = error
+            ));
+            return None;
+        }
+    };
+    Some((name, file, imported))
+}
+
+/// Reads the archive entries: transforms and mappings into memory, graphic
+/// and parameter files into `temp`, grouped by part index.
+fn extract_parts(
+    archive: &mut zip::ZipArchive<std::fs::File>,
+    temp: &TempDir,
+) -> Result<BTreeMap<u32, PartFiles>, ImportError> {
+    let mut parts: BTreeMap<u32, PartFiles> = BTreeMap::new();
+    let mut total = 0u64;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(ImportError::PlfDamaged)?;
+        if entry.is_dir() {
+            continue;
+        }
+        // VisiCut writes UTF-8 names without setting the ZIP's UTF-8 flag.
+        let name = std::str::from_utf8(entry.name_raw())
+            .map(str::to_string)
+            .unwrap_or_else(|_| String::from_utf8_lossy(entry.name_raw()).into_owned());
+        let mut bytes = Vec::new();
+        (&mut entry)
+            .take(MAX_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| ImportError::PlfEntryUnreadable {
+                name: name.clone(),
+                error,
+            })?;
+        if bytes.len() as u64 > MAX_FILE_BYTES {
+            return Err(ImportError::PlfEntryTooLarge(name));
+        }
+        total += bytes.len() as u64;
+        if total > MAX_TOTAL_BYTES {
+            return Err(ImportError::PlfTooLarge);
+        }
+        let (index, local) = split_index(&name);
+        let part = parts.entry(index).or_default();
+        if local == "transform.xml" {
+            part.transform = Some(parse_transform(&bytes));
+        } else if local == "mappings.xml" {
+            part.mapping = Some(bytes);
+        } else {
+            let directory = temp.0.join(index.to_string());
+            std::fs::create_dir_all(&directory)?;
+            let file_name = sanitize(local);
+            let target = directory.join(&file_name);
+            std::fs::write(&target, &bytes)?;
+            // Parameter files only accompany a parametric SVG.
+            if !file_name.to_ascii_lowercase().ends_with(".parameters") {
+                let shown = local.rsplit(['/', '\\']).next().unwrap_or(local);
+                part.source = Some((shown.to_string(), target));
+            }
+        }
+    }
+    Ok(parts)
+}
+
+/// The part's saved position; `None` (graphic at the origin) with a warning
+/// when it is missing or unreadable.
+fn placement(
+    name: &str,
+    transform: Option<Result<Matrix, ImportError>>,
+    warnings: &mut Vec<String>,
+) -> Option<Matrix> {
+    match transform {
+        Some(Ok(transform)) => Some(transform),
+        Some(Err(error)) => {
+            warnings.push(tr!(
+                "Teil „{name}“: Position nicht lesbar ({error}); die Grafik liegt am Nullpunkt",
+                name = name,
+                error = error
+            ));
+            None
+        }
+        None => {
+            warnings.push(tr!(
+                "Teil „{name}“: keine Position gespeichert; die Grafik liegt am Nullpunkt",
+                name = name
+            ));
+            None
+        }
+    }
+}
+
+/// A PLF file with parametric parts only: the first becomes the main graphic,
+/// the others keep their offsets relative to it.
+fn first_part_as_main(
+    mut separate: Vec<crate::svg_import::ExtraPart>,
+    warnings: Vec<String>,
+) -> Imported {
+    let first = separate.remove(0);
+    for part in &mut separate {
+        part.offset_mm[0] -= first.offset_mm[0];
+        part.offset_mm[1] -= first.offset_mm[1];
+    }
+    Imported {
+        svg: first.svg,
+        warnings,
+        steps: first.steps,
+        parametric: first.parametric,
+        extra_parts: separate,
+        offset_mm: first.offset_mm,
+    }
+}
+
 /// Parts that VisiCutR knows as SVG; their objects have the attributes VisiCut uses.
 fn is_svg(file: &Path) -> bool {
     file.extension()
@@ -261,14 +288,14 @@ fn is_svg(file: &Path) -> bool {
 /// (images embedded) and the parameters with their types and limits.
 pub fn render_parametric(
     parametric: &crate::project::Parametric,
-) -> Result<(Imported, Vec<Parameter>), String> {
+) -> Result<(Imported, Vec<Parameter>), ImportError> {
     let rendered = parametric::render(
         parametric.template.clone(),
         parametric.psvg,
         parametric.values.clone(),
         script::TIME_LIMIT,
     )
-    .map_err(|e| tr!("Parametrische SVG: {details}", details = e))?;
+    .map_err(|e| ImportError::Parametric(Box::new(e)))?;
     let mut imported =
         crate::svg_import::embed_external_images(&rendered.svg, Path::new(&parametric.base_dir));
     if let Some(placement) = &parametric.placement {
@@ -288,8 +315,8 @@ pub fn render_parametric(
     Ok((imported, rendered.parameters))
 }
 
-pub fn read_parametric_svg(path: &Path) -> Result<Imported, String> {
-    let source = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+pub fn read_parametric_svg(path: &Path) -> Result<Imported, ImportError> {
+    let source = std::fs::read_to_string(path)?;
     let name = path
         .file_name()
         .unwrap_or_default()
@@ -304,7 +331,7 @@ pub fn read_parametric_svg(path: &Path) -> Result<Imported, String> {
     let parameter_file = PathBuf::from(parameter_file);
     if parameter_file.is_file() {
         match std::fs::read_to_string(&parameter_file)
-            .map_err(|e| e.to_string())
+            .map_err(ImportError::from)
             .and_then(|text| parametric::read_saved_values(&text))
         {
             Ok(values) => saved = values,
@@ -331,8 +358,8 @@ pub fn read_parametric_svg(path: &Path) -> Result<Imported, String> {
     Ok(imported)
 }
 
-pub fn read_laser_script(path: &Path) -> Result<Imported, String> {
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+pub fn read_laser_script(path: &Path) -> Result<Imported, ImportError> {
+    let bytes = std::fs::read(path)?;
     let source = String::from_utf8_lossy(&bytes).into_owned();
     let drawing = laserscript::run(source, script::TIME_LIMIT)?;
     let (svg, mut warnings) = laserscript::to_svg(&drawing)?;
@@ -359,7 +386,7 @@ pub fn read_laser_script(path: &Path) -> Result<Imported, String> {
 #[derive(Default)]
 struct PartFiles {
     source: Option<(String, PathBuf)>,
-    transform: Option<Result<Matrix, String>>,
+    transform: Option<Result<Matrix, ImportError>>,
     /// Content of `mappings.xml`.
     mapping: Option<Vec<u8>>,
 }
@@ -403,10 +430,10 @@ fn sanitize(name: &str) -> String {
 
 /// Reads the six matrix values that VisiCut's XMLEncoder output lists as
 /// `<void index="i"><double>v</double></void>` (omitted values are 0).
-fn parse_transform(bytes: &[u8]) -> Result<Matrix, String> {
+fn parse_transform(bytes: &[u8]) -> Result<Matrix, ImportError> {
     let text = String::from_utf8_lossy(bytes);
     crate::svg::check_nesting(&text)?;
-    let document = roxmltree::Document::parse(&text).map_err(|e| e.to_string())?;
+    let document = roxmltree::Document::parse(&text).map_err(ImportError::Xml)?;
     let mut matrix = [0.0; 6];
     let mut found = false;
     for node in document.descendants().filter(|n| n.has_tag_name("void")) {
@@ -429,7 +456,7 @@ fn parse_transform(bytes: &[u8]) -> Result<Matrix, String> {
     }
     let determinant = matrix[0] * matrix[3] - matrix[1] * matrix[2];
     if !found || matrix.iter().any(|v| !v.is_finite()) || determinant.abs() < 1e-12 {
-        return Err(tr("keine gültige Transformation").into());
+        return Err(ImportError::InvalidTransform);
     }
     Ok(matrix)
 }
@@ -555,13 +582,12 @@ impl Composer {
         file: &Path,
         svg: &str,
         transform: Option<Matrix>,
-    ) -> Result<(), String> {
+    ) -> Result<(), ImportError> {
         let number = self.parts.len() + 1;
         let group_id = format!("plf-teil-{number}");
         let source = xml::strip_doctype(svg);
         let source = self.unique_ids(&source, number)?;
-        let parsed = roxmltree::Document::parse(&source)
-            .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
+        let parsed = roxmltree::Document::parse(&source).map_err(ImportError::SvgXml)?;
         let root = parsed.root_element();
         let frame = Frame::of(root);
         let matrix = match transform {
@@ -607,7 +633,7 @@ impl Composer {
             xml::escape_attribute(name)
         );
         usvg::Tree::from_str(&document(1.0, 1.0, None, &group), &crate::svg::options())
-            .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
+            .map_err(crate::svg::SvgError::Unreadable)?;
         self.parts.push(group);
         self.ids.insert(group_id);
         Ok(())
@@ -615,10 +641,9 @@ impl Composer {
 
     /// Prefixes all ids of a part (and references to them) when one of them
     /// is already used by an earlier part, e.g. when a part was duplicated.
-    fn unique_ids(&mut self, source: &str, number: usize) -> Result<String, String> {
+    fn unique_ids(&mut self, source: &str, number: usize) -> Result<String, ImportError> {
         crate::svg::check_nesting(source)?;
-        let document = roxmltree::Document::parse(source)
-            .map_err(|e| tr!("SVG konnte nicht gelesen werden: {error}", error = e))?;
+        let document = roxmltree::Document::parse(source).map_err(ImportError::SvgXml)?;
         let ids: HashSet<String> = document
             .descendants()
             .filter_map(|n| n.attribute("id"))
@@ -668,15 +693,11 @@ impl Composer {
 
     /// The composed document, sized to reach from the bed origin to the
     /// furthest part. Parts left of or above the origin move it.
-    fn finish(&self) -> Result<Composed, String> {
+    fn finish(&self) -> Result<Composed, ImportError> {
         let body = self.parts.join("\n");
         let probe = document(1.0, 1.0, None, &body);
-        let tree = usvg::Tree::from_str(&probe, &crate::svg::options()).map_err(|e| {
-            tr!(
-                "PLF-Grafik konnte nicht zusammengesetzt werden: {error}",
-                error = e
-            )
-        })?;
+        let tree = usvg::Tree::from_str(&probe, &crate::svg::options())
+            .map_err(ImportError::ComposeFailed)?;
         // The probe's 1 × 1 viewBox spans 1 mm; usvg reports pixels.
         let px = tree.size().width() as f64;
         let bounds = tree.root().abs_bounding_box();
@@ -706,15 +727,11 @@ impl Composer {
 
     /// The composed document cropped to its content; returns it and its top
     /// left corner in bed millimetres.
-    fn finish_cropped(&self) -> Result<(String, [f64; 2]), String> {
+    fn finish_cropped(&self) -> Result<(String, [f64; 2]), ImportError> {
         let body = self.parts.join("\n");
         let probe = document(1.0, 1.0, None, &body);
-        let tree = usvg::Tree::from_str(&probe, &crate::svg::options()).map_err(|e| {
-            tr!(
-                "PLF-Grafik konnte nicht zusammengesetzt werden: {error}",
-                error = e
-            )
-        })?;
+        let tree = usvg::Tree::from_str(&probe, &crate::svg::options())
+            .map_err(ImportError::ComposeFailed)?;
         let px = tree.size().width() as f64;
         let stroke = tree.root().abs_stroke_bounding_box();
         let (left, top) = (stroke.left() as f64 / px, stroke.top() as f64 / px);
@@ -739,7 +756,7 @@ pub(crate) fn place_part(
     name: &str,
     svg: &str,
     transform: Option<Matrix>,
-) -> Result<(String, [f64; 2]), String> {
+) -> Result<(String, [f64; 2]), ImportError> {
     let mut composer = Composer::default();
     composer.add(name, Path::new("teil.svg"), svg, transform)?;
     composer.finish_cropped()
@@ -750,9 +767,9 @@ fn separate_part(
     name: &str,
     rendered: &str,
     parametric: crate::project::Parametric,
-    mapping: Option<Result<Vec<mappings::Entry>, String>>,
+    mapping: Option<Result<Vec<mappings::Entry>, ImportError>>,
     any_mapping: bool,
-) -> Result<(crate::svg_import::ExtraPart, Vec<String>), String> {
+) -> Result<(crate::svg_import::ExtraPart, Vec<String>), ImportError> {
     let transform = parametric.placement.as_ref().and_then(|p| p.transform);
     let (svg, offset_mm) = place_part(name, rendered, transform)?;
     let translation = if any_mapping {
@@ -822,7 +839,7 @@ fn prefix_urls(value: &str, ids: &HashSet<String>, prefix: &str) -> Option<Strin
 struct TempDir(PathBuf);
 
 impl TempDir {
-    fn new() -> Result<Self, String> {
+    fn new() -> Result<Self, ImportError> {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         loop {
@@ -833,10 +850,7 @@ impl TempDir {
                 Ok(()) => return Ok(Self(path)),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
                 Err(e) => {
-                    return Err(tr!(
-                        "Temporärer Ordner konnte nicht angelegt werden: {error}",
-                        error = e
-                    ));
+                    return Err(ImportError::TempDir(e));
                 }
             }
         }
@@ -1232,7 +1246,7 @@ mod tests {
         let dir = tempdir::Dir::new();
         let path = dir.0.join("kaputt.plf");
         std::fs::write(&path, b"kein zip").unwrap();
-        assert!(read_plf(&path).err().unwrap().contains("ZIP"));
+        assert!(matches!(read_plf(&path), Err(ImportError::PlfNotZip(_))));
         let (_dir, path) = write_plf(&[("transform.xml", b"<java/>")]);
         assert!(read_plf(&path).is_err());
     }
@@ -1395,13 +1409,13 @@ mod tests {
             std::time::Duration::from_millis(500),
         )
         .unwrap_err();
-        assert!(error.contains("abgebrochen"), "{error}");
+        assert!(error.to_string().contains("abgebrochen"), "{error}");
         let error = laserscript::run(
             "var i = 0; for (;;) { i++; }".into(),
             std::time::Duration::from_millis(500),
         )
         .unwrap_err();
-        assert!(error.contains("abgebrochen"), "{error}");
+        assert!(error.to_string().contains("abgebrochen"), "{error}");
     }
 
     #[test]

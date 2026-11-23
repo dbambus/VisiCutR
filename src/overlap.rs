@@ -193,7 +193,9 @@ fn rebuild(contour: &[Point], pieces: &[Vec<(f64, f64)>]) -> Vec<Contour> {
             .is_some_and(|p| p.1 == 1.0);
         if starts_at_start && ends_at_end {
             let first = lines.remove(0);
-            lines.last_mut().unwrap().extend(first.into_iter().skip(1));
+            if let Some(last) = lines.last_mut() {
+                last.extend(first.into_iter().skip(1));
+            }
         }
     }
     lines

@@ -5,6 +5,34 @@ use crate::{i18n::tr, tr};
 use serde::Serialize;
 use std::time::Duration;
 
+#[derive(Debug)]
+pub enum UpdateError {
+    Json(serde_json::Error),
+    NoVersion,
+    Request(ureq::Error),
+}
+
+impl std::fmt::Display for UpdateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text = match self {
+            Self::Json(error) => error.to_string(),
+            Self::NoVersion => tr("Antwort von GitHub ohne Versionsnummer").to_string(),
+            Self::Request(error) => {
+                tr!("Update-Prüfung fehlgeschlagen: {error}", error = error)
+            }
+        };
+        f.write_str(&text)
+    }
+}
+
+impl std::error::Error for UpdateError {}
+
+impl From<UpdateError> for String {
+    fn from(error: UpdateError) -> Self {
+        error.to_string()
+    }
+}
+
 /// Latest published release (drafts and pre-releases are not listed here).
 pub const LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/dbambus/VisiCutR/releases/latest";
@@ -78,11 +106,9 @@ pub fn now_secs() -> u64 {
 }
 
 /// Reads GitHub's answer for the latest release; `None` if it is not newer.
-fn newer_release(json: &str, current: &str) -> Result<Option<Release>, String> {
-    let value: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
-    let tag = value["tag_name"]
-        .as_str()
-        .ok_or(tr("Antwort von GitHub ohne Versionsnummer"))?;
+fn newer_release(json: &str, current: &str) -> Result<Option<Release>, UpdateError> {
+    let value: serde_json::Value = serde_json::from_str(json).map_err(UpdateError::Json)?;
+    let tag = value["tag_name"].as_str().ok_or(UpdateError::NoVersion)?;
     if value["draft"].as_bool() == Some(true)
         || value["prerelease"].as_bool() == Some(true)
         || !is_newer(tag, current)
@@ -104,7 +130,7 @@ fn newer_release(json: &str, current: &str) -> Result<Option<Release>, String> {
 }
 
 /// Asks GitHub for the latest release of the fork.
-pub fn check() -> Result<Option<Release>, String> {
+pub fn check() -> Result<Option<Release>, UpdateError> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(15)))
         .build()
@@ -115,12 +141,12 @@ pub fn check() -> Result<Option<Release>, String> {
         .header("User-Agent", &format!("VisiCutR/{}", current_version()))
         .header("Accept", "application/vnd.github+json")
         .call()
-        .map_err(|e| tr!("Update-Prüfung fehlgeschlagen: {error}", error = e))?
+        .map_err(UpdateError::Request)?
         .body_mut()
         .with_config()
         .limit(1024 * 1024)
         .read_to_string()
-        .map_err(|e| tr!("Update-Prüfung fehlgeschlagen: {error}", error = e))?;
+        .map_err(UpdateError::Request)?;
     newer_release(&body, current_version())
 }
 

@@ -29,9 +29,9 @@ pub fn is_cached(dir: &Path, path: &Path) -> bool {
 /// Legt `project` ab und liefert den Pfad. Ein gleicher, schon abgelegter
 /// Stand wird wiederverwendet; `previous` (der Zwischenstand, aus dem das
 /// Projekt geöffnet wurde) wird überschrieben, sonst entsteht eine neue Datei.
-pub fn stash(dir: &Path, project: &Project, previous: Option<&Path>) -> Result<PathBuf, String> {
-    let bytes = serde_json::to_vec_pretty(project).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+pub fn stash(dir: &Path, project: &Project, previous: Option<&Path>) -> std::io::Result<PathBuf> {
+    let bytes = serde_json::to_vec_pretty(project)?;
+    std::fs::create_dir_all(dir)?;
     let path = match states(dir)
         .into_iter()
         .find(|p| std::fs::read(p).is_ok_and(|b| b == bytes))
@@ -59,25 +59,25 @@ pub fn discard(dir: &Path, path: &Path) {
 
 /// Löscht alle Zwischenstände und den Merker für den nächsten Start und
 /// liefert die gelöschten Pfade (für „Zuletzt geöffnet“).
-pub fn clear(dir: &Path) -> Result<Vec<PathBuf>, String> {
+pub fn clear(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     let removed = states(dir);
     for path in &removed {
-        std::fs::remove_file(path).map_err(|e| e.to_string())?;
+        std::fs::remove_file(path)?;
     }
     set_resume(dir, None)?;
     Ok(removed)
 }
 
 /// Merkt sich `path` für den nächsten Start (`None` vergisst ihn).
-pub fn set_resume(dir: &Path, path: Option<&Path>) -> Result<(), String> {
+pub fn set_resume(dir: &Path, path: Option<&Path>) -> std::io::Result<()> {
     let file = dir.join(RESUME);
     match path {
         Some(path) => {
-            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(dir)?;
             write(&file, path.to_string_lossy().as_bytes())
         }
         None => match std::fs::remove_file(file) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),
         },
     }
@@ -139,12 +139,11 @@ fn free_name(dir: &Path, name: &str) -> PathBuf {
         .expect("unendlich viele Namen")
 }
 
-fn write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
-    std::fs::write(&temporary, bytes).map_err(|e| e.to_string())?;
-    std::fs::rename(&temporary, path).map_err(|e| {
+    std::fs::write(&temporary, bytes)?;
+    std::fs::rename(&temporary, path).inspect_err(|_| {
         let _ = std::fs::remove_file(&temporary);
-        e.to_string()
     })
 }
 

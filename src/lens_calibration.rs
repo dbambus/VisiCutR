@@ -335,7 +335,7 @@ fn grow(
         let mut added = false;
         let keys: Vec<(i32, i32)> = grid.keys().cloned().collect();
         for (i, j) in keys {
-            let p = at(&grid, (i, j)).unwrap();
+            let p = at(&grid, (i, j)).expect("Schlüssel stammt aus dem Raster");
             for (di, dj) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
                 let target = (i + di, j + dj);
                 if grid.contains_key(&target) {
@@ -414,7 +414,7 @@ fn trim(mut rows: Vec<Vec<Option<usize>>>) -> Option<Vec<Vec<usize>>> {
             .iter()
             .enumerate()
             .min_by(|a, b| a.1.total_cmp(b.1))
-            .unwrap();
+            .expect("vier Ränder");
         if *value > 0.6 {
             return None;
         }
@@ -996,7 +996,7 @@ pub fn undistort_image(image: &RgbaImage, k: &Intrinsics) -> RgbaImage {
             }
         }
     });
-    RgbaImage::from_raw(w, h, raw).expect("buffer has the image size")
+    RgbaImage::from_raw(w, h, raw).expect("Puffer hat die Bildgröße")
 }
 
 // ---------------------------------------------------------------------------
@@ -1084,7 +1084,7 @@ fn read_npy(bytes: &[u8]) -> Result<(Vec<usize>, Vec<f64>), String> {
     let values = bytes[start + header_len..]
         .chunks_exact(8)
         .map(|c| {
-            let c: [u8; 8] = c.try_into().unwrap();
+            let c: [u8; 8] = c.try_into().expect("chunks_exact liefert 8 Bytes");
             if big_endian {
                 f64::from_be_bytes(c)
             } else {

@@ -19,11 +19,40 @@ use std::io::Cursor;
 /// Größte Bitmap in Pixeln, damit Speicher und Rechenzeit begrenzt bleiben.
 pub const MAX_PIXELS: u64 = 25_000_000;
 
-fn damaged(error: impl std::fmt::Display) -> String {
-    tr!(
-        "Bilddatei ist beschädigt oder hat ein nicht unterstütztes Format: {error}",
-        error = error
-    )
+#[derive(Debug)]
+pub enum VectorizeError {
+    Damaged(String),
+    TooManyPixels,
+    InvalidSize,
+}
+
+impl std::fmt::Display for VectorizeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text = match self {
+            Self::Damaged(error) => tr!(
+                "Bilddatei ist beschädigt oder hat ein nicht unterstütztes Format: {error}",
+                error = error
+            ),
+            Self::TooManyPixels => tr!(
+                "Bild hat mehr als {megapixels} Megapixel; bitte verkleinern",
+                megapixels = MAX_PIXELS / 1_000_000
+            ),
+            Self::InvalidSize => tr("Ungültige Größe für die Vektorisierung").to_string(),
+        };
+        f.write_str(&text)
+    }
+}
+
+impl std::error::Error for VectorizeError {}
+
+impl From<VectorizeError> for String {
+    fn from(error: VectorizeError) -> Self {
+        error.to_string()
+    }
+}
+
+fn damaged(error: impl std::fmt::Display) -> VectorizeError {
+    VectorizeError::Damaged(error.to_string())
 }
 
 /// Größe des Ergebnisses. Die Höhe folgt dem Seitenverhältnis des Bildes.
@@ -77,21 +106,18 @@ pub struct Vectorized {
 }
 
 /// Dekodiert ein PNG, JPEG, BMP oder GIF und vektorisiert es in einem Schritt.
-pub fn vectorize(data: &[u8], options: &Options) -> Result<Vectorized, String> {
+pub fn vectorize(data: &[u8], options: &Options) -> Result<Vectorized, VectorizeError> {
     Bitmap::decode(data)?.vectorize(options)
 }
 
 impl Bitmap {
-    pub fn decode(data: &[u8]) -> Result<Self, String> {
+    pub fn decode(data: &[u8]) -> Result<Self, VectorizeError> {
         let reader = ImageReader::new(Cursor::new(data))
             .with_guessed_format()
             .map_err(damaged)?;
         let (width, height) = reader.into_dimensions().map_err(damaged)?;
         if u64::from(width) * u64::from(height) > MAX_PIXELS {
-            return Err(tr!(
-                "Bild hat mehr als {megapixels} Megapixel; bitte verkleinern",
-                megapixels = MAX_PIXELS / 1_000_000
-            ));
+            return Err(VectorizeError::TooManyPixels);
         }
         let image = ImageReader::new(Cursor::new(data))
             .with_guessed_format()
@@ -121,11 +147,11 @@ impl Bitmap {
     }
 
     /// Vektorisiert das Bild mit den Optionen.
-    pub fn vectorize(&self, options: &Options) -> Result<Vectorized, String> {
+    pub fn vectorize(&self, options: &Options) -> Result<Vectorized, VectorizeError> {
         let scale = match options.size {
             Size::WidthMm(width) if width.is_finite() && width > 0.0 => width / self.width as f64,
             Size::Dpi(dpi) if dpi.is_finite() && dpi > 0.0 => 25.4 / dpi,
-            _ => return Err(tr("Ungültige Größe für die Vektorisierung").into()),
+            _ => return Err(VectorizeError::InvalidSize),
         };
         let contours = self.contours(options);
         let (width_mm, height_mm) = (self.width as f64 * scale, self.height as f64 * scale);
@@ -498,7 +524,7 @@ mod tests {
                 ..Options::default()
             })
             .unwrap_err();
-        assert!(error.contains("Größe"));
+        assert!(matches!(error, VectorizeError::InvalidSize));
     }
 
     #[test]
@@ -528,6 +554,6 @@ mod tests {
     #[test]
     fn damaged_data_is_reported() {
         let error = vectorize(b"kein Bild", &Options::default()).unwrap_err();
-        assert!(error.contains("beschädigt"));
+        assert!(matches!(error, VectorizeError::Damaged(_)));
     }
 }

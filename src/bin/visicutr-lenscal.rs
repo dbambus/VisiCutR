@@ -511,7 +511,7 @@ impl App {
                 .load_texture("photo", pixels, egui::TextureOptions::LINEAR);
             self.texture = Some((photo.id, undistorted, texture));
         }
-        let texture = &self.texture.as_ref().unwrap().2;
+        let texture = &self.texture.as_ref().expect("Textur ist eben geladen").2;
         let image_size = Vec2::new(photo.preview.width() as f32, photo.preview.height() as f32);
         let zoom = (ui.available_width() / image_size.x).min(ui.available_height() / image_size.y);
         let (rect, _) = ui.allocate_exact_size(image_size * zoom, Sense::hover());
@@ -578,11 +578,12 @@ impl App {
                 _ => None,
             })
         });
-        let (path, frames) = self.capture.as_mut().unwrap();
+        let (path, frames) = self.capture.as_mut().expect("oben geprüft");
         if let Some(image) = image {
             let pixels = image.pixels.iter().flat_map(|p| p.to_array()).collect();
             let shot =
-                RgbaImage::from_raw(image.size[0] as u32, image.size[1] as u32, pixels).unwrap();
+                RgbaImage::from_raw(image.size[0] as u32, image.size[1] as u32, pixels)
+                    .expect("Bildschirmfoto hat seine Größe");
             if let Err(error) = shot.save(&*path) {
                 eprintln!("{error}");
             }

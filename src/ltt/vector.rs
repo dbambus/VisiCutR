@@ -4,10 +4,9 @@
 // curveWithKnownSpeed, circle, reinterpolateWithMaximumDistance,
 // cuttingTimeForPxDistance) and LibLaserCut Circle.fromPointList.
 // LGPL-3.0-or-later; original author Maximilian Gaukler.
-use super::{Axis, NOMINAL_CUT_SPEED, RASTER_DPI, word};
+use super::{Axis, LttError, NOMINAL_CUT_SPEED, RASTER_DPI, word};
 use crate::project::LIBLASERCUT_CURVE_ACCELERATION;
 use crate::timeline::{MotionKind, Program};
-use crate::{i18n::tr, tr};
 
 /// Acceleration of the time estimate for straight moves: the FAU device's
 /// tangentCurveMaxAcceleration as in Java (the controller ramps start/stop
@@ -66,6 +65,12 @@ impl P {
             delta: None,
             angle: f64::NAN,
         }
+    }
+
+    /// Delta of a point after the first of its list, which always has one.
+    fn delta(&self) -> (f64, f64) {
+        self.delta
+            .expect("jeder Punkt nach dem ersten hat einen Abstand")
     }
 }
 
@@ -235,7 +240,7 @@ impl<'a> Encoder<'a> {
 
     /// curveOrLine: cut the polyline from the current point, split at corners,
     /// using circle commands or joint curves where possible.
-    pub fn polyline(&mut self, points: &[(f64, f64)]) -> Result<f64, String> {
+    pub fn polyline(&mut self, points: &[(f64, f64)]) -> Result<f64, LttError> {
         let mut time = 0.0;
         if points.is_empty() {
             return Ok(0.0);
@@ -243,7 +248,7 @@ impl<'a> Encoder<'a> {
         let tolerance = mm_to_px(LENGTH_TOLERANCE_MM).max(1.0);
         let mut list = vec![P::new(self.x, self.y)];
         for &(x, y) in points {
-            let last = *list.last().unwrap();
+            let last = *list.last().expect("beginnt mit dem Startpunkt");
             let mut point = P::new(x, y);
             let delta = (x - last.x, y - last.y);
             point.delta = Some(delta);
@@ -253,7 +258,9 @@ impl<'a> Encoder<'a> {
             }
             if let Some(previous) = last.delta {
                 let angle = abs_angle(previous, delta);
-                list.last_mut().unwrap().angle = angle;
+                if let Some(corner) = list.last_mut() {
+                    corner.angle = angle;
+                }
                 if angle * length > tolerance * 5.0
                     || angle > ANGLE_TOLERANCE_SHORT
                     || (length > tolerance * 100.0 && angle > ANGLE_TOLERANCE_LONG)
@@ -328,7 +335,7 @@ impl<'a> Encoder<'a> {
 
     /// curve: plan speeds within the acceleration limit, then send the
     /// joint curve. Two points are sent as a plain line.
-    fn curve(&mut self, points: Vec<P>) -> Result<f64, String> {
+    fn curve(&mut self, points: Vec<P>) -> Result<f64, LttError> {
         if points.len() <= 1 {
             return Ok(0.0);
         }
@@ -340,8 +347,6 @@ impl<'a> Encoder<'a> {
         }
         let max_speed = self.speed as f64 * NOMINAL_CUT_SPEED / 100.0;
         let to_percent = 100.0 / NOMINAL_CUT_SPEED;
-        let px_mm = px_to_mm(1.0);
-        let safety = 0.99;
         let mut points = reinterpolate(points, mm_to_px(0.9));
         for p in &mut points {
             p.speed = max_speed;
@@ -350,6 +355,20 @@ impl<'a> Encoder<'a> {
         points[0].speed = 0.0;
         points[last].speed = 0.0;
         points[0].angle = 0.0;
+        self.plan_curve_speeds(&mut points, max_speed)?;
+        let mut filtered = drop_straight_points(&points);
+        for p in &mut filtered {
+            p.speed *= to_percent;
+        }
+        self.curve_with_known_speed(&filtered)
+    }
+
+    /// Lowers the speed of the points until every change between two of
+    /// them stays within the curve acceleration; the first rounds plan
+    /// optimistically with more acceleration.
+    fn plan_curve_speeds(&self, points: &mut [P], max_speed: f64) -> Result<(), LttError> {
+        let px_mm = px_to_mm(1.0);
+        let safety = 0.99;
         const WARMUP_ROUNDS: i32 = 10;
         const WARMUP_FACTOR_MAX: f64 = 16.0;
         let mut warmup = WARMUP_ROUNDS;
@@ -358,7 +377,7 @@ impl<'a> Encoder<'a> {
         while changed || warmup > 0 {
             iterations += 1;
             if iterations > 100_000 {
-                return Err(tr("Kurvenplanung konvergiert nicht").into());
+                return Err(LttError::CurveNotConverging);
             }
             if warmup > 0 {
                 warmup -= 1;
@@ -374,7 +393,7 @@ impl<'a> Encoder<'a> {
                 let before = points[i - 1];
                 let p = points[i];
                 let max_avg = (p.speed + before.speed) / 2.0;
-                let distance = hypot(p.delta.unwrap()) * px_mm;
+                let distance = hypot(p.delta()) * px_mm;
                 let mut min_time = distance / max_avg;
                 const MAX_ACCEL_TIME: f64 = 0.005;
                 if before.angle != 0.0 && min_time > MAX_ACCEL_TIME {
@@ -392,13 +411,13 @@ impl<'a> Encoder<'a> {
                 let mut max_for_accel = a * cos + root;
                 let min_for_accel = a * cos - root;
                 if min_for_accel.is_nan() || max_for_accel.is_nan() {
-                    return Err(tr("Kurvenplanung: kein gültiger Geschwindigkeitsbereich").into());
+                    return Err(LttError::CurveNoSpeedRange);
                 }
                 if max_for_accel > max_speed {
                     if min_for_accel < max_speed {
                         max_for_accel = max_speed;
                     } else {
-                        return Err(tr("Kurvenplanung: Geschwindigkeitsbereich ungültig").into());
+                        return Err(LttError::CurveSpeedRangeInvalid);
                     }
                 }
                 if p.speed > max_for_accel {
@@ -412,7 +431,7 @@ impl<'a> Encoder<'a> {
                     let new_min = (b * cos - root).max(0.0);
                     let new_a = new_max * safety + new_min * (1.0 - safety);
                     if new_a.is_nan() {
-                        return Err(tr("Kurvenplanung: Bremsgeschwindigkeit ungültig").into());
+                        return Err(LttError::CurveBrakeSpeedInvalid);
                     }
                     points[i - 1].speed = new_a;
                     changed = true;
@@ -423,28 +442,10 @@ impl<'a> Encoder<'a> {
                 i += 1;
             }
         }
-        // Drop points on straight segments with little speed change.
-        let mut filtered = vec![points[0]];
-        let mut speed_now = points[0].speed;
-        let mut since_last = 0.0;
-        for p in &points[1..last] {
-            let threshold = 0.2 + (0.1 * speed_now * (1.0 - since_last / 5.0)).max(0.0);
-            if p.angle == 0.0 && (p.speed - speed_now).abs() < threshold {
-                since_last += hypot(p.delta.unwrap()) * px_mm;
-            } else {
-                speed_now = p.speed;
-                since_last = 0.0;
-                filtered.push(*p);
-            }
-        }
-        filtered.push(points[last]);
-        for p in &mut filtered {
-            p.speed *= to_percent;
-        }
-        self.curve_with_known_speed(&filtered)
+        Ok(())
     }
 
-    fn curve_with_known_speed(&mut self, points: &[P]) -> Result<f64, String> {
+    fn curve_with_known_speed(&mut self, points: &[P]) -> Result<f64, LttError> {
         self.set_laser(true);
         self.out.extend(b"PJ");
         let (mut vx, mut vy, mut v) = (0.0, 0.0, 0.0);
@@ -454,7 +455,7 @@ impl<'a> Encoder<'a> {
             let speed = points[i].speed;
             let before = points[i - 1].speed;
             if self.x == x && self.y == y {
-                return Err(tr("Kurve enthält einen doppelten Punkt").into());
+                return Err(LttError::CurveDuplicatePoint);
             }
             let dx = px_to_mm(x - self.x);
             let dy = px_to_mm(y - self.y);
@@ -469,10 +470,7 @@ impl<'a> Encoder<'a> {
             let tolerance = 1.00001;
             let limit = self.curve_acceleration * tolerance;
             if ax.is_nan() || ax > limit || ay.is_nan() || ay > limit || ax.hypot(ay) > limit {
-                return Err(tr!(
-                    "Beschleunigung im Kurvensegment {segment} zu hoch",
-                    segment = i
-                ));
+                return Err(LttError::CurveAcceleration { segment: i });
             }
             (vx, vy, v) = (new_vx, new_vy, new_v);
             self.out.extend(b"PE");
@@ -491,11 +489,32 @@ impl<'a> Encoder<'a> {
     }
 }
 
+/// Drop points on straight segments with little speed change.
+fn drop_straight_points(points: &[P]) -> Vec<P> {
+    let px_mm = px_to_mm(1.0);
+    let last = points.len() - 1;
+    let mut filtered = vec![points[0]];
+    let mut speed_now = points[0].speed;
+    let mut since_last = 0.0;
+    for p in &points[1..last] {
+        let threshold = 0.2 + (0.1 * speed_now * (1.0 - since_last / 5.0)).max(0.0);
+        if p.angle == 0.0 && (p.speed - speed_now).abs() < threshold {
+            since_last += hypot(p.delta()) * px_mm;
+        } else {
+            speed_now = p.speed;
+            since_last = 0.0;
+            filtered.push(*p);
+        }
+    }
+    filtered.push(points[last]);
+    filtered
+}
+
 fn reinterpolate(points: Vec<P>, max_distance: f64) -> Vec<P> {
     let mut result = vec![points[0]];
     let mut previous = points[0];
     for mut point in points.into_iter().skip(1) {
-        let delta = point.delta.unwrap();
+        let delta = point.delta();
         let length = hypot(delta);
         if length == 0.0 {
             continue;

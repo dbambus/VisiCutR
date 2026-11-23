@@ -1,8 +1,8 @@
 //! Tokenizer and parser for the PostScript subset: numbers, names, literal and
 //! hex strings and nested `{ }` procedures. Every other token is an executable
 //! name that the interpreter either implements or reports as unsupported.
+use super::error::EpsError;
 use super::graphics::Matrix;
-use crate::i18n::tr;
 use std::rc::Rc;
 
 /// Deepest allowed nesting of `{ }` procedures in the source.
@@ -26,7 +26,7 @@ pub(super) enum Obj {
 }
 
 /// Parses a whole PostScript program into top-level objects.
-pub(super) fn parse(src: &[u8]) -> Result<Rc<[Obj]>, String> {
+pub(super) fn parse(src: &[u8]) -> Result<Rc<[Obj]>, EpsError> {
     let mut root: Vec<Obj> = Vec::new();
     // Procedures that are still open, innermost last.
     let mut open: Vec<Vec<Obj>> = Vec::new();
@@ -44,14 +44,14 @@ pub(super) fn parse(src: &[u8]) -> Result<Rc<[Obj]>, String> {
             }
             b'{' => {
                 if open.len() >= MAX_NESTING {
-                    return Err(tr("Prozeduren sind zu tief verschachtelt").into());
+                    return Err(EpsError::ProceduresTooDeep);
                 }
                 open.push(Vec::new());
                 i += 1;
                 continue;
             }
             b'}' => {
-                let body = open.pop().ok_or(tr("Unerwartete „}“ in der EPS-Datei"))?;
+                let body = open.pop().ok_or(EpsError::UnexpectedBrace)?;
                 (Obj::Proc(body.into()), i + 1)
             }
             b'(' => {
@@ -93,7 +93,7 @@ pub(super) fn parse(src: &[u8]) -> Result<Rc<[Obj]>, String> {
         i = next;
     }
     if !open.is_empty() {
-        return Err(tr("Eine Prozedur „{“ in der EPS-Datei ist nicht geschlossen").into());
+        return Err(EpsError::UnclosedProcedure);
     }
     Ok(root.into())
 }
@@ -151,7 +151,7 @@ fn token_object(text: &str) -> Obj {
 
 /// Reads a `( ... )` string starting at `start`, honouring nested parentheses
 /// and backslash escapes. Returns the bytes and the index after the `)`.
-fn read_string(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), String> {
+fn read_string(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), EpsError> {
     let mut out = Vec::new();
     let mut depth = 0usize;
     let mut i = start;
@@ -208,11 +208,11 @@ fn read_string(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), String> {
             _ => out.push(byte),
         }
     }
-    Err(tr("Eine Zeichenkette „(...)“ in der EPS-Datei ist nicht geschlossen").into())
+    Err(EpsError::UnclosedString)
 }
 
 /// Reads a `< ... >` hex string starting at `start`.
-fn read_hex_string(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), String> {
+fn read_hex_string(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), EpsError> {
     let mut nibbles = Vec::new();
     let mut i = start + 1;
     while i < src.len() {
@@ -229,9 +229,9 @@ fn read_hex_string(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), String>
             _ if is_space(byte) => {}
             _ => match (byte as char).to_digit(16) {
                 Some(value) => nibbles.push(value as u8),
-                None => return Err(tr("Ungültige Hex-Zeichenkette in der EPS-Datei").into()),
+                None => return Err(EpsError::InvalidHexString),
             },
         }
     }
-    Err(tr("Eine Hex-Zeichenkette „<...>“ in der EPS-Datei ist nicht geschlossen").into())
+    Err(EpsError::UnclosedHexString)
 }

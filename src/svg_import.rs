@@ -10,6 +10,7 @@
 use crate::{i18n::tr, tr};
 use base64::Engine;
 use std::collections::HashMap;
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 /// Largest single image file that is embedded.
@@ -20,6 +21,49 @@ pub const MAX_SVG_BYTES: usize = 20 * 1024 * 1024;
 const SVG_NS: &str = "http://www.w3.org/2000/svg";
 const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
 const SODIPODI_NS: &str = "http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd";
+
+#[derive(Debug)]
+pub enum SvgImportError {
+    Io(std::io::Error),
+    FileTooLarge,
+    Svg(crate::svg::SvgError),
+    ImageTooLarge,
+    UnsupportedImageFormat,
+}
+
+impl fmt::Display for SvgImportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(error) => write!(f, "{error}"),
+            Self::FileTooLarge => f.write_str(tr("Datei ist größer als 25 MB")),
+            Self::Svg(error) => write!(f, "{error}"),
+            Self::ImageTooLarge => f.write_str(tr("Die Datei ist größer als 10 MB")),
+            Self::UnsupportedImageFormat => f.write_str(tr(
+                "Format wird nicht unterstützt (nur PNG, JPEG, GIF, WebP oder SVG)",
+            )),
+        }
+    }
+}
+
+impl std::error::Error for SvgImportError {}
+
+impl From<std::io::Error> for SvgImportError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<crate::svg::SvgError> for SvgImportError {
+    fn from(error: crate::svg::SvgError) -> Self {
+        Self::Svg(error)
+    }
+}
+
+impl From<SvgImportError> for String {
+    fn from(error: SvgImportError) -> Self {
+        error.to_string()
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct Imported {
@@ -50,12 +94,12 @@ pub struct ExtraPart {
 }
 
 /// Reads an SVG file (≤ 25 MB) and embeds its external images.
-pub fn read_svg_file(path: &Path) -> Result<Imported, String> {
-    let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
+pub fn read_svg_file(path: &Path) -> Result<Imported, SvgImportError> {
+    let meta = std::fs::metadata(path)?;
     if meta.len() > 25 * 1024 * 1024 {
-        return Err(tr("Datei ist größer als 25 MB").into());
+        return Err(SvgImportError::FileTooLarge);
     }
-    let source = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let source = std::fs::read_to_string(path)?;
     crate::svg::check_nesting(&source)?;
     Ok(embed_external_images(
         &source,
@@ -167,10 +211,10 @@ pub fn embed_external_images(source: &str, base_dir: &Path) -> Imported {
         allow_dtd: true,
         ..Default::default()
     };
-    let parsed = crate::svg::check_nesting(source).and_then(|()| {
-        roxmltree::Document::parse_with_options(source, options).map_err(|e| e.to_string())
-    });
-    let Ok(document) = parsed else {
+    let parsed = crate::svg::check_nesting(source)
+        .ok()
+        .and_then(|()| roxmltree::Document::parse_with_options(source, options).ok());
+    let Some(document) = parsed else {
         return Imported {
             svg: source.to_owned(),
             warnings,
@@ -196,40 +240,16 @@ pub fn embed_external_images(source: &str, base_dir: &Path) -> Imported {
             }
             let href = attribute.value().trim();
             let shown = shorten(href);
-            let candidates = match classify(href) {
-                Href::Skip => continue,
-                Href::Remote => {
-                    warnings.push(tr!(
-                        "Bild „{name}“ wird nicht aus dem Netz geladen; \
-                         bitte als Datei speichern und neu verknüpfen",
-                        name = shown
-                    ));
+            let path = match find_image(href, &shown, absref, base_dir) {
+                Ok(path) => path,
+                Err(warning) => {
+                    warnings.extend(warning);
                     continue;
                 }
-                Href::Unsupported => {
-                    warnings.push(tr!(
-                        "Bild „{name}“: Adresse wird nicht unterstützt",
-                        name = shown
-                    ));
-                    continue;
-                }
-                Href::Paths(paths) => paths,
-            };
-            let mut candidates = candidates
-                .into_iter()
-                .chain(absref.map(PathBuf::from))
-                .filter(|path| !is_network_path(path))
-                .map(|path| base_dir.join(path));
-            let Some(path) = candidates.find(|path| path.is_file()) else {
-                warnings.push(tr!(
-                    "Bild „{name}“ nicht gefunden und nicht eingebettet",
-                    name = shown
-                ));
-                continue;
             };
             let embedded = cache
                 .entry(path.clone())
-                .or_insert_with(|| data_uri(&path))
+                .or_insert_with(|| data_uri(&path).map_err(|e| e.to_string()))
                 .clone();
             let uri = match embedded {
                 Ok(uri) => uri,
@@ -267,6 +287,60 @@ pub fn embed_external_images(source: &str, base_dir: &Path) -> Imported {
             }
         }
     }
+    let svg = apply_edits(source, edits, length);
+    Imported {
+        svg,
+        warnings,
+        ..Default::default()
+    }
+}
+
+/// The local file an image `href` (or Inkscape's `absref`) points to,
+/// relative to `base_dir`. `Err` carries the warning for the image `shown`,
+/// or `None` for references that are not files (`#id`, `data:`).
+fn find_image(
+    href: &str,
+    shown: &str,
+    absref: Option<&str>,
+    base_dir: &Path,
+) -> Result<PathBuf, Option<String>> {
+    let candidates = match classify(href) {
+        Href::Skip => return Err(None),
+        Href::Remote => {
+            return Err(Some(tr!(
+                "Bild „{name}“ wird nicht aus dem Netz geladen; \
+                 bitte als Datei speichern und neu verknüpfen",
+                name = shown
+            )));
+        }
+        Href::Unsupported => {
+            return Err(Some(tr!(
+                "Bild „{name}“: Adresse wird nicht unterstützt",
+                name = shown
+            )));
+        }
+        Href::Paths(paths) => paths,
+    };
+    let mut candidates = candidates
+        .into_iter()
+        .chain(absref.map(PathBuf::from))
+        .filter(|path| !is_network_path(path))
+        .map(|path| base_dir.join(path));
+    candidates.find(|path| path.is_file()).ok_or_else(|| {
+        Some(tr!(
+            "Bild „{name}“ nicht gefunden und nicht eingebettet",
+            name = shown
+        ))
+    })
+}
+
+/// `source` with the attribute values in `edits` replaced; `length` is the
+/// length of the result.
+fn apply_edits(
+    source: &str,
+    mut edits: Vec<(std::ops::Range<usize>, String)>,
+    length: usize,
+) -> String {
     edits.sort_by_key(|(range, _)| range.start);
     let mut svg = String::with_capacity(length);
     let mut position = 0;
@@ -276,11 +350,7 @@ pub fn embed_external_images(source: &str, base_dir: &Path) -> Imported {
         position = range.end;
     }
     svg.push_str(&source[position..]);
-    Imported {
-        svg,
-        warnings,
-        ..Default::default()
-    }
+    svg
 }
 
 enum Href {
@@ -416,18 +486,16 @@ fn percent_decode(text: &str) -> Option<PathBuf> {
     }
 }
 
-fn data_uri(path: &Path) -> Result<String, String> {
-    let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
+fn data_uri(path: &Path) -> Result<String, SvgImportError> {
+    let size = std::fs::metadata(path)?.len();
     if size > MAX_IMAGE_BYTES {
-        return Err(tr("Die Datei ist größer als 10 MB").into());
+        return Err(SvgImportError::ImageTooLarge);
     }
-    let data = std::fs::read(path).map_err(|e| e.to_string())?;
+    let data = std::fs::read(path)?;
     let svgz = path
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("svgz"));
-    let mime = mime_type(&data, svgz).ok_or(tr(
-        "Format wird nicht unterstützt (nur PNG, JPEG, GIF, WebP oder SVG)",
-    ))?;
+    let mime = mime_type(&data, svgz).ok_or(SvgImportError::UnsupportedImageFormat)?;
     Ok(format!(
         "data:{mime};base64,{}",
         base64::engine::general_purpose::STANDARD.encode(&data)
@@ -623,7 +691,10 @@ mod tests {
         let deep = format!("<svg>{}{}</svg>", "<g>".repeat(depth), "</g>".repeat(depth));
         std::fs::write(&path, &deep).unwrap();
         let error = read_svg_file(&path).err().expect("refused");
-        assert!(error.contains("verschachtelt"), "{error}");
+        assert!(
+            matches!(error, SvgImportError::Svg(crate::svg::SvgError::TooDeep)),
+            "{error}"
+        );
         assert_eq!(embed_external_images(&deep, &dir.0).svg, deep);
         assert!(fit_to_content(&deep).is_none());
     }
@@ -751,16 +822,16 @@ mod tests {
         )
         .unwrap();
         let before = crate::svg::render(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert!(before.image.pixels.iter().all(|p| p.a() == 0));
+        assert!(before.pixmap.pixels().iter().all(|p| p.alpha() == 0));
         let imported = read_svg_file(&path).unwrap();
         assert!(imported.warnings.is_empty(), "{:?}", imported.warnings);
         let after = crate::svg::render(&imported.svg).unwrap();
         assert!(
             after
-                .image
-                .pixels
+                .pixmap
+                .pixels()
                 .iter()
-                .any(|p| p.a() > 0 && p.r() > 200 && p.g() < 50)
+                .any(|p| p.alpha() > 0 && p.red() > 200 && p.green() < 50)
         );
     }
 }

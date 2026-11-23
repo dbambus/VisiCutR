@@ -6,7 +6,10 @@
 //!
 //! Set the device's camera URL to http://<host>:8088/visicam.jpg.
 //!
-//! The server usually listens on the whole network, so every connection has
+//! Without a login the server only listens on this computer (127.0.0.1);
+//! `--bind 0.0.0.0` serves the network without one. With `--user` it
+//! listens on the whole network. Basic authentication travels unencrypted
+//! over HTTP: use it only in the lab network. Every connection has
 //! deadlines and size limits (a client that sends or reads slowly cannot
 //! block the camera), the capture command is stopped after a while, and
 //! `--user` with a password (`--password` or `VISICUTR_CAMERA_PASSWORD`)
@@ -28,12 +31,15 @@ struct Timing {
     request: Duration,
     response: Duration,
     capture: Duration,
+    /// Pause before answering a wrong login.
+    refused: Duration,
 }
 
 const TIMING: Timing = Timing {
     request: Duration::from_secs(10),
     response: Duration::from_secs(30),
     capture: Duration::from_secs(30),
+    refused: Duration::from_secs(1),
 };
 const MAX_REQUEST_HEAD: u64 = 16 * 1024;
 const MAX_PHOTO: u64 = 64 * 1024 * 1024;
@@ -51,11 +57,13 @@ struct Options {
 fn usage() -> &'static str {
     tr(
         "Aufruf: visicutr-cameraserver [--bind ADRESSE] [--port 8088] \
-        [--rotate 0|90|180|270] [--output DATEI] [--user NAME --password KENNWORT] \
+        [--rotate 0|90|180|270] [--output DATEI] [--user NAME --password-file DATEI] \
         -- AUFNAHMEBEFEHL [ARGUMENTE …]\n\
         Ohne --output muss der Befehl das Bild (JPEG oder PNG) auf stdout schreiben. \
-        Mit --user verlangt der Server eine Anmeldung; das Kennwort kann statt mit \
-        --password auch in VISICUTR_CAMERA_PASSWORD stehen.",
+        Mit --user verlangt der Server eine Anmeldung und ist im ganzen Netz erreichbar, \
+        ohne nur auf diesem Rechner (--bind 0.0.0.0 öffnet ihn ohne Anmeldung fürs Netz). \
+        Das Kennwort steht in einer Datei (--password-file) oder in \
+        VISICUTR_CAMERA_PASSWORD; --password zeigt es in der Prozessliste.",
     )
 }
 
@@ -64,7 +72,7 @@ fn parse(
     password_variable: Option<String>,
 ) -> Result<Options, String> {
     let mut options = Options {
-        bind: "0.0.0.0".into(),
+        bind: String::new(),
         port: 8088,
         rotate: 0,
         output: None,
@@ -89,7 +97,20 @@ fn parse(
             }
             "--output" => options.output = Some(value()?),
             "--user" => user = Some(value()?),
-            "--password" => password = Some(value()?),
+            "--password" => {
+                eprintln!(
+                    "{}",
+                    tr(
+                        "Hinweis: --password steht in der Prozessliste; besser --password-file oder VISICUTR_CAMERA_PASSWORD."
+                    )
+                );
+                password = Some(value()?);
+            }
+            "--password-file" => {
+                let path = value()?;
+                let text = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+                password = Some(text.trim_end_matches(['\r', '\n']).to_string());
+            }
             "--" => options.command = args.by_ref().collect(),
             "-h" | "--help" => return Err(usage().into()),
             other => {
@@ -112,6 +133,14 @@ fn parse(
             "Basic {}",
             base64::engine::general_purpose::STANDARD.encode(format!("{user}:{password}"))
         ));
+    }
+    if options.bind.is_empty() {
+        // Ohne Anmeldung nur auf diesem Rechner, außer ausdrücklich anders.
+        options.bind = if options.authorization.is_some() {
+            "0.0.0.0".into()
+        } else {
+            "127.0.0.1".into()
+        };
     }
     Ok(options)
 }
@@ -154,24 +183,43 @@ fn capture(options: &Options, timing: Timing) -> Result<Vec<u8>, String> {
     if let Some(output) = &options.output {
         let _ = std::fs::remove_file(output);
     }
-    let mut child = Command::new(&options.command[0])
+    let mut command = Command::new(&options.command[0]);
+    command
         .args(&options.command[1..])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    // Own process group, so that stopping the command also stops what it
+    // started in the background.
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = command
         .spawn()
         .map_err(|e| format!("{}: {e}", options.command[0]))?;
+    let stop = |child: &mut std::process::Child| {
+        #[cfg(unix)]
+        let _ = Command::new("kill")
+            .args(["-KILL", &format!("-{}", child.id())])
+            .stderr(Stdio::null())
+            .status();
+        let _ = child.kill();
+        let _ = child.wait();
+    };
     // Read both pipes on their own threads, limited, so the command never
-    // blocks on a full pipe and a huge output cannot fill the memory.
+    // blocks on a full pipe and a huge output cannot fill the memory. The
+    // results arrive over channels, so a background process that keeps a
+    // pipe open cannot make the server wait for ever.
     let collect = |pipe: Option<Box<dyn Read + Send>>, limit: u64| {
+        let (sender, receiver) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut bytes = Vec::new();
             if let Some(mut pipe) = pipe {
                 let _ = (&mut pipe).take(limit + 1).read_to_end(&mut bytes);
                 let _ = std::io::copy(&mut pipe, &mut std::io::sink());
             }
-            bytes
-        })
+            let _ = sender.send(bytes);
+        });
+        receiver
     };
     let stdout = collect(
         child
@@ -192,8 +240,7 @@ fn capture(options: &Options, timing: Timing) -> Result<Vec<u8>, String> {
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if started.elapsed() > timing.capture => {
-                let _ = child.kill();
-                let _ = child.wait();
+                stop(&mut child);
                 return Err(tr!(
                     "Aufnahmebefehl nach {seconds} s abgebrochen",
                     seconds = timing.capture.as_secs_f32()
@@ -203,10 +250,20 @@ fn capture(options: &Options, timing: Timing) -> Result<Vec<u8>, String> {
             Err(e) => return Err(e.to_string()),
         }
     };
-    let (stdout, stderr) = (
-        stdout.join().unwrap_or_default(),
-        stderr.join().unwrap_or_default(),
-    );
+    let left = || {
+        timing
+            .capture
+            .saturating_sub(started.elapsed())
+            .max(Duration::from_millis(100))
+    };
+    let (Ok(stdout), Ok(stderr)) = (stdout.recv_timeout(left()), stderr.recv_timeout(left()))
+    else {
+        stop(&mut child);
+        return Err(tr!(
+            "Aufnahmebefehl nach {seconds} s abgebrochen",
+            seconds = timing.capture.as_secs_f32()
+        ));
+    };
     if !status.success() {
         return Err(tr!(
             "Aufnahmebefehl fehlgeschlagen ({status}): {error}",
@@ -287,6 +344,8 @@ fn handle(
         until: Instant::now() + timing.response,
     };
     if !authorized {
+        // At most one guess per second (requests are served one at a time).
+        std::thread::sleep(timing.refused);
         write!(
             out,
             "HTTP/1.0 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"VisiCutR\"\r\n\
@@ -385,6 +444,7 @@ mod tests {
         request: Duration::from_millis(500),
         response: Duration::from_millis(500),
         capture: Duration::from_millis(300),
+        refused: Duration::from_millis(10),
     };
 
     /// Sends `head` and returns the answer and what `handle` returned.
@@ -464,6 +524,10 @@ mod tests {
         assert_eq!((options.port, options.rotate), (9000, 180));
         assert_eq!(options.command, ["gphoto2", "--stdout"]);
         assert!(options.authorization.is_none());
+        // Without a login only this computer, unless asked otherwise.
+        assert_eq!(options.bind, "127.0.0.1");
+        let open = parse(args(&["--bind", "0.0.0.0", "--", "x"]), None).unwrap();
+        assert_eq!(open.bind, "0.0.0.0");
         assert!(parse(args(&["--rotate", "45", "--", "x"]), None).is_err());
         assert!(parse(std::iter::empty(), None).is_err());
         // --user needs a password, from the option or the variable.
@@ -473,6 +537,26 @@ mod tests {
             options.authorization.as_deref(),
             Some("Basic bGFzZXI6Z2VoZWlt")
         );
+        assert_eq!(options.bind, "0.0.0.0");
+        let file = std::env::temp_dir().join(format!("visicutr-campw-{}", std::process::id()));
+        std::fs::write(&file, "geheim\n").unwrap();
+        let options = parse(
+            args(&[
+                "--user",
+                "laser",
+                "--password-file",
+                file.to_str().unwrap(),
+                "--",
+                "x",
+            ]),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            options.authorization.as_deref(),
+            Some("Basic bGFzZXI6Z2VoZWlt")
+        );
+        std::fs::remove_file(file).unwrap();
     }
 
     #[test]
@@ -529,6 +613,17 @@ mod tests {
     #[test]
     fn a_hanging_capture_command_is_stopped() {
         let options = parse(args(&["--", "sleep", "10"]), None).unwrap();
+        let started = Instant::now();
+        let error = capture(&options, FAST).unwrap_err();
+        assert!(error.contains("abgebrochen"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_background_process_holding_the_pipe_does_not_block_the_server() {
+        // The command ends at once, but what it started keeps stdout open.
+        let options = parse(args(&["--", "sh", "-c", "sleep 10 &"]), None).unwrap();
         let started = Instant::now();
         let error = capture(&options, FAST).unwrap_err();
         assert!(error.contains("abgebrochen"), "{error}");

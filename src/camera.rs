@@ -29,6 +29,8 @@ pub enum CameraError {
     Unreadable(image::ImageError),
     /// The device (by name) has no camera URL.
     NoUrl(String),
+    /// The camera URL is neither `http://` nor `https://`.
+    NotHttp(String),
     NotCalibrated,
 }
 
@@ -54,6 +56,10 @@ impl fmt::Display for CameraError {
             Self::NoUrl(device) => {
                 tr!("{device}: keine Kamera-URL eingetragen", device = device)
             }
+            Self::NotHttp(url) => tr!(
+                "{url}: Die Kamera-URL muss mit http:// oder https:// beginnen",
+                url = url
+            ),
             Self::NotCalibrated => tr("Kamera ist noch nicht kalibriert").to_string(),
         };
         f.write_str(&text)
@@ -595,18 +601,37 @@ pub fn encode_png(image: &RgbaImage) -> Result<Vec<u8>, CameraError> {
     Ok(png)
 }
 
+/// Decodes a camera picture of at most 64 megapixels: the size in the
+/// header decides the memory before anything is read.
 pub fn decode(bytes: &[u8]) -> Result<RgbaImage, CameraError> {
-    image::load_from_memory(bytes)
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(CameraError::Io)?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16_384);
+    limits.max_image_height = Some(16_384);
+    limits.max_alloc = Some(512 * 1024 * 1024);
+    reader.limits(limits);
+    reader
+        .decode()
         .map(|i| i.to_rgba8())
         .map_err(CameraError::Unreadable)
 }
 
 pub fn capture(device: &LaserDevice) -> Result<RgbaImage, CameraError> {
-    if device.camera_url.trim().is_empty() {
+    let url = device.camera_url.trim();
+    if url.is_empty() {
         return Err(CameraError::NoUrl(device.name.clone()));
     }
+    // Imported devices bring their URL along; a path would be opened as a
+    // file (on Windows a UNC path signs in to that server). Tests use
+    // `file://` URLs.
+    let test_file = cfg!(test) && url.starts_with("file:///");
+    if !test_file && !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(CameraError::NotHttp(url.into()));
+    }
     decode(&fetch_with(
-        device.camera_url.trim(),
+        url,
         30 * 1024 * 1024,
         Some((&device.camera_user, &device.camera_password)),
     )?)
@@ -1180,6 +1205,15 @@ pub fn calibration_svg(
 mod tests {
     use super::*;
 
+    #[test]
+    fn camera_pictures_claiming_huge_sizes_are_not_decoded() {
+        let mut png = encode_png(&RgbaImage::new(2, 2)).unwrap();
+        png[16..20].copy_from_slice(&100_000u32.to_be_bytes());
+        png[20..24].copy_from_slice(&100_000u32.to_be_bytes());
+        assert!(decode(&png).is_err());
+        assert!(decode(&encode_png(&RgbaImage::new(2, 2)).unwrap()).is_ok());
+    }
+
     /// Dark picture with VisiCam-style markers (sticker, ring, dot) at `centers`.
     fn picture_with_markers(centers: &[[f64; 2]]) -> RgbaImage {
         RgbaImage::from_fn(1500, 1000, |x, y| {
@@ -1538,6 +1572,11 @@ mod tests {
         };
         let png = background(&device, 1000.0, 600.0).unwrap();
         assert!(decode(&png).unwrap().width() >= 40);
+        // Imported devices: only HTTP is fetched, no paths or UNC shares.
+        for url in [path.to_str().unwrap(), r"\\attacker.example\s\a.jpg"] {
+            device.camera_url = url.into();
+            assert!(matches!(capture(&device), Err(CameraError::NotHttp(_))));
+        }
         device.camera_url.clear();
         assert!(background(&device, 1000.0, 600.0).is_err());
         assert!(fetch(path.to_str().unwrap(), 10).is_err());

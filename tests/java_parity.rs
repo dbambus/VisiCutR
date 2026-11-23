@@ -7,7 +7,11 @@
 //!
 //! A case with `deviation=<reason>` is a documented difference (see
 //! `docs/audits/Java-Vergleich-2026-10-21.md`): it is reported, not failed, and
-//! a note appears when it becomes byte-identical again.
+//! a note appears when it becomes byte-identical again. Its Rust output is
+//! frozen in `frozen<suffix>.txt` (length and FNV-1a hash of the job, or the
+//! error): a change there fails, so regressions in these cases do not go
+//! unnoticed. `VISICUTR_FREEZE_PARITY=1` writes the files anew (in a release
+//! build, which also covers the variants).
 
 use std::{collections::HashMap, fs, path::Path};
 use visicut_core::{
@@ -325,7 +329,12 @@ fn ltt_output_matches_java_byte_for_byte() {
                 // A missing reference is a setup problem, never a documented deviation.
                 Err(Outcome::MissingReference(message)) => failures.push(message),
                 Err(Outcome::Different(message)) => match known {
-                    Some(reason) => deviations.push(format!("{message}\n  bekannt: {reason}")),
+                    Some(reason) => {
+                        deviations.push(format!("{message}\n  bekannt: {reason}"));
+                        if let Err(change) = check_frozen(dir, &name, &case, &suffix) {
+                            failures.push(change);
+                        }
+                    }
                     None => failures.push(message),
                 },
             }
@@ -361,17 +370,69 @@ fn prepare(project: &Project, case: &HashMap<String, String>) -> Result<ltt::Pre
         .map_err(String::from)
 }
 
+/// The Rust output of a documented deviation as written to `frozen*.txt`.
+fn rust_output(dir: &Path, case: &HashMap<String, String>) -> String {
+    match project(dir, case).and_then(|p| prepare(&p, case)) {
+        Ok(prepared) => {
+            let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+            let mut length = 0;
+            for job in &prepared.jobs {
+                length += job.bytes.len();
+                for byte in &job.bytes {
+                    hash ^= u64::from(*byte);
+                    hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+                }
+            }
+            format!(
+                "{} jobs, {length} bytes, fnv1a {hash:016x}\n",
+                prepared.jobs.len()
+            )
+        }
+        Err(error) => format!("error: {error}\n"),
+    }
+}
+
+/// Compares the Rust output of a documented deviation with its frozen state.
+fn check_frozen(
+    dir: &Path,
+    name: &str,
+    case: &HashMap<String, String>,
+    suffix: &str,
+) -> Result<(), String> {
+    let path = dir.join(format!("frozen{suffix}.txt"));
+    let actual = rust_output(dir, case);
+    if std::env::var_os("VISICUTR_FREEZE_PARITY").is_some() {
+        fs::write(&path, &actual).unwrap();
+        return Ok(());
+    }
+    match fs::read_to_string(&path) {
+        Ok(frozen) if frozen == actual => Ok(()),
+        Ok(frozen) => Err(format!(
+            "{name}: Rust-Ausgabe der dokumentierten Abweichung hat sich geändert \
+             (eingefroren: {}, jetzt: {}); gewollt? VISICUTR_FREEZE_PARITY=1",
+            frozen.trim(),
+            actual.trim()
+        )),
+        Err(_) => Err(format!(
+            "{name}: frozen{suffix}.txt fehlt; mit VISICUTR_FREEZE_PARITY=1 anlegen"
+        )),
+    }
+}
+
 /// The case itself (suffix "") and each of its `variants`, a comma-separated
 /// list of `key=value` overrides such as `order=FILE, rotary_diameter_mm=100`.
 /// A variant has the suffix `@key-value` (other characters than letters,
 /// digits, `-`, `_` and `.` become `_`), its references
 /// `expected@key-value.ltt`/`.error` and its own `deviation@key-value`.
-/// Variants run in release builds only (`cargo test --release`, also in CI):
-/// unoptimised, the 570 of them add three minutes.
+/// Variants run in release builds (`cargo test --release`) and in debug
+/// builds with `VISICUTR_PARITY_VARIANTS=1` (CI sets it when it tests the
+/// debug build): unoptimised, the 570 of them add three minutes.
 fn variants(case: &HashMap<String, String>) -> Vec<(String, HashMap<String, String>)> {
     let mut all = vec![(String::new(), case.clone())];
+    let with_variants =
+        !cfg!(debug_assertions) || std::env::var_os("VISICUTR_PARITY_VARIANTS").is_some();
     let list = match case.get("variants") {
-        Some(list) if !cfg!(debug_assertions) => list.as_str(),
+        Some(list) if with_variants => list.as_str(),
         _ => "",
     };
     for (key, value) in list.split(',').filter_map(|v| v.trim().split_once('=')) {

@@ -1,7 +1,6 @@
 //! Scripts and PDF pages from files run in a child process of the
 //! application (`visicutr --import-worker`), so a hostile file can only end
-//! that process: it is killed after the time limit and, on Linux, limited in
-//! memory.
+//! that process: it is killed after the time limit and limited in memory.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -41,7 +40,6 @@ fn work_inside_built_in_functions_is_stopped_at_the_time_limit() {
     assert!(error.to_string().contains("abgebrochen"), "{error}");
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn memory_bombs_end_only_the_worker() {
     // In-process this aborted the application ("memory allocation of

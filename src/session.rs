@@ -118,9 +118,14 @@ fn free_name(dir: &Path, name: &str) -> PathBuf {
                 c
             }
         })
-        .take(80)
         .collect();
-    let name = name.trim().trim_start_matches('.');
+    // File systems allow 255 bytes per name; with „ (ungesichert 99).vcr“ and
+    // translations at most 150 bytes of the name stay (CJK: 3 bytes each).
+    let mut end = name.len().min(150);
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    let name = name[..end].trim().trim_start_matches('.');
     let name = if name.is_empty() {
         tr("Neues Projekt")
     } else {
@@ -140,16 +145,24 @@ fn free_name(dir: &Path, name: &str) -> PathBuf {
 }
 
 fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
-    std::fs::write(&temporary, bytes)?;
-    std::fs::rename(&temporary, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&temporary);
-    })
+    crate::atomic::write(path, bytes, false)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_names_fit_the_file_system_in_bytes() {
+        let dir = temporary("long-name");
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = "漢".repeat(200);
+        let path = free_name(&dir, &name);
+        let file = path.file_name().unwrap().to_string_lossy().len();
+        assert!(file <= 255, "{file}");
+        std::fs::write(&path, b"x").unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn temporary(name: &str) -> PathBuf {
         let dir =

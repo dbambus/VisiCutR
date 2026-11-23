@@ -31,6 +31,8 @@ pub enum EpsError {
     TooComplex,
     CallsTooDeep,
     ProceduresTooDeep,
+    /// More objects than [`super::parse::MAX_OBJECTS`].
+    TooManyObjects,
     StackUnderflow(String),
     InvalidNumber(String),
     WrongOperand {
@@ -89,6 +91,7 @@ impl fmt::Display for EpsError {
                 tr("Prozeduren sind zu tief ineinander verschachtelt").to_string()
             }
             Self::ProceduresTooDeep => tr("Prozeduren sind zu tief verschachtelt").to_string(),
+            Self::TooManyObjects => tr("EPS-Datei enthält zu viele Objekte").to_string(),
             Self::StackUnderflow(op) => tr!("Stapelunterlauf bei „{operator}“", operator = op),
             Self::InvalidNumber(op) => tr!("Ungültiger Zahlenwert bei „{operator}“", operator = op),
             Self::WrongOperand { operator, expected } => match expected {

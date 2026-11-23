@@ -1,5 +1,6 @@
 # Cargo build output and local packages (scripts/bundle-macos.sh, package-ci.py)
 /target/
+/visicut-rust/target/
 /dist/
 
 # macOS

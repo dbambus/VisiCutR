@@ -2203,7 +2203,10 @@ impl JobUi {
             };
             changed = true;
         }
-        if let Some(i) = edits.insert_after {
+        // Mehr Schritte ließen sich nicht mehr sichern und öffnen.
+        if let Some(i) = edits.insert_after
+            && project.steps.len() < visicut_core::project::MAX_STEPS
+        {
             let step = JobStep {
                 filters: Some(Vec::new()),
                 ..default_step(self.active(), project, project.steps[i].operation)
@@ -2312,6 +2315,9 @@ impl JobUi {
         }
         if ui
             .add_enabled(self.custom, egui::Button::new(tr("FAU wiederherstellen")))
+            .on_hover_text(tr(
+                "Ersetzt die eigene Materialbibliothek durch die FAU-Vorgabe; die eigene bleibt als materials.json.bak erhalten und lässt sich importieren.",
+            ))
             .clicked()
         {
             match Library::reset(&device::config_dir()) {
@@ -2320,7 +2326,7 @@ impl JobUi {
                     *selected = 0;
                     self.library = library;
                     self.custom = false;
-                    *status = tr("FAU-Materialbibliothek wiederhergestellt").into();
+                    *status = tr("FAU-Materialbibliothek wiederhergestellt; die eigene liegt als materials.json.bak im Einstellungsordner").into();
                 }
                 Err(e) => *status = e.to_string(),
             }

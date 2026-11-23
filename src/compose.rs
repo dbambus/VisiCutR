@@ -1443,6 +1443,14 @@ pub fn reload_parts(project: &Project, whole_drawing: bool) -> (Project, usize, 
             continue;
         };
         let path = std::path::Path::new(&file);
+        // The path comes from the project file.
+        if crate::svg_import::is_network_path(path) {
+            notes.push(tr!(
+                "{path}: Netzwerkpfade werden nicht neu geladen",
+                path = file
+            ));
+            continue;
+        }
         match refresh_part(part, path, whole_drawing) {
             Ok((true, warnings)) => {
                 changed += 1;

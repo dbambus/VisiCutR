@@ -63,8 +63,9 @@ pub type Composed = Result<(Project, Vec<String>), compose::ComposeError>;
 
 pub struct ComposeUi {
     open: Option<Tool>,
-    /// Das Textfenster bearbeitet den Text des gewählten Teils.
-    editing: bool,
+    /// Das Textfenster bearbeitet den Text dieses Teils (Position in der
+    /// Teileliste beim Öffnen), nicht des beim Übernehmen gewählten.
+    editing: Option<usize>,
     text: TextSource,
     shape: ShapeForm,
     sign: Sign,
@@ -81,7 +82,7 @@ impl Default for ComposeUi {
     fn default() -> Self {
         Self {
             open: None,
-            editing: false,
+            editing: None,
             text: TextSource {
                 text: tr("Text").into(),
                 font: "sans-serif".into(),
@@ -380,15 +381,15 @@ impl ComposeUi {
         if self.fonts.is_empty() {
             self.fonts = compose::font_families();
         }
-        self.editing = false;
+        self.editing = None;
         self.open = Some(tool);
     }
 
     /// Öffnet das Textfenster mit Text und Einstellungen des gewählten Teils.
-    pub fn edit_text(&mut self, source: &TextSource) {
+    pub fn edit_text(&mut self, source: &TextSource, part: usize) {
         self.open(Tool::Text);
         self.text = source.clone();
-        self.editing = true;
+        self.editing = Some(part);
     }
 
     /// Zeigt das offene Werkzeug; liefert das neue Projekt nach „Einfügen“.
@@ -401,7 +402,7 @@ impl ComposeUi {
         view: [f32; 4],
     ) -> Option<Composed> {
         let tool = self.open?;
-        let title = if self.editing {
+        let title = if self.editing.is_some() {
             tr("Text bearbeiten")
         } else {
             tool.title()
@@ -451,7 +452,7 @@ impl ComposeUi {
                     ui.add_space(12.0);
                     let label = match tool {
                         Tool::Array | Tool::Nest => tr("Anwenden"),
-                        Tool::Text if self.editing => tr("Übernehmen"),
+                        Tool::Text if self.editing.is_some() => tr("Übernehmen"),
                         _ => tr("Einfügen"),
                     };
                     // Nur eine Zeile hoch, sonst wächst das Fenster mit.
@@ -500,8 +501,15 @@ impl ComposeUi {
             compose::add_objects_as_part(project, &objects, name, view).map(|p| (p, Vec::new()))
         };
         match tool {
-            Tool::Text if self.editing => {
-                compose::set_text(project, &self.text).map(|p| (p, Vec::new()))
+            Tool::Text if self.editing.is_some() => {
+                let part = self.editing.unwrap_or_default();
+                // Inzwischen kann ein anderes Teil gewählt sein.
+                if part >= project.part_count() {
+                    return Err(compose::ComposeError::NotText);
+                }
+                let mut target = project.clone();
+                target.select_part(part);
+                compose::set_text(&target, &self.text).map(|p| (p, Vec::new()))
             }
             Tool::Text => compose::add_text(project, &self.text, view).map(|p| (p, Vec::new())),
             Tool::Shape => {

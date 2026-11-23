@@ -11,6 +11,8 @@ pub enum DxfError {
     TooManyObjects,
     TooManyBlockReferences,
     NothingToShow,
+    /// The import ran out of time (see `import::TIME_LIMIT`).
+    TimeLimit(std::time::Duration),
     /// Width and height in mm, already formatted.
     TooLarge {
         width: String,
@@ -30,6 +32,10 @@ impl fmt::Display for DxfError {
                 tr("DXF-Datei enthält zu viele Blockreferenzen").to_string()
             }
             Self::NothingToShow => tr("DXF-Datei enthält keine darstellbaren Objekte").to_string(),
+            Self::TimeLimit(limit) => tr!(
+                "Import nach {seconds} s abgebrochen (Datei zu aufwendig)",
+                seconds = limit.as_secs_f32()
+            ),
             Self::TooLarge { width, height } => tr!(
                 "DXF-Zeichnung ist zu groß ({width} × {height} mm); Einheiten prüfen",
                 width = width,

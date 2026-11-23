@@ -219,29 +219,14 @@ pub fn export_plan<'a>(folder: &Path, names: impl IntoIterator<Item = &'a str>) 
 
 /// Schreibt neben das Ziel und ersetzt es dann in einem Schritt.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    use std::io::Write;
-    let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(".{}.tmp", std::process::id()));
-    let temporary = path.with_file_name(name);
-    let result = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&temporary, path)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-    }
-    result.map_err(|e| format!("{}: {e}", path.display()))
+    visicut_core::atomic::write(path, bytes, false).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn percent(value: f32) -> String {
-    let text = format!("{value:.1}");
-    text.trim_end_matches(".0").replace('.', ",")
+    let text = visicut_core::i18n::number(f64::from(value), 1);
+    text.trim_end_matches(".0")
+        .trim_end_matches(",0")
+        .to_string()
 }
 
 /// Parameter eines Schritts für die Sende-Bestätigung.

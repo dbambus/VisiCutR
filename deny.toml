@@ -1,0 +1,15 @@
+# cargo deny check advisories (CI-Job „Advisories“): Schwachstellen in den
+# Abhängigkeiten aus Cargo.lock lassen den Build scheitern.
+[graph]
+all-features = true
+
+[advisories]
+# Meldungen „nicht mehr gepflegt“ (paste, rustybuzz, ttf-parser, zbus_names,
+# zvariant …) kommen über resvg, egui und rfd und sind zu beobachten, aber
+# kein Grund für einen roten Build.
+unmaintained = "none"
+# Zurückgezogene Versionen werden gemeldet, ohne den Build zu stoppen.
+yanked = "warn"
+# Ausnahmen mit Begründung, z. B.:
+# ignore = [{ id = "RUSTSEC-0000-0000", reason = "trifft VisiCutR nicht, weil …" }]
+ignore = []

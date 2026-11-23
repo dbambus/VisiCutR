@@ -124,8 +124,8 @@ Wiederholung nach Fehlern.
   Begrenzungsrahmens, ohne Pfade zu verbinden. Wörtliche Portierungen von
   `FileVectorOptimizer`, `NearestVectorOptimizer` und
   `SmallestFirstVectorOptimizer`; Java-Referenzbytes gibt es dafür nicht.
-- Doppelte Linien entfernen (Option, Standard aus; ohne Option bleibt die
-  Ausgabe byte-gleich mit VisiCut): Je Schritt werden die Konturen in
+- Doppelte Linien entfernen (Option, Standard an, auch für Projekte ohne
+  das Feld; ausgeschaltet bleibt die Ausgabe byte-gleich mit VisiCut): Je Schritt werden die Konturen in
   Reihenfolge der SVG geprüft. Teile eines Segments, die ein früheres Segment
   kollinear überdeckt (alle Endpunkte innerhalb 0,02 mm der anderen Geraden,
   auch gegenläufig), entfallen; Reste unter 0,04 mm ebenso. Die übrigen Teile
@@ -318,8 +318,9 @@ Die Geschwindigkeiten werden für die Schätzung wie für ESC-S auf Zehntelproze
 quantisiert. Nicht modelliert sind die exakten Beschleunigungsprofile,
 Gerätestart, Übertragungszeit und Bedienpausen. Keine Zeitmessung am Gerät.
 
-Projektformat 2 enthält optional `steps`: maximal je einen Schnitt-, Markier-
-und Gravurschritt, mit nullbasierten SVG-Objektindizes und eigenen Parametern.
+Projektformat 2 enthält optional `steps`: bis zu 64 Schritte (Schneiden,
+Markieren oder Gravieren, auch mehrere derselben Art), mit nullbasierten
+SVG-Objektindizes oder Farbregeln und eigenen Parametersätzen.
 Ein fehlendes oder leeres `steps` behält die bisherige Ganzmotiv-Bearbeitung bei.
 Leere Objektauswahlen innerhalb expliziter Schritte werden übersprungen;
 bei vollständig leerem Auftrag, doppelten oder ungültigen Objektindizes wird

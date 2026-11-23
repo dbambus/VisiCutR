@@ -24,6 +24,23 @@ env:
   RUST_BACKTRACE: "1"
 
 jobs:
+  advisories:
+    name: Advisories
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Schwachstellen-Meldungen der RustSec-Datenbank für Cargo.lock
+      # (Einstellungen in deny.toml).
+      - name: Check RustSec advisories
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories
+
   build:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
@@ -132,7 +149,8 @@ jobs:
           # wie bisher im Debug-Profil, sonst würde jedes Testprogramm mit
           # LTO gelinkt.
           if [[ "$LTO" == true ]]; then
-            cargo test --locked --all-targets
+            # Die Paritätsvarianten laufen sonst nur im Release-Profil.
+            VISICUTR_PARITY_VARIANTS=1 cargo test --locked --all-targets
           else
             cargo test --locked --release --all-targets
           fi
@@ -211,7 +229,7 @@ jobs:
       github.repository == 'dbambus/VisiCutR' &&
       (startsWith(github.ref, 'refs/tags/v') ||
       (github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')))
-    needs: build
+    needs: [build, advisories]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

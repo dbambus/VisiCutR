@@ -991,8 +991,15 @@ fn parse_each(text: &str) -> Result<(String, String, String), ImportError> {
     Ok((variable, status, expression.trim().to_string()))
 }
 
+/// Largest `.parameters` file read (a few values in XStream XML).
+pub(crate) const MAX_SAVED_VALUES_BYTES: usize = 1024 * 1024;
+
 /// Values from VisiCut's `.parameters` file (XStream XML of a map).
 pub fn read_saved_values(text: &str) -> Result<Vec<(String, Value)>, ImportError> {
+    if text.len() > MAX_SAVED_VALUES_BYTES {
+        return Err(ImportError::Svg(crate::svg::SvgError::TooLarge));
+    }
+    crate::svg::check_nesting(text)?;
     let document = roxmltree::Document::parse(text).map_err(ImportError::Xml)?;
     let mut result = Vec::new();
     for entry in document
@@ -1146,6 +1153,21 @@ mod tests {
         let rendered = render(source.into(), true, saved, script::TIME_LIMIT).unwrap();
         assert!(rendered.svg.contains(r#"width="60""#), "{}", rendered.svg);
         assert!(rendered.parameters[0].saved);
+    }
+
+    #[test]
+    fn parameter_files_are_checked_like_drawings() {
+        let deep = format!(
+            "<parameters>{}{}</parameters>",
+            "<entry>".repeat(10_000),
+            "</entry>".repeat(10_000)
+        );
+        assert!(matches!(
+            read_saved_values(&deep),
+            Err(ImportError::Svg(crate::svg::SvgError::TooDeep))
+        ));
+        let large = format!("<parameters>{}</parameters>", " ".repeat(2 * 1024 * 1024));
+        assert!(read_saved_values(&large).is_err());
     }
 
     #[test]

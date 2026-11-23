@@ -101,6 +101,21 @@ pub fn language() -> Language {
     Language::ALL[usize::from(CURRENT.load(Ordering::Relaxed)).min(Language::ALL.len() - 1)]
 }
 
+/// `value` with `decimals` places and the decimal separator of the
+/// interface language: a comma in German, French, Italian and Dutch, a
+/// point in English.
+pub fn number(value: f64, decimals: usize) -> String {
+    number_in(language(), value, decimals)
+}
+
+fn number_in(language: Language, value: f64, decimals: usize) -> String {
+    let text = format!("{value:.decimals$}");
+    match language {
+        Language::English => text,
+        _ => text.replace('.', ","),
+    }
+}
+
 /// Übersetzt einen deutschen Text der Oberfläche.
 pub fn tr(german: &'static str) -> &'static str {
     language()
@@ -153,6 +168,13 @@ macro_rules! tr {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numbers_use_the_decimal_separator_of_the_language() {
+        assert_eq!(number_in(Language::German, 2.25, 1), "2,2");
+        assert_eq!(number_in(Language::English, 2.5, 1), "2.5");
+        assert_eq!(number_in(Language::French, 10.0, 2), "10,00");
+    }
     use std::collections::BTreeSet;
 
     fn sources(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {

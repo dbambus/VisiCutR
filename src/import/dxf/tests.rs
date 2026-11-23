@@ -412,3 +412,57 @@ fn flattened_curves_have_a_segment_limit() {
     assert!(path.overflowed());
     assert_eq!(path.segs.len(), geom::MAX_PATH_SEGMENTS);
 }
+
+#[test]
+fn hatch_splines_without_data_finish_quickly() {
+    // 22 lines: degree 999 999 and a million control points without data
+    // ran for minutes.
+    let start = std::time::Instant::now();
+    let result = import_bytes(
+        drawing(
+            MM,
+            "",
+            "",
+            "|0|HATCH|8|0|70|1|91|1|92|0|93|1|72|4|94|999999|73|0|74|0|95|1000000|96|1000000",
+        )
+        .as_bytes(),
+    );
+    assert!(result.is_err(), "nothing to draw");
+    assert!(start.elapsed() < std::time::Duration::from_secs(10));
+}
+
+#[test]
+fn large_blocks_in_arrays_stop_at_the_visit_limit() {
+    // 100 000 points drawn 316 × 316 times: below the instance limit, but
+    // 10¹⁰ entities to visit.
+    let points = "|0|POINT|8|0|10|0|20|0".repeat(100_000);
+    let start = std::time::Instant::now();
+    let error = import_bytes(
+        drawing(
+            MM,
+            "",
+            &format!("|0|BLOCK|8|0|2|P|10|0|20|0{points}|0|ENDBLK"),
+            "|0|INSERT|8|0|2|P|10|0|20|0|70|316|71|316",
+        )
+        .as_bytes(),
+    )
+    .err()
+    .expect("refused");
+    assert!(matches!(error, DxfError::TooManyObjects), "{error}");
+    assert!(start.elapsed() < std::time::Duration::from_secs(60));
+}
+
+#[test]
+fn control_characters_in_texts_do_not_break_the_drawing() {
+    let imported = import_bytes(
+        drawing(
+            MM,
+            "",
+            "",
+            "|0|TEXT|8|0|10|0|20|10|40|7|1|A%%001B\\U+0002C|0|LINE|8|0|10|0|20|0|11|10|21|0",
+        )
+        .as_bytes(),
+    )
+    .expect("readable");
+    assert!(imported.svg.contains(">ABC<"), "{}", imported.svg);
+}

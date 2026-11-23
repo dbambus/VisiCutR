@@ -1,4 +1,5 @@
 pub mod addins;
+pub mod atomic;
 pub mod camera;
 pub mod compose;
 pub mod device;

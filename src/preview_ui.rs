@@ -352,7 +352,10 @@ impl PreviewUi {
                     "Geschätzte Bearbeitungszeit: ca. {time}",
                     time = duration(ready.job.estimated_seconds)
                 );
-                self.playback.seek(0.0, ready.job.estimated_seconds);
+                // Die Vorschau zeigt zuerst das fertige Teil; die Animation
+                // läuft nur auf Wunsch (⏵ beginnt dann von vorn).
+                let total = ready.job.estimated_seconds;
+                self.playback.seek(total, total);
                 self.state = State::Ready {
                     fingerprint,
                     ready: Box::new(ready),

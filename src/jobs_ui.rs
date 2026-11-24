@@ -1279,7 +1279,11 @@ fn material_menu(
     own_material: &mut bool,
 ) -> bool {
     let mut changed = false;
-    crate::form::Dropdown::from_id_salt("material")
+    // Bei offener Liste filtert getippter Text die Materialien (Enter wählt
+    // den ersten Treffer); der Filter gilt nur, solange die Liste offen ist.
+    let filter_id = egui::Id::new("material-filter");
+    let mut filter: String = ui.data(|d| d.get_temp(filter_id)).unwrap_or_default();
+    let shown = crate::form::Dropdown::from_id_salt("material")
         .width(190.0)
         .selected_text(if own {
             tr("Eigenes Material …")
@@ -1289,22 +1293,63 @@ fn material_menu(
             &project.material
         })
         .show_ui(ui, |ui| {
-            if ui
-                .selectable_label(!own && project.material.is_empty(), tr("Material wählen"))
-                .clicked()
-            {
-                project.material.clear();
-                *own_material = false;
-                changed = true;
-            }
-            ui.separator();
-            for m in &library.materials {
+            let enter = ui.input_mut(|i| {
+                i.events.retain(|event| match event {
+                    egui::Event::Text(text) => {
+                        filter.push_str(text);
+                        false
+                    }
+                    egui::Event::Key {
+                        key: egui::Key::Backspace,
+                        pressed: true,
+                        ..
+                    } => {
+                        filter.pop();
+                        false
+                    }
+                    _ => true,
+                });
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+            });
+            let needle = filter.to_lowercase();
+            let matches: Vec<&str> = library
+                .materials
+                .iter()
+                .map(|m| m.name.as_str())
+                .filter(|name| name.to_lowercase().contains(&needle))
+                .collect();
+            if filter.is_empty() {
                 if ui
-                    .selectable_label(project.material == m.name, &m.name)
+                    .selectable_label(!own && project.material.is_empty(), tr("Material wählen"))
                     .clicked()
                 {
-                    select_material(library, project, Some(&m.name));
+                    project.material.clear();
+                    *own_material = false;
                     changed = true;
+                }
+            } else {
+                ui.label(
+                    egui::RichText::new(format!("🔍 {filter}")).color(egui::Color32::from_gray(90)),
+                );
+                if matches.is_empty() {
+                    ui.label(
+                        egui::RichText::new(tr("Kein Material gefunden"))
+                            .color(egui::Color32::from_gray(130)),
+                    );
+                }
+            }
+            ui.separator();
+            for (index, &name) in matches.iter().enumerate() {
+                let label = ui.selectable_label(project.material == name, name);
+                if index == 0 && !filter.is_empty() {
+                    label.scroll_to_me(None);
+                }
+                if label.clicked() || (enter && index == 0 && !filter.is_empty()) {
+                    select_material(library, project, Some(name));
+                    changed = true;
+                    if enter {
+                        ui.close();
+                    }
                 }
             }
             ui.separator();
@@ -1314,6 +1359,10 @@ fn material_menu(
                 changed = true;
             }
         });
+    if shown.inner.is_none() {
+        filter.clear();
+    }
+    ui.data_mut(|d| d.insert_temp(filter_id, filter));
     changed
 }
 
@@ -1668,10 +1717,15 @@ impl JobUi {
         let before = (project.material.clone(), project.thickness_mm);
         let library = &self.library;
         let library_material = find_material(library, &project.material).is_some();
-        if library_material {
+        // Solange das Namensfeld bearbeitet wird, bleibt es stehen, auch wenn
+        // der getippte Name (etwa „PE“) einem Material der Bibliothek gleicht.
+        let name_id = egui::Id::new("own-material-name");
+        if ui.memory(|m| m.has_focus(name_id)) {
+            self.own_material = true;
+        } else if library_material {
             self.own_material = false;
         }
-        let own = !library_material && (self.own_material || !project.material.is_empty());
+        let own = self.own_material || (!library_material && !project.material.is_empty());
         crate::form::row(ui, tr("Material"), |ui| {
             *dirty |= material_menu(ui, library, project, own, &mut self.own_material);
         });
@@ -1680,6 +1734,7 @@ impl JobUi {
                 *dirty |= ui
                     .add(
                         egui::TextEdit::singleline(&mut project.material)
+                            .id(name_id)
                             .hint_text(tr("Eigenes Material"))
                             .desired_width(190.0),
                     )

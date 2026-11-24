@@ -1067,8 +1067,8 @@ impl VisiCutR {
         }
     }
 
-    /// Öffnet, was beim Start verlangt wurde: Beispiel, übergebene Dateien
-    /// oder den ungesicherten Stand des letzten Beendens.
+    /// Öffnet, was beim Start verlangt wurde: Beispiel oder übergebene
+    /// Dateien; sonst bleibt der Auftrag leer.
     fn open_at_launch(&mut self, ctx: &egui::Context, launch: instance::Launch) {
         // Unter macOS kommen per Doppelklick geöffnete Dateien als Ereignis.
         let opened = open_files::take();
@@ -1079,9 +1079,11 @@ impl VisiCutR {
             self.open_request(ctx, launch.request);
         } else if !opened.is_empty() {
             self.open_files(ctx, opened);
-        } else if let Some(path) = session::take_resume(&session::dir()) {
-            // Sonst der beim letzten Beenden ungesicherte Stand.
-            self.perform(ctx, Replace::Open(path));
+        } else {
+            // Sonst beginnt die App mit einem leeren Auftrag; der beim letzten
+            // Beenden ungesicherte Stand steht unter „Zuletzt geöffnet“.
+            // Ein Merker älterer Fassungen wird vergessen.
+            let _ = session::take_resume(&session::dir());
         }
     }
 
@@ -1996,7 +1998,7 @@ impl VisiCutR {
         }
         if self.busy() && !matches!(action, Replace::Quit) {
             self.messages.status = tr("Bitte die laufende Übertragung abwarten").into();
-        } else if self.file.dirty && !self.stash(matches!(action, Replace::Quit)) {
+        } else if self.file.dirty && !self.stash() {
             self.pending.replace = Some(action);
         } else {
             self.perform(ctx, action);
@@ -2027,17 +2029,9 @@ impl VisiCutR {
     }
 
     /// Legt den ungesicherten Stand ab und führt ihn unter „Zuletzt
-    /// geöffnet“; mit `resume` öffnet er beim nächsten Start wieder.
-    fn stash(&mut self, resume: bool) -> bool {
-        let dir = session::dir();
-        let stashed =
-            session::stash(&dir, &self.project, self.file.cached.as_deref()).and_then(|path| {
-                if resume {
-                    session::set_resume(&dir, Some(&path))?;
-                }
-                Ok(path)
-            });
-        match stashed {
+    /// geöffnet“.
+    fn stash(&mut self) -> bool {
+        match session::stash(&session::dir(), &self.project, self.file.cached.as_deref()) {
             Ok(path) => {
                 self.remember(&path);
                 true
@@ -3305,7 +3299,9 @@ impl VisiCutR {
         for command in commands {
             self.run(ctx, command);
         }
-        if self.busy() || ctx.memory(|m| m.focused().is_some()) {
+        // Auch bei offener Auswahlliste (etwa Material, dort wird getippt)
+        // gehören Tasten wie Rücktaste und Pfeile der Liste, nicht dem Motiv.
+        if self.busy() || ctx.memory(|m| m.focused().is_some()) || egui::Popup::is_any_open(ctx) {
             return;
         }
         // Widerrufen, Wiederholen, Löschen und Duplizieren nur ohne aktives Eingabefeld,
@@ -3336,8 +3332,13 @@ impl VisiCutR {
                     _ => {}
                 }
             }
+            // Die Rücktaste löscht nur auf dem Mac (dort heißt sie „Löschen“);
+            // unter Windows und Linux löscht allein Entf, damit ein Vertipper
+            // nicht das Teil entfernt.
+            let backspace = cfg!(target_os = "macos");
             for modifiers in [Modifiers::NONE, Modifiers::COMMAND] {
-                if i.consume_key(modifiers, Key::Delete) || i.consume_key(modifiers, Key::Backspace)
+                if i.consume_key(modifiers, Key::Delete)
+                    || (backspace && i.consume_key(modifiers, Key::Backspace))
                 {
                     commands.push(Command::Delete);
                 }
@@ -4282,7 +4283,6 @@ impl VisiCutR {
                 let size = shown.size() / scale;
                 self.canvas.visible_mm = [min[0], min[1], size.x, size.y];
             }
-            self.rulers(ui.painter(), view);
             let painter = ui.painter().with_clip_rect(shown);
             self.paint_bed(&painter, view);
             match self.textures.active.as_ref().map(egui::TextureHandle::id) {
@@ -4303,6 +4303,8 @@ impl VisiCutR {
                     );
                 }
             }
+            // Zuletzt, damit die mitlaufenden Lineale über dem Motiv liegen.
+            self.rulers(ui.painter(), view, ui.clip_rect(), RULER);
         });
     }
 
@@ -4845,43 +4847,81 @@ impl VisiCutR {
         }
     }
 
-    /// Lineale mit mm-Beschriftung oben und links vom Bett.
-    fn rulers(&self, painter: &egui::Painter, view: BedView) {
+    /// Lineale mit mm-Beschriftung oben und links vom Bett. Ist das Bett
+    /// hineingezoomt und gescrollt, bleiben sie am oberen und linken Rand des
+    /// sichtbaren Ausschnitts (`visible`, `ruler`: Breite der Linealleiste).
+    fn rulers(&self, painter: &egui::Painter, view: BedView, visible: Rect, ruler: f32) {
         let BedView { rect: bed, scale } = view;
         let step = workspace::ruler_step_mm(scale);
         let color = Color32::from_gray(110);
         let font = egui::FontId::monospace(10.0);
         let tick = Stroke::new(1.0, Color32::from_gray(160));
+        // Grundlinien der Lineale: Bettkante oder, weggescrollt, Rand des Ausschnitts.
+        let top = bed.top().max(visible.top() + ruler);
+        let left = bed.left().max(visible.left() + ruler);
+        // Hinter mitlaufenden Linealen das Motiv abdecken.
+        let top_strip = Rect::from_min_max(
+            Pos2::new(visible.left(), top - ruler),
+            Pos2::new(visible.right(), top),
+        );
+        let left_strip = Rect::from_min_max(
+            Pos2::new(left - ruler, visible.top()),
+            Pos2::new(left, visible.bottom()),
+        );
+        if top > bed.top() {
+            painter.rect_filled(top_strip, 0.0, form::CANVAS);
+            painter.hline(top_strip.x_range(), top, tick);
+        }
+        if left > bed.left() {
+            painter.rect_filled(left_strip, 0.0, form::CANVAS);
+            painter.vline(left, left_strip.y_range(), tick);
+        }
+        // Marken nur rechts bzw. unterhalb der Ecke, in der sich die Lineale treffen.
+        let top_painter = painter.with_clip_rect(
+            Rect::from_min_max(
+                Pos2::new(left - 1.0, top - ruler),
+                Pos2::new(visible.right(), top),
+            )
+            .intersect(painter.clip_rect()),
+        );
         for x in workspace::ruler_marks(self.project.bed_width_mm, step) {
             let px = bed.left() + x * scale;
-            painter.line_segment(
-                [Pos2::new(px, bed.top() - 6.0), Pos2::new(px, bed.top())],
-                tick,
-            );
-            painter.text(
-                Pos2::new(px, bed.top() - 7.0),
+            top_painter.line_segment([Pos2::new(px, top - 6.0), Pos2::new(px, top)], tick);
+            top_painter.text(
+                Pos2::new(px, top - 7.0),
                 egui::Align2::CENTER_BOTTOM,
                 workspace::ruler_label(x, step),
                 font.clone(),
                 color,
             );
         }
+        let left_painter = painter.with_clip_rect(
+            Rect::from_min_max(
+                Pos2::new(left - ruler, top - 1.0),
+                Pos2::new(left, visible.bottom()),
+            )
+            .intersect(painter.clip_rect()),
+        );
         for y in workspace::ruler_marks(self.project.bed_height_mm, step) {
             let py = self.ruler_y(view, y);
-            painter.line_segment(
-                [Pos2::new(bed.left() - 6.0, py), Pos2::new(bed.left(), py)],
-                tick,
-            );
-            painter.text(
-                Pos2::new(bed.left() - 8.0, py),
+            left_painter.line_segment([Pos2::new(left - 6.0, py), Pos2::new(left, py)], tick);
+            left_painter.text(
+                Pos2::new(left - 8.0, py),
                 egui::Align2::RIGHT_CENTER,
                 workspace::ruler_label(y, step),
                 font.clone(),
                 color,
             );
         }
+        if top > bed.top() || left > bed.left() {
+            painter.rect_filled(
+                Rect::from_min_max(Pos2::new(left - ruler, top - ruler), Pos2::new(left, top)),
+                0.0,
+                form::CANVAS,
+            );
+        }
         painter.text(
-            bed.min - Vec2::splat(8.0),
+            Pos2::new(left, top) - Vec2::splat(8.0),
             egui::Align2::RIGHT_BOTTOM,
             "mm",
             font,
@@ -5681,7 +5721,7 @@ impl VisiCutR {
                     tr("Bitte die laufende Übertragung vor dem Beenden abwarten").into();
             } else if !self.settings_saved_before_quit() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            } else if self.file.dirty && !self.stash(true) {
+            } else if self.file.dirty && !self.stash() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.pending.replace = Some(Replace::Quit);
             }

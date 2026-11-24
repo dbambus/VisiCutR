@@ -3,6 +3,38 @@
 Jede Version hat einen Abschnitt `## <Version> – <Datum>`; der Release-Workflow
 übernimmt ihn als Beschreibung des GitHub-Releases.
 
+## 1.0.3 – 24.11.2026
+
+Sicherheits- und Stabilitätsrelease nach dem Audit von 1.0.2 und seiner
+Nachprüfung.
+
+- **Widerrufen und Zielgerät:** Widerrufen übernimmt Adresse und
+  Maschinenwerte des gewählten Lasercutters, nicht die des vorher
+  gewählten.
+- **Dateien aus fremder Hand:** Projektdateien öffnen keine
+  Netzwerkpfade mehr. SVG-Dateien mit Entities, die Elemente enthalten
+  oder sich stark ausdehnen, werden abgelehnt, auch hinter Kommentaren.
+  Eingebettete Bilder, gzip-SVG, `.parameters`, DXF und EPS haben
+  Größen-, Tiefen- und Zeitgrenzen, statt die App aufzuhängen oder zu
+  beenden.
+- **Senden:** Während eine Datei gelesen oder ein parametrisches Teil
+  erzeugt wird, ist Senden gesperrt; Ergebnisse ändern das Projekt nicht
+  mehr unter einer offenen Sende-Bestätigung. Lesen im Hintergrund lässt
+  sich abbrechen. Der Encoder prüft jede Position gegen das Arbeitsbett.
+- **Kamera:** Gefundene Kameras werden nur per Klick übernommen, die
+  Anmeldung nur für denselben Rechner; Kamera-Adressen nur über
+  http(s). Der Kameraserver lauscht ohne Anmeldung nur auf 127.0.0.1
+  und liest das Passwort auf Wunsch aus einer Datei.
+- **Windows:** Relativ verknüpfte Bilder in SVG-Dateien werden wieder
+  eingebettet.
+- **Oberfläche:** Hover-Umrisse, Vektorisieren, parametrische Teile,
+  Export und Senden rechnen im Hintergrund; ein Widerrufen-Schritt je
+  Geste; EPS geht nur nach Freigabe in den Einstellungen an Ghostscript;
+  „FAU wiederherstellen“ sichert die eigene Bibliothek als
+  `materials.json.bak`; Dateien werden atomar gespeichert.
+- **Abhängigkeiten:** TLS- und Zip-Bibliotheken aktualisiert;
+  `cargo deny` prüft Schwachstellen in der CI.
+
 ## 1.0.2 – 23.11.2026
 
 Laserwerte lassen sich direkt als Materialprofil sichern (#10).

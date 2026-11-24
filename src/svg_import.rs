@@ -424,9 +424,14 @@ pub fn is_drawing_folder(path: &Path) -> bool {
     !path.as_os_str().is_empty() && !is_network_path(path) && path.parent().is_some()
 }
 
-/// UNC and device paths, which Windows opens over the network.
+/// UNC and device paths, which Windows opens over the network. A verbatim
+/// path on a local drive (`\\?\C:\…`, what `canonicalize` returns on
+/// Windows) is local.
 pub fn is_network_path(path: &Path) -> bool {
     let text = path.to_string_lossy();
+    if is_verbatim_disk(&text) {
+        return false;
+    }
     let mut start = text.chars();
     if matches!(
         (start.next(), start.next()),
@@ -438,16 +443,21 @@ pub fn is_network_path(path: &Path) -> bool {
     {
         use std::path::{Component, Prefix};
         if let Some(Component::Prefix(prefix)) = path.components().next() {
-            return matches!(
-                prefix.kind(),
-                Prefix::UNC(..)
-                    | Prefix::VerbatimUNC(..)
-                    | Prefix::DeviceNS(..)
-                    | Prefix::Verbatim(..)
-            );
+            return !matches!(prefix.kind(), Prefix::Disk(..) | Prefix::VerbatimDisk(..));
         }
     }
     false
+}
+
+/// `\\?\C:` followed by nothing or a separator. Only backslashes make a
+/// verbatim path; Windows reads `//?/C:` as a share named `C:` on host `?`.
+fn is_verbatim_disk(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() >= 6
+        && bytes.starts_with(br"\\?\")
+        && bytes[4].is_ascii_alphabetic()
+        && bytes[5] == b':'
+        && bytes.get(6).is_none_or(|c| matches!(c, b'\\' | b'/'))
 }
 
 fn file_url_path(url: &str) -> Option<PathBuf> {
@@ -620,7 +630,10 @@ mod tests {
     }
 
     fn file_url(path: &Path) -> String {
-        let text = path.to_string_lossy().replace('\\', "/");
+        // Inkscape writes file:///C:/…, not the verbatim form of `canonicalize`.
+        let text = path.to_string_lossy();
+        let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+        let text = text.replace('\\', "/");
         let text = if text.starts_with('/') {
             text
         } else {
@@ -689,6 +702,15 @@ mod tests {
         assert!(is_network_path(Path::new("//server/share")));
         assert!(!is_network_path(Path::new("/home/user/red.png")));
         assert!(!is_network_path(Path::new("img/red.png")));
+        // What `canonicalize` returns on Windows is a local path.
+        assert!(!is_network_path(Path::new(r"\\?\C:\Users\a\red.png")));
+        assert!(!is_network_path(Path::new(r"\\?\C:")));
+        assert!(is_drawing_folder(Path::new(r"\\?\C:\Users\a")));
+        assert!(is_network_path(Path::new(r"\\?\UNC\server\share")));
+        assert!(is_network_path(Path::new(r"\\?\C:evil")));
+        assert!(is_network_path(Path::new(r"\\.\C:\x")));
+        assert!(is_network_path(Path::new("//?/C:/x")));
+        assert!(is_network_path(Path::new(r"\\?\Volume{1}\x")));
         // A sodipodi:absref on another computer is not tried either.
         let source = svg(r#"href="missing.png" sodipodi:absref="//attacker.example/s/red.png""#)
             .replace(

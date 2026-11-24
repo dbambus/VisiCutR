@@ -625,8 +625,8 @@ pub fn capture(device: &LaserDevice) -> Result<RgbaImage, CameraError> {
     }
     // Imported devices bring their URL along; a path would be opened as a
     // file (on Windows a UNC path signs in to that server). Tests use
-    // `file://` URLs.
-    let test_file = cfg!(test) && url.starts_with("file:///");
+    // `file://` URLs (`file://C:\…` on Windows).
+    let test_file = cfg!(test) && url.starts_with("file://");
     if !test_file && !url.starts_with("http://") && !url.starts_with("https://") {
         return Err(CameraError::NotHttp(url.into()));
     }

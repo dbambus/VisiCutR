@@ -299,6 +299,10 @@ fn difference(actual: &[u8], expected: &[u8]) -> Option<String> {
 
 #[test]
 fn ltt_output_matches_java_byte_for_byte() {
+    // Frozen output must not depend on the computer: no system fonts, and
+    // no Ghostscript (installed on some runners, not on others).
+    visicut_core::svg::use_system_fonts(false);
+    visicut_core::import::allow_ghostscript_for_postscript(false);
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/java_parity");
     let mut dirs: Vec<_> = fs::read_dir(&root)
         .unwrap()
@@ -406,7 +410,8 @@ fn check_frozen(
         return Ok(());
     }
     match fs::read_to_string(&path) {
-        Ok(frozen) if frozen == actual => Ok(()),
+        // Git for Windows checks text files out with CRLF.
+        Ok(frozen) if frozen.replace("\r\n", "\n") == actual => Ok(()),
         Ok(frozen) => Err(format!(
             "{name}: Rust-Ausgabe der dokumentierten Abweichung hat sich geändert \
              (eingefroren: {}, jetzt: {}); gewollt? VISICUTR_FREEZE_PARITY=1",

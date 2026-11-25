@@ -139,7 +139,8 @@
    Objekte fehlen. Markierkonturen erscheinen violett. Der **Zeitslider**
    zeigt auf dem ganzen Arbeitsbett den Ablauf mit Laserkopfposition,
    Leerfahrten, Rasterzeilen und Durchgängen; jeder Auftrag beginnt wie am
-   LTT am Referenzpunkt oben rechts. **Abspielen/Pause**, Anfang/Ende und **1× bis 100×** erlauben
+   LTT am Referenzpunkt oben rechts. Nach der Berechnung zeigt die Vorschau
+   zuerst das fertige Teil; die Animation läuft nur auf Wunsch. **Abspielen/Pause**, Anfang/Ende und **1× bis 100×** erlauben
    die Simulation. Beim Verschieben pausiert die Wiedergabe. Bereits
    bearbeitete Bereiche sind kräftig, geplante Bereiche blass dargestellt.
    Angezeigt werden die geschätzte Gesamtdauer, Dauer und
@@ -257,8 +258,9 @@ automatischen Prüfung erscheinen nur in der Statuszeile.
 Ungesicherte Änderungen fragen nicht nach dem Sichern (beide Oberflächen):
 Beim Öffnen, bei **Neu** und beim Beenden legt die App den Stand im Ordner
 `cache` des Einstellungsordners ab (höchstens zehn, ältere werden gelöscht)
-und führt ihn als „Name (ungesichert).vcr“ unter **Zuletzt geöffnet**. Der beim
-Beenden abgelegte Stand öffnet beim nächsten Start wieder. Ein Zwischenstand
+und führt ihn als „Name (ungesichert).vcr“ unter **Zuletzt geöffnet**. Die App startet
+immer mit einem leeren Auftrag; den beim Beenden abgelegten Stand öffnet
+**Zuletzt geöffnet**. Ein Zwischenstand
 hat keinen eigenen Speicherort: **Sichern** fragt nach dem Ort und löscht danach
 den Zwischenstand. Nur wenn das Ablegen scheitert, kommt die frühere Rückfrage.
 **Ablage/Datei → Zwischenspeicher leeren …** löscht nach einer Bestätigung alle

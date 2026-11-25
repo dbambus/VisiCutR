@@ -1,7 +1,8 @@
 //! Zwischenspeicher für ungesicherte Projekte. Statt beim Öffnen, bei „Neu“
 //! oder beim Beenden nach dem Sichern zu fragen, legen beide Oberflächen den
-//! ungesicherten Stand hier ab und führen ihn unter „Zuletzt geöffnet“. Der
-//! beim Beenden abgelegte Stand öffnet beim nächsten Start wieder. An einen
+//! ungesicherten Stand hier ab und führen ihn unter „Zuletzt geöffnet“. Die
+//! App startet mit leerem Auftrag (`take_resume` vergisst nur noch den Merker
+//! älterer Fassungen). An einen
 //! selbst gewählten Ort kommt ein Projekt erst über „Sichern“; danach wird
 //! sein Zwischenstand gelöscht.
 

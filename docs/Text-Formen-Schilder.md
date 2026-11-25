@@ -38,7 +38,7 @@ um). Der Kreis über der Mitte (bei wenig Platz darunter) dreht das Motiv um
 seine Mitte; beim Ziehen zeigt eine Vorschau den Winkel, Umschalt rastet in
 15°-Schritten ein, ⌘Z widerruft die Drehung.
 Der **Rechtsklick auf das Motiv** bietet Duplizieren, Kopien im Raster,
-Nesting, Drehen, Spiegeln, Zentrieren und Löschen. **Entf/⌫** (macOS auch
+Nesting, Drehen, Spiegeln, Zentrieren und Löschen. **Entf** (macOS ⌫ und
 ⌘⌫) löscht das Motiv, sobald das Arbeitsbett aktiv ist; einzelne Objekte
 löscht der Rechtsklick in der Objektliste. **Widerrufen** (⌘Z/Strg+Z)
 nimmt diese Aktionen nacheinander zurück (bis zu 50 Schritte),

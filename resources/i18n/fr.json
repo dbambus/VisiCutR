@@ -258,6 +258,7 @@
   "Material": "Matériau",
   "Material auswählen": "Sélectionner le matériau",
   "Material wählen": "Choisir le matériau",
+  "Kein Material gefunden": "Aucun matériau trouvé",
   "Material „{name}“ ist doppelt vorhanden": "Le matériau « {name} » existe en double",
   "Materialbibliothek exportieren": "Exporter la bibliothèque de matériaux",
   "Materialbibliothek exportiert": "Bibliothèque de matériaux exportée",

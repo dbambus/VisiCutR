@@ -189,6 +189,23 @@ pub struct CameraCalibration {
     /// pixels, the homography works on undistorted ones.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lens: Option<Lens>,
+    /// Width and height (px) of the pictures the view points were taken in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture_size: Option<[u32; 2]>,
+}
+
+impl CameraCalibration {
+    /// Picture size the view points belong to: stored since the camera
+    /// change to v3, before that the lens centre (always the picture centre)
+    /// tells it; unknown for calibrations without lens (e.g. from VisiCut).
+    pub fn calibrated_size(&self) -> Option<[u32; 2]> {
+        self.picture_size.or_else(|| {
+            let c = self.lens.as_ref()?.center;
+            let size = [(c[0] * 2.0).round(), (c[1] * 2.0).round()];
+            (size.iter().all(|v| *v >= 1.0 && *v <= u32::MAX as f64))
+                .then(|| size.map(|v| v as u32))
+        })
+    }
 }
 
 /// Radial lens distortion (Brown model without tangential terms) in camera
@@ -197,7 +214,7 @@ pub struct CameraCalibration {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Lens {
-    /// Lens profile the values started from („rpi-v2“, „generic“).
+    /// Lens profile the values started from („rpi-v3“, „generic“; ältere Kalibrierungen „rpi-v2“).
     pub profile: String,
     pub center: [f64; 2],
     pub focal: f64,
@@ -228,6 +245,11 @@ pub struct LaserDevice {
     /// (VisiCut `cameraTiming`); 0: only when shown and on request.
     pub camera_refresh_ms: u32,
     pub camera_calibration: Option<CameraCalibration>,
+    /// Bed positions (mm) of the fiducial markers on the frame, kept apart
+    /// from the calibration: they do not depend on the camera, so after a
+    /// camera change they place the calibration crosses in the new picture.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub camera_markers: Vec<[f64; 2]>,
     /// Coordinates are shown from the bottom left corner of the bed (VisiCut
     /// `originBottomLeft`): rulers and Y count upwards. Display only; the
     /// job output does not change.
@@ -250,6 +272,7 @@ impl Default for LaserDevice {
             camera_password: String::new(),
             camera_refresh_ms: 0,
             camera_calibration: None,
+            camera_markers: Vec::new(),
             origin_bottom_left: false,
             machine: MachineSettings::default(),
         }
@@ -293,6 +316,13 @@ impl LaserDevice {
             if !c.reference_points.iter().chain(&c.view_points).all(finite) {
                 return Err(DeviceError::CameraPoints(self.name.clone()));
             }
+        }
+        if !self
+            .camera_markers
+            .iter()
+            .all(|p| p.iter().all(|v| v.is_finite()))
+        {
+            return Err(DeviceError::CameraPoints(self.name.clone()));
         }
         Ok(())
     }
@@ -461,6 +491,9 @@ fn keep_local(local: &LaserDevice, mut incoming: LaserDevice) -> LaserDevice {
     if incoming.camera_calibration.is_none() {
         incoming.camera_calibration = local.camera_calibration.clone();
     }
+    if incoming.camera_markers.is_empty() {
+        incoming.camera_markers = local.camera_markers.clone();
+    }
     let default_shift = MachineSettings::default().engrave_shift;
     if incoming.machine.engrave_shift == default_shift {
         incoming.machine.engrave_shift = local.machine.engrave_shift;
@@ -591,6 +624,7 @@ pub fn from_visicut_xml(source: &str) -> Result<LaserDevice, DeviceError> {
             view_points: points(child(h, "viewPoints"))?,
             marker_points: Vec::new(),
             lens: None,
+            picture_size: None,
         }),
         None => None,
     };
@@ -635,6 +669,7 @@ pub fn from_visicut_xml(source: &str) -> Result<LaserDevice, DeviceError> {
             _ => 0,
         },
         camera_calibration,
+        camera_markers: Vec::new(),
         origin_bottom_left: text(root, "originBottomLeft").as_deref() == Some("true"),
         machine,
     };

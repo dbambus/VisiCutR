@@ -63,18 +63,27 @@ Die Auswahl im Inspektor bestimmt Ziel und verfügbare Funktionen.
   „5 × 3 Kreuze“ unter Anordnung setzt das neue Raster. Liegt ein Kreuz
   außerhalb des Kamerabilds, wird es mit „−“ entfernt.
   „Kreuze erkennen“ setzt die Punkte auf die Kreuzmitten; mit vorhandener
-  Kalibrierung geschieht das nach dem Foto automatisch. Im Foto lässt sich
+  Kalibrierung oder mindestens drei erkannten Passmarken geschieht das nach
+  dem Foto automatisch. Im Foto lässt sich
   zoomen (Zwei-Finger-Zoom, ⌘/Strg + Mausrad) und mit den Pfeiltasten
   feinjustieren.
 - **Objektiv**: Ab 6 Kreuzen bestimmt die Kalibrierung die radiale
   Verzeichnung (k1, ab 10 Kreuzen auch k2). Das Profil „Raspberry Pi Camera
-  v2“ (IMX219, 3,04 mm) liefert Bildmitte, Brennweite und Startwert.
+  v3“ (IMX708, 4,74 mm, 4608 × 2592 px; die FAU-Kamera) liefert Bildmitte und
+  Brennweite, die Verzeichnung kommt ganz aus den Kreuzen.
+- **Bildgröße**: Die Kalibrierung merkt sich die Größe des Kamerabilds.
+  Liefert die Kamera eine andere (z. B. nach einem Kamerawechsel), wird das
+  Bild nicht untergelegt, sondern ein Hinweis zum Neukalibrieren gezeigt; der
+  Kalibrierdialog setzt die Kreuze dann neu.
 - **Genauigkeit**: Neben „Kalibrierung“ steht ab 5 Punkten der größte
   Restfehler der Kalibrierkreuze in mm. Zwischen den Kreuzen kann der Fehler
   größer sein.
 - **Passmarken**: Runde Zielscheiben-Aufkleber (Ring mit Punkt) am Rahmen
   werden beim Kalibrieren erkannt und gespeichert. Spätere Kamerabilder
   werden daran nachgeführt, wenn sich die Kamera z. B. mit dem Deckel bewegt.
+  Ihre Lage auf dem Bett bleibt auch ohne Kalibrierung beim Gerät
+  (`camera_markers`): Nach einem Kamerawechsel sagt sie im Kalibrierdialog
+  voraus, wo die Kreuze im neuen Bild liegen.
 - **Kameraserver**: `visicutr-cameraserver` ersetzt Java-VisiCuts `tools/cameraserver` und
   beantwortet jede HTTP-Anfrage mit einem frischen Foto eines
   Aufnahmebefehls, z. B.

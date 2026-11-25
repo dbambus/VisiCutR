@@ -32,6 +32,11 @@ pub enum CameraError {
     /// The camera URL is neither `http://` nor `https://`.
     NotHttp(String),
     NotCalibrated,
+    /// The picture (width, height) differs from the calibrated size.
+    PictureSize {
+        picture: [u32; 2],
+        calibrated: [u32; 2],
+    },
 }
 
 impl fmt::Display for CameraError {
@@ -61,6 +66,14 @@ impl fmt::Display for CameraError {
                 url = url
             ),
             Self::NotCalibrated => tr("Kamera ist noch nicht kalibriert").to_string(),
+            Self::PictureSize {
+                picture,
+                calibrated,
+            } => tr!(
+                "Das Kamerabild hat {picture}, die Kalibrierung gilt für {calibrated} – die Kamera wurde wohl gewechselt; bitte neu kalibrieren",
+                picture = format!("{} × {} px", picture[0], picture[1]),
+                calibrated = format!("{} × {} px", calibrated[0], calibrated[1])
+            ),
         };
         f.write_str(&text)
     }
@@ -345,22 +358,19 @@ pub fn homography(calibration: &CameraCalibration) -> Result<Matrix, CameraError
     Ok(result.map(|row| row.map(|v| v / scale)))
 }
 
-/// Undistortion factor of the Raspberry Pi Camera v2 standard lens, measured
-/// on the FAU laser camera (r relative to the focal length); the crosses of a
-/// calibration refine it for each camera.
-const RPI_V2_K1: f64 = -0.11;
-
 impl Lens {
-    /// Raspberry Pi Camera v2 (Sony IMX219, 3280 × 2464 px of 1.12 µm, lens
-    /// 3.04 mm) delivering pictures of `size`: the ISP scales the full sensor
-    /// and crops it centred to the picture's aspect ratio.
-    pub fn raspberry_pi_v2(size: [f64; 2]) -> Self {
-        let scale = (size[0] / 3280.0).max(size[1] / 2464.0);
+    /// Raspberry Pi Camera Module 3 (Sony IMX708, 4608 × 2592 px of 1.4 µm,
+    /// standard lens 4.74 mm, the FAU laser camera) delivering pictures of
+    /// `size`: the ISP scales the full sensor and crops it centred to the
+    /// picture's aspect ratio. The start is distortion-free; the calibration
+    /// crosses determine the distortion.
+    pub fn raspberry_pi_v3(size: [f64; 2]) -> Self {
+        let scale = (size[0] / 4608.0).max(size[1] / 2592.0);
         Self {
-            profile: "rpi-v2".into(),
+            profile: "rpi-v3".into(),
             center: [size[0] / 2.0, size[1] / 2.0],
-            focal: 3.04 / 0.00112 * scale,
-            k1: RPI_V2_K1,
+            focal: 4.74 / 0.0014 * scale,
+            k1: 0.0,
             k2: 0.0,
         }
     }
@@ -806,6 +816,37 @@ pub fn find_markers(image: &RgbaImage) -> Vec<[f64; 2]> {
     });
     let low: Vec<f32> = range.iter().map(|r| r.0).collect();
     let high: Vec<f32> = range.iter().map(|r| r.1).collect();
+    let largest = w.max(h) as f64;
+    // Zwei Schwellen: die Mitte, und höher für Ringe im Schatten oder neben
+    // sehr hellen Flächen (die Mitte lässt sie dort teils hell erscheinen).
+    let mut markers: Vec<[f64; 2]> = Vec::new();
+    for level in [0.5, 0.7] {
+        for m in markers_at_level(&gray, w, h, block, bw, bh, &low, &high, level) {
+            if markers
+                .iter()
+                .all(|k| (k[0] - m[0]).hypot(k[1] - m[1]) > 0.004 * largest)
+            {
+                markers.push(m);
+            }
+        }
+    }
+    markers
+}
+
+/// Markers in the picture thresholded at `level` between the darkest and
+/// brightest value around each pixel.
+#[allow(clippy::too_many_arguments)]
+fn markers_at_level(
+    gray: &[f32],
+    w: usize,
+    h: usize,
+    block: usize,
+    bw: usize,
+    bh: usize,
+    low: &[f32],
+    high: &[f32],
+    level: f32,
+) -> Vec<[f64; 2]> {
     let around = |values: &[f32], bx: usize, by: usize, pick: fn(f32, f32) -> f32| {
         let mut r = values[by * bw + bx];
         for y in by.saturating_sub(1)..(by + 2).min(bh) {
@@ -818,10 +859,10 @@ pub fn find_markers(image: &RgbaImage) -> Vec<[f64; 2]> {
     let threshold: Vec<Option<f32>> = (0..bw * bh)
         .map(|b| {
             let (lo, hi) = (
-                around(&low, b % bw, b / bw, f32::min),
-                around(&high, b % bw, b / bw, f32::max),
+                around(low, b % bw, b / bw, f32::min),
+                around(high, b % bw, b / bw, f32::max),
             );
-            (hi - lo > 25.0).then_some((hi + lo) / 2.0)
+            (hi - lo > 25.0).then_some(lo + level * (hi - lo))
         })
         .collect();
     let mut dark = vec![false; w * h];
@@ -1060,6 +1101,125 @@ fn fit_affine(from: &[[f64; 2]], to: &[[f64; 2]]) -> Option<Matrix> {
     }
 }
 
+/// Least-squares affine map `from` → `to` (at least 3 pairs) and its
+/// largest remaining distance.
+fn affine_fit(from: &[[f64; 2]], to: &[[f64; 2]]) -> Option<(Matrix, f64)> {
+    let mut n = [[0.0; 3]; 3];
+    let mut b = [[0.0; 3]; 2];
+    for (f, t) in from.iter().zip(to) {
+        let v = [f[0], f[1], 1.0];
+        for i in 0..3 {
+            for j in 0..3 {
+                n[i][j] += v[i] * v[j];
+            }
+            b[0][i] += v[i] * t[0];
+            b[1][i] += v[i] * t[1];
+        }
+    }
+    let inv = invert(&n)?;
+    let row = |b: [f64; 3]| std::array::from_fn(|i| (0..3).map(|j| inv[i][j] * b[j]).sum());
+    let m = [row(b[0]), row(b[1]), [0.0, 0.0, 1.0]];
+    let error = from
+        .iter()
+        .zip(to)
+        .map(|(f, t)| {
+            let p = transform(&m, *f);
+            (p[0] - t[0]).hypot(p[1] - t[1])
+        })
+        .fold(0.0, f64::max);
+    Some((m, error))
+}
+
+/// Mapping of an uncalibrated camera from the fiducial markers: `bed` are
+/// their known bed positions (mm), `found` the markers detected in a picture
+/// of `size`. Each bed marker is matched to a detected one (or none) so that
+/// at least three pairs agree with a nearly undistorted, upright view (bed x
+/// to the right, y downwards, as the uncalibrated guess assumes); more pairs
+/// and a smaller deviation win. Good enough to search the calibration crosses
+/// near their predicted positions.
+pub fn marker_mapping(bed: &[[f64; 2]], found: &[[f64; 2]], size: [f64; 2]) -> Option<Mapping> {
+    if bed.len() < 3 || bed.len() > 6 || found.len() < 3 {
+        return None;
+    }
+    let found = &found[..found.len().min(10)];
+    let tolerance = 0.02 * size[0].max(size[1]);
+    let mut best: Option<(usize, f64, Vec<usize>)> = None;
+    // Zuordnung je Bettmarke: Index der erkannten Marke, found.len() = keine.
+    let mut choice = vec![0; bed.len()];
+    loop {
+        let used: Vec<usize> = choice
+            .iter()
+            .copied()
+            .filter(|c| *c < found.len())
+            .collect();
+        let distinct = used.iter().enumerate().all(|(i, a)| !used[..i].contains(a));
+        if used.len() >= 3 && distinct {
+            let (from, to): (Vec<_>, Vec<_>) = bed
+                .iter()
+                .zip(&choice)
+                .filter(|(_, c)| **c < found.len())
+                .map(|(b, c)| (*b, found[*c]))
+                .unzip();
+            if let Some((m, error)) = affine_fit(&from, &to) {
+                let upright = m[0][0] > 0.0
+                    && m[1][1] > 0.0
+                    && m[0][1].abs() < m[0][0]
+                    && m[1][0].abs() < m[1][1];
+                let better = best
+                    .as_ref()
+                    .is_none_or(|b| used.len() > b.0 || (used.len() == b.0 && error < b.1));
+                if upright && error < tolerance && better {
+                    best = Some((used.len(), error, choice.clone()));
+                }
+            }
+        }
+        // Nächste Zuordnung (Zähler zur Basis found.len() + 1).
+        let mut i = 0;
+        loop {
+            if i == choice.len() {
+                let (_, _, choice) = best?;
+                let (from, to): (Vec<_>, Vec<_>) = bed
+                    .iter()
+                    .zip(&choice)
+                    .filter(|(_, c)| **c < found.len())
+                    .map(|(b, c)| (*b, found[*c]))
+                    .unzip();
+                let h = if from.len() >= 4 {
+                    homography(&CameraCalibration {
+                        reference_points: from.clone(),
+                        view_points: to.clone(),
+                        ..Default::default()
+                    })
+                    .ok()
+                } else {
+                    None
+                };
+                let h = h.or_else(|| affine_fit(&from, &to).map(|(m, _)| m))?;
+                return Some(Mapping { h, lens: None });
+            }
+            choice[i] += 1;
+            if choice[i] <= found.len() {
+                break;
+            }
+            choice[i] = 0;
+            i += 1;
+        }
+    }
+}
+
+/// Fails when the picture does not have the size the calibration was made
+/// in: its pixel positions would put the picture in the wrong place.
+pub fn check_size(calibration: &CameraCalibration, picture: &RgbaImage) -> Result<(), CameraError> {
+    let picture = [picture.width(), picture.height()];
+    match calibration.calibrated_size() {
+        Some(calibrated) if calibrated != picture => Err(CameraError::PictureSize {
+            picture,
+            calibrated,
+        }),
+        _ => Ok(()),
+    }
+}
+
 /// Mapping for this picture: the calibration, re-aligned on the markers
 /// found in it when the calibration knows their bed positions (the camera
 /// moves a little whenever the lid is closed). Returns how many matched.
@@ -1067,6 +1227,7 @@ pub fn tracked_mapping(
     calibration: &CameraCalibration,
     picture: &RgbaImage,
 ) -> Result<(Mapping, usize), CameraError> {
+    check_size(calibration, picture)?;
     let base = mapping(calibration)?;
     if calibration.marker_points.len() < 2 {
         return Ok((base, 0));
@@ -1233,6 +1394,30 @@ mod tests {
     }
 
     #[test]
+    fn finds_markers_with_shadowed_ring_on_dark_surroundings() {
+        // Aufkleber knapp um den Ring, ringsum fast schwarz; der Ring liegt im
+        // Schatten und ist nur mittelgrau (wie oben links an der FAU-Kamera).
+        let c = [300.4, 200.6];
+        let picture = RgbaImage::from_fn(600, 400, |x, y| {
+            let (dx, dy) = (x as f64 + 0.5 - c[0], y as f64 + 0.5 - c[1]);
+            let v = match dx.hypot(dy) {
+                _ if dx.abs() > 36.0 || dy.abs() > 36.0 => 10,
+                r if r < 7.0 => 60,
+                r if r < 18.0 => 200,
+                r if r < 32.0 => 135,
+                _ => 200,
+            };
+            image::Rgba([v, v, v, 255])
+        });
+        let found = find_markers(&picture);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            (found[0][0] - c[0]).hypot(found[0][1] - c[1]) < 1.0,
+            "{found:?}"
+        );
+    }
+
+    #[test]
     fn finds_cross_centre_but_not_ticks_or_paper_corners() {
         cross_on_paper(120.0);
         // Blass gelasert, kaum Kontrast zum grauen Papier.
@@ -1299,6 +1484,7 @@ mod tests {
             view_points: vec![[0.0, 0.0], [1500.0, 0.0], [1500.0, 900.0], [0.0, 900.0]],
             marker_points: Vec::new(),
             lens: None,
+            picture_size: None,
         };
         calibration.marker_points = markers_on_bed(&centers, &calibration).unwrap();
         assert!((calibration.marker_points[0][0] - 200.0 / 1.5).abs() < 1e-6);
@@ -1337,11 +1523,78 @@ mod tests {
     }
 
     #[test]
+    fn passmarks_place_an_uncalibrated_camera() {
+        // Passmarken der FAU-Laserkamera (mm) und ein schräger Blick darauf.
+        let bed = [
+            [-40.0, 30.0],
+            [1034.0, 40.0],
+            [1039.0, 474.0],
+            [-41.0, 508.0],
+        ];
+        let h: Matrix = [[3.4, 0.2, 560.0], [0.0, 3.3, 440.0], [0.0, 4e-5, 1.0]];
+        let size = [4608.0, 2592.0];
+        let truth = |p: [f64; 2]| transform(&h, p);
+        let check = |m: Mapping| {
+            for p in [[0.0, 0.0], [1000.0, 600.0], [500.0, 300.0]] {
+                let (a, b) = (m.to_pixel(p), truth(p));
+                assert!((a[0] - b[0]).hypot(a[1] - b[1]) < 1.0, "{p:?} {a:?} {b:?}");
+            }
+        };
+        // Reihenfolge der Funde beliebig, dazu eine Fehlerkennung.
+        let mut found: Vec<_> = bed.iter().rev().map(|b| truth(*b)).collect();
+        found.insert(1, [2300.0, 1300.0]);
+        check(marker_mapping(&bed, &found, size).unwrap());
+        // Mit nur drei gefundenen Marken genügt eine affine Näherung.
+        let three: Vec<_> = bed[..3].iter().map(|b| truth(*b)).collect();
+        let m = marker_mapping(&bed, &three, size).unwrap();
+        let (a, b) = (m.to_pixel([500.0, 300.0]), truth([500.0, 300.0]));
+        assert!(
+            (a[0] - b[0]).hypot(a[1] - b[1]) < 0.02 * 4608.0,
+            "{a:?} {b:?}"
+        );
+        // Zu wenige Marken: keine Abbildung.
+        assert!(marker_mapping(&bed, &found[..2], size).is_none());
+    }
+
+    #[test]
+    fn pictures_of_another_size_are_refused() {
+        let mut calibration = CameraCalibration {
+            lens: Some(Lens::raspberry_pi_v3([3000.0, 2100.0])),
+            ..Default::default()
+        };
+        // Ältere Kalibrierungen: Größe aus der Bildmitte der Linse.
+        assert_eq!(calibration.calibrated_size(), Some([3000, 2100]));
+        let v3 = RgbaImage::new(4608, 2592);
+        let error = check_size(&calibration, &v3).unwrap_err();
+        assert!(matches!(
+            error,
+            CameraError::PictureSize {
+                picture: [4608, 2592],
+                calibrated: [3000, 2100]
+            }
+        ));
+        assert!(matches!(
+            tracked_mapping(&calibration, &v3),
+            Err(CameraError::PictureSize { .. })
+        ));
+        calibration.picture_size = Some([4608, 2592]);
+        assert!(check_size(&calibration, &v3).is_ok());
+        // Ohne Linse und Größe (z. B. aus VisiCut) wird nicht geprüft.
+        assert_eq!(CameraCalibration::default().calibrated_size(), None);
+        assert!(check_size(&CameraCalibration::default(), &v3).is_ok());
+    }
+
+    #[test]
     fn lens_profile_and_fit_remove_radial_distortion() {
         let size = [3000.0, 2100.0];
-        let pi = Lens::raspberry_pi_v2(size);
-        assert!((pi.focal - 2482.6).abs() < 1.0, "{}", pi.focal);
+        let pi = Lens::raspberry_pi_v3(size);
+        // 3000 × 2100 ist ein mittiger Ausschnitt des um 2100/2592 skalierten Sensors.
+        assert!((pi.focal - 2743.1).abs() < 1.0, "{}", pi.focal);
         assert_eq!(pi.center, [1500.0, 1050.0]);
+        // Volle Auflösung (16:9) wie die FAU-Kamera.
+        let full = Lens::raspberry_pi_v3([4608.0, 2592.0]);
+        assert!((full.focal - 3385.7).abs() < 1.0, "{}", full.focal);
+        assert_eq!((full.profile.as_str(), full.k1), ("rpi-v3", 0.0));
         let truth = Lens {
             k1: -0.15,
             k2: 0.03,
@@ -1378,7 +1631,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .fold(0.0, f64::max);
-        calibration.lens = Some(fit_lens(&calibration, Lens::raspberry_pi_v2(size)));
+        calibration.lens = Some(fit_lens(&calibration, Lens::raspberry_pi_v3(size)));
         let with = residuals(&calibration)
             .unwrap()
             .into_iter()
@@ -1440,6 +1693,7 @@ mod tests {
             view_points: vec![[10.0, 20.0], [210.0, 25.0], [205.0, 130.0], [12.0, 120.0]],
             marker_points: Vec::new(),
             lens: None,
+            picture_size: None,
         };
         let h = homography(&calibration).unwrap();
         for (r, v) in calibration
@@ -1465,6 +1719,7 @@ mod tests {
             view_points: vec![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
             marker_points: Vec::new(),
             lens: None,
+            picture_size: None,
         };
         assert!(matches!(homography(&line), Err(CameraError::PointsOnLine)));
         let legacy = CameraCalibration {
@@ -1472,6 +1727,7 @@ mod tests {
             view_points: vec![[100.0, 60.0], [400.0, 240.0]],
             marker_points: Vec::new(),
             lens: None,
+            picture_size: None,
         };
         let h = homography(&legacy).unwrap();
         assert_eq!(transform(&h, [500.0, 300.0]), [250.0, 150.0]);
@@ -1567,6 +1823,7 @@ mod tests {
                 view_points: vec![[0.0, 0.0], [40.0, 30.0]],
                 marker_points: Vec::new(),
                 lens: None,
+                picture_size: None,
             }),
             ..Default::default()
         };

@@ -426,6 +426,9 @@ impl DeviceUi {
                     .iter_mut()
                     .find(|d| d.name == calibration.device.name)
             {
+                if !points.marker_points.is_empty() {
+                    device.camera_markers = points.marker_points.clone();
+                }
                 device.camera_calibration = Some(points);
             }
             if close {
@@ -612,10 +615,11 @@ impl DeviceUi {
                 ..Default::default()
             });
         let shot = device.clone();
-        // Ohne gespeicherte Linse das Profil der FAU-Kamera vorschlagen.
+        // Ohne gespeicherte Linse das Profil der FAU-Kamera (Camera Module 3)
+        // vorschlagen.
         let lens = match points.lens.as_ref().map(|l| l.profile.as_str()) {
             Some("generic") => LensChoice::Generic,
-            _ => LensChoice::RaspberryPiV2,
+            _ => LensChoice::RaspberryPiV3,
         };
         let grid = Grid::of(&points.reference_points);
         self.calibration = Some(Calibration {
@@ -1301,7 +1305,7 @@ fn shift_test_window(
 
 #[derive(Clone, Copy, PartialEq)]
 enum LensChoice {
-    RaspberryPiV2,
+    RaspberryPiV3,
     Generic,
     Off,
 }
@@ -1309,7 +1313,7 @@ enum LensChoice {
 impl LensChoice {
     fn label(self) -> &'static str {
         match self {
-            Self::RaspberryPiV2 => tr("Raspberry Pi Camera v2"),
+            Self::RaspberryPiV3 => tr("Raspberry Pi Camera v3"),
             Self::Generic => tr("Andere Kamera (aus den Kreuzen)"),
             Self::Off => tr("Keine Linsenkorrektur"),
         }
@@ -1318,7 +1322,7 @@ impl LensChoice {
     fn start(self, size: Vec2) -> Option<camera::Lens> {
         let size = [size.x as f64, size.y as f64];
         match self {
-            Self::RaspberryPiV2 => Some(camera::Lens::raspberry_pi_v2(size)),
+            Self::RaspberryPiV3 => Some(camera::Lens::raspberry_pi_v3(size)),
             Self::Generic => Some(camera::Lens::generic(size)),
             Self::Off => None,
         }
@@ -1377,6 +1381,7 @@ fn fitted(c: &Calibration) -> Option<CameraCalibration> {
     let mut points = c.points.clone();
     points.marker_points.clear();
     points.lens = None;
+    points.picture_size = Some([size.x as u32, size.y as u32]);
     camera::homography(&points).ok()?;
     points.lens = c
         .lens
@@ -1486,6 +1491,7 @@ fn detect_crosses(c: &mut Calibration) {
         view_points: c.points.view_points[..n].to_vec(),
         marker_points: Vec::new(),
         lens: None,
+        picture_size: None,
     })
     .ok();
     let mut found = 0;
@@ -1543,7 +1549,11 @@ fn lens_choice(ui: &mut egui::Ui, c: &mut Calibration) {
         .width(ui.available_width())
         .selected_text(c.lens.label())
         .show_ui(ui, |ui| {
-            for choice in [LensChoice::RaspberryPiV2, LensChoice::Generic, LensChoice::Off] {
+            for choice in [
+                LensChoice::RaspberryPiV3,
+                LensChoice::Generic,
+                LensChoice::Off,
+            ] {
                 ui.selectable_value(&mut c.lens, choice, choice.label());
             }
         })
@@ -1796,6 +1806,17 @@ fn calibration_window(
             let size = Vec2::new(image.width() as f32, image.height() as f32);
             c.picture = Some((texture(ctx, "Kalibrierfoto", &image), size));
             c.markers = camera::find_markers(&image);
+            // Andere Bildgröße: neue Kamera. Die alten Bildpunkte passen nicht,
+            // die Kreuze werden neu gesetzt, mit dem Profil der FAU-Kamera.
+            if let Some(previous) = &c.device.camera_calibration
+                && let Err(e) = camera::check_size(previous, &image)
+            {
+                c.points.view_points.clear();
+                c.points.lens = None;
+                c.points.picture_size = None;
+                c.lens = LensChoice::RaspberryPiV3;
+                c.problem = Some(e.to_string());
+            }
             // Mit vorhandener Kalibrierung: Punkte dorthin, wo die Kreuze jetzt
             // zu erwarten sind (an den Passmarken nachgeführt), und gleich suchen.
             c.expected = c
@@ -1803,7 +1824,20 @@ fn calibration_window(
                 .camera_calibration
                 .as_ref()
                 .and_then(|previous| camera::tracked_mapping(previous, &image).ok())
-                .map(|(mapping, _)| mapping);
+                .map(|(mapping, _)| mapping)
+                .or_else(|| {
+                    // Neue oder noch nicht kalibrierte Kamera: Lage der Kreuze
+                    // aus den Passmarken, deren Bettlage bekannt ist.
+                    let bed = c
+                        .device
+                        .camera_calibration
+                        .as_ref()
+                        .map(|p| p.marker_points.clone())
+                        .filter(|m| !m.is_empty())
+                        .unwrap_or_else(|| c.device.camera_markers.clone());
+                    let size = [image.width() as f64, image.height() as f64];
+                    camera::marker_mapping(&bed, &c.markers, size)
+                });
             c.gray = Some(camera::Gray::new(&image));
             if let Some(mapping) = &c.expected {
                 c.points.view_points = c
